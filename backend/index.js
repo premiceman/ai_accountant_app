@@ -27,6 +27,12 @@ app.use('/api/docs', docsRoutes);
 const aiRoutes = require('./routes/ai');
 app.use('/api/ai', aiRoutes);
 
+// backend/index.js  (add beneath your other app.use lines)
+app.use('/api/summary', require('./src/routes/summary.routes'));
+app.use('/api/income', require('./src/routes/income.routes'));
+app.use('/api/docs', require('./src/routes/documents.routes')); // replaces earlier lightweight docs if you had it
+
+
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true

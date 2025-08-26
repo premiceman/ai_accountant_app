@@ -1,0 +1,26 @@
+{
+    "region": "EnglandWales",
+    "personalAllowance": 12570,
+    "personalAllowanceTaperStart": 100000,
+    "personalAllowanceTaperRatePerPound": 0.5,
+    "bands": [
+      { "name": "basic",     "upTo": 50270,  "rate": 0.20 },
+      { "name": "higher",    "upTo": 125140, "rate": 0.40 },
+      { "name": "additional","upTo": null,   "rate": 0.45 }
+    ],
+    "ni": {
+      "class1": {
+        "primaryThreshold": 12570,
+        "upperEarningsLimit": 50270,
+        "mainRate": 0.08,
+        "upperRate": 0.02
+      }
+    },
+    "studentLoan": {
+      "plan2": { "threshold": 27295, "rate": 0.09 },
+      "plan1": { "threshold": 22015, "rate": 0.09 },
+      "plan4": { "threshold": 27660, "rate": 0.09 },
+      "pgl":   { "threshold": 21000, "rate": 0.06 }
+    }
+  }
+  
