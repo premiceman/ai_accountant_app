@@ -69,3 +69,20 @@
 
 ## ✅ Last Verified: v1.0 Complete Restore
 This manifest tracks the current state of all working features, file locations, and configuration in your application.
+
+## Profile Management (Implemented)
+
+- **Frontend**
+  - `frontend/profile.html`: Profile summary (email, member since) + edit form (first name, last name, email, phone, address).
+  - `frontend/js/profile.js`: Fetches `GET /api/user/me` and updates via `PUT /api/user/me`. Uses JWT from storage (supports `token`/`jwt`/`authToken`). Forces re-login on email change.
+
+- **API**
+  - `GET /api/user/me` (auth required): returns safe user fields (no password).
+  - `PUT /api/user/me` (auth required): allowlist updates; trims/validates; enforces unique email; returns `{ user, forceReauth }`.
+
+- **Model**
+  - `backend/models/User.js`: optional `phone` and `address` fields added; non-breaking.
+
+- **Security**
+  - Endpoints require `Authorization: Bearer <token>`.
+  - Server never returns password; input trimmed; timestamps maintained.

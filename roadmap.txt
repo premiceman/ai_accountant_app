@@ -1,0 +1,92 @@
+Here’s the summarised roadmap from “works locally” → “in production”, focusing on ease + economy:
+
+1. Hosting Choices
+
+Backend (Node.js + Express + MongoDB)
+
+Cheapest / easiest: Render
+, Railway
+, or [Heroku Free/Hobby tier]*
+
+More control, still simple: [DigitalOcean App Platform] or [Fly.io]
+
+Enterprise-ready, flexible: AWS/GCP/Azure, but more setup overhead.
+
+Frontend (static HTML/JS)
+
+Host for free on [Netlify], [Vercel], or GitHub Pages.
+
+Just build → push → auto-deploy.
+
+Database
+
+Use [MongoDB Atlas] free/shared cluster (already what you’re seeing).
+
+Make sure you set IP allowlists or VPC peering for security.
+
+2. Secrets & Config
+
+All your .env variables (JWT_SECRET, Mongo URI, OpenAI key, TrueLayer creds) go into the host’s “Environment Variables” panel.
+
+Never commit them to Git.
+
+3. Productionizing the Backend
+
+Add a Procfile or a start script:
+
+"scripts": {
+  "start": "node backend/index.js"
+}
+
+
+Ensure CORS is configured correctly so your frontend domain can call your backend API.
+
+Add a reverse proxy (if needed) for HTTPS → Node (most platforms handle this automatically).
+
+4. Domain & SSL
+
+Point a custom domain (cheap via Namecheap, Google Domains).
+
+Platforms like Vercel/Netlify/Render issue free SSL (Let’s Encrypt) automatically.
+
+5. Monitoring & Logs
+
+Use the free built-in dashboards/logs of Render/Heroku/Fly.io.
+
+At minimum: enable email alerts for downtime.
+
+6. Security Hardening (minimum viable)
+
+Use HTTPS everywhere.
+
+Rotate JWT secret when moving to prod.
+
+Configure strong DB user/passwords.
+
+Enable rate-limiting middleware on login & sensitive routes.
+
+Set CORS only to your frontend domain.
+
+7. Cost Snapshot
+
+MongoDB Atlas free/shared cluster (0–$9/mo).
+
+Backend on Render/Railway free to ~$7/mo for hobby dyno/container.
+
+Frontend on Netlify/Vercel free.
+
+Domain: ~$12/year.
+
+👉 So you can realistically run the whole stack in production for under $20/month.
+
+⚡ Summary Path for You
+
+Put backend on Render/Railway (link GitHub → auto-deploy).
+
+Put frontend on Netlify (link GitHub → auto-deploy).
+
+Use MongoDB Atlas free tier.
+
+Configure .env secrets in the host dashboards.
+
+Point your domain → done.
