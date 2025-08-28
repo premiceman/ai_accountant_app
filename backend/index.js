@@ -1,44 +1,115 @@
-require('dotenv').config();
+/*require('dotenv').config();
+const path = require('path');
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
+const morgan = require('morgan');
+const mongoose = require('mongoose');
 
+const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
-const authRoutes = require('./routes/auth'); // ✅ Include auth route
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const FRONTEND_DIR = path.join(__dirname, '../frontend');
 
-app.use(cors());
-app.use(express.json());
+app.use(morgan('combined'));
+app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
+app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/ping', (req, res) => res.json({ message: 'pong' }));
+app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
-app.use('/api/auth', authRoutes); // ✅ Mount the /api/auth route
-const profileRoutes = require('./routes/profile');
-app.use('/api/user', profileRoutes);
 
-const dashboardRoutes = require('./routes/dashboard');
-const docsRoutes = require('./routes/docs');
+// serve frontend
+app.use(express.static(FRONTEND_DIR));
+app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
 
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/docs', docsRoutes);
+// API 404s
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
-const aiRoutes = require('./routes/ai');
-app.use('/api/ai', aiRoutes);
+// Error handler
+app.use((err, req, res, next) => { console.error('❌ Server error:', err); res.status(500).json({ error: 'Server error' }); });
 
-// backend/index.js  (add beneath your other app.use lines)
+const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accountant_app';
+mongoose.connect(mongoUri, {})
+  .then(() => {
+    console.log('✅ Connected to MongoDB');
+    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+  })
+  .catch((err) => { console.error('❌ MongoDB connection error:', err); process.exit(1); });*/
+
+  require('dotenv').config();
+const path = require('path');
+const express = require('express');
+const cors = require('cors');
+let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,next)=>next(); }
+const mongoose = require('mongoose');
+
+function safeRequire(p) { try { return require(p); } catch { return null; } }
+
+// Try both locations in case files live under ./src/...
+const authRoutes = safeRequire('./routes/auth') || safeRequire('./src/routes/auth');
+const userRoutes = safeRequire('./routes/user') || safeRequire('./src/routes/user');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const FRONTEND_DIR = path.join(__dirname, '../frontend');
+
+app.use(morgan('combined'));
+app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
+app.use(express.json({ limit: '1mb' }));
 app.use('/api/summary', require('./src/routes/summary.routes'));
-app.use('/api/income', require('./src/routes/income.routes'));
-app.use('/api/docs', require('./src/routes/documents.routes')); // replaces earlier lightweight docs if you had it
+app.use('/api/docs', require('./src/routes/documents.routes'));
 
 
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => {
-  console.log('✅ Connected to MongoDB');
-  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-}).catch((err) => console.error('❌ MongoDB connection error:', err));
 
+// Helper to mount and log
+function mount(pathPrefix, router, name) {
+  if (!router) {
+    console.warn(`⚠️  ${name} router NOT found; expected at ./routes/${name}.js or ./src/routes/${name}.js`);
+    return;
+  }
+  app.use(pathPrefix, router);
+  console.log(`✅ Mounted ${name} router at ${pathPrefix}`);
+}
+
+// --- API mounts (BEFORE any 404s)
+app.get('/api/ping', (req, res) => res.json({ message: 'pong' }));
+mount('/api/auth', authRoutes, 'auth');
+mount('/api/user', userRoutes, 'user');
+
+// TEMP: route inspector to verify what's mounted
+app.get('/__routes', (req, res) => {
+  const dump = [];
+  const walk = (stack, prefix = '') => {
+    stack.forEach(layer => {
+      if (layer.route?.path) {
+        const methods = Object.keys(layer.route.methods).map(m => m.toUpperCase()).join(',');
+        dump.push(`${methods} ${prefix}${layer.route.path}`);
+      } else if (layer.name === 'router' && layer.handle?.stack) {
+        walk(layer.handle.stack, prefix);
+      }
+    });
+  };
+  walk(app._router.stack);
+  res.json({ routes: dump });
+});
+
+// serve frontend
+app.use(express.static(FRONTEND_DIR));
+app.get('/', (req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
+
+// API 404s AFTER routes
+app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+
+// Error handler
+app.use((err, req, res, next) => { console.error('❌ Server error:', err); res.status(500).json({ error: 'Server error' }); });
+
+const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accountant_app';
+mongoose.connect(mongoUri, {})
+  .then(() => {
+    console.log('✅ Connected to MongoDB');
+    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+  })
+  .catch((err) => { console.error('❌ MongoDB connection error:', err); process.exit(1); });
 

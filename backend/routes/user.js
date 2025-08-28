@@ -1,59 +1,42 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const auth = require('../middleware/auth');
 
 const router = express.Router();
+const EDITABLE = new Set(['firstName','lastName','email','phone','address']);
 
-// POST /api/user/login
-router.post('/login', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
-
-  // Check if user exists or create new
-  let user = await User.findOne({ email });
-  if (!user) user = await User.create({ email });
-
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-  res.json({ token, user });
+// GET /api/user/me  -> current user only
+router.get('/me', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password -__v');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (e) {
+    console.error('GET /me error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// GET /api/user/profile
-router.get('/profile', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
-
-  const token = auth.split(' ')[1];
+// PUT /api/user/me -> current user only
+router.put('/me', auth, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    res.json(user);
-  } catch (err) {
-    res.status(401).json({ error: 'Invalid token' });
+    const updates = {};
+    for (const [k, v] of Object.entries(req.body || {})) {
+      if (EDITABLE.has(k) && typeof v === 'string') updates[k] = v.trim();
+    }
+    if ('email' in updates) {
+      const exists = await User.findOne({ email: updates.email.toLowerCase() });
+      if (exists && String(exists._id) !== String(req.user.id)) {
+        return res.status(409).json({ error: 'Email already in use' });
+      }
+    }
+    const doc = await User.findByIdAndUpdate(req.user.id, { $set: updates }, { new: true, select: '-password -__v' });
+    if (!doc) return res.status(404).json({ error: 'User not found' });
+    res.json(doc);
+  } catch (e) {
+    console.error('PUT /me error:', e);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
 module.exports = router;
-
-const generateReport = require('../ai/reportGenerator');
-
-// POST /api/user/report
-router.post('/report', async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
-
-  const token = auth.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-	console.log('🔎 Generating report for:', user.email);
-	console.log('📦 Payload:', JSON.stringify(req.body, null, 2));
-	console.log('🔑 OpenAI Key?', !!process.env.OPENAI_API_KEY);
-
-
-    const report = await generateReport(req.body); // Pass user data in body
-    res.json({ summary: report });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to generate report' });
-  }
-});

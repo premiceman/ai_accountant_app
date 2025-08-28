@@ -2,44 +2,49 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../../middleware/auth');
-const IncomeProfile = require('../models/IncomeProfile');
-const { computeTakeHome } = require('../services/tax/compute.service');
 
-// GET /api/summary/current-year
+// NOTE: UI-first stub. Returns a stable contract the frontend can render.
+// We'll swap in real tax compute next (services/tax + config/tax JSON).
 router.get('/current-year', auth, async (req, res) => {
-  const prof = await IncomeProfile.findOne({ userId: req.user.id });
-  const base = prof ? {
-    salary: prof.salary,
-    pensionPct: prof.pensionPct,
-    studentLoanPlan: prof.studentLoanPlan
-  } : { salary: 0, pensionPct: 0, studentLoanPlan: null };
+  try {
+    // Minimal placeholder; front-end will render gracefully.
+    const summary = {
+      year: '2025/26',
+      currency: 'GBP',
+      // Waterfall amounts in pounds (positive gross/net, negative deductions)
+      waterfall: [
+        { label: 'Gross Income', amount: 0 },
+        { label: 'Income Tax', amount: 0 },
+        { label: 'National Insurance', amount: 0 },
+        { label: 'Student Loan', amount: 0 },
+        { label: 'Pension', amount: 0 },
+        { label: 'Net Pay', amount: 0 }
+      ],
+      // EMTR points: income (x), marginalRate (0–1)
+      emtr: [
+        { income: 0, rate: 0.0 },
+        { income: 10000, rate: 0.2 }
+      ],
+      // Gauges: used, total (numbers in pounds where relevant)
+      gauges: {
+        personalAllowance: { used: 0, total: 12570 },
+        dividendAllowance: { used: 0, total: 500 },
+        cgtAllowance:      { used: 0, total: 3000 },
+        pensionAnnual:     { used: 0, total: 60000 },
+        isa:               { used: 0, total: 20000 }
+      },
+      // Upcoming events timeline tiles
+      events: [
+        // Example format; leave empty until we add tasks & real events
+        // { date: '2026-01-31', title: 'Self Assessment payment due', kind: 'deadline' }
+      ]
+    };
 
-  const calc = computeTakeHome(base);
-
-  const gauges = [
-    { key: 'personalAllowance', used: Math.min(calc.pa, calc.pa), total: calc.pa },
-    { key: 'dividendAllowance', used: 0, total: 500 },
-    { key: 'cgtAllowance', used: 0, total: 3000 },
-    { key: 'pensionAnnual', used: (base.salary * base.pensionPct)/100, total: 60000 },
-    { key: 'isa', used: 0, total: 20000 }
-  ];
-
-  res.json({
-    year: '2025-26',
-    summary: {
-      gross: calc.gross,
-      net: calc.net,
-      tax: calc.tax,
-      ni: calc.ni,
-      studentLoan: calc.sl,
-      pension: calc.pension
-    },
-    waterfall: calc.waterfall,
-    emtr: calc.emtrPoints,
-    gauges,
-    events: []
-  });
+    res.json(summary);
+  } catch (e) {
+    console.error('GET /api/summary/current-year error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 module.exports = router;
-

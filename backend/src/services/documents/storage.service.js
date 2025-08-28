@@ -1,29 +1,34 @@
 // backend/src/services/documents/storage.service.js
-const { PassThrough } = require('stream');
 const mongoose = require('mongoose');
+const { GridFSBucket, ObjectId } = require('mongodb');
 
 function bucket() {
-  const db = mongoose.connection.db;
-  if (!db) throw new Error('No MongoDB connection');
-  return new mongoose.mongo.GridFSBucket(db, { bucketName: 'documents' });
+  if (!mongoose.connection?.db) throw new Error('MongoDB not connected');
+  return new GridFSBucket(mongoose.connection.db, { bucketName: 'documents' });
 }
 
-async function saveBufferToGridFS(buffer, filename, metadata) {
-  const b = bucket();
-  const stream = new PassThrough();
-  stream.end(buffer);
+async function saveBufferToGridFS(buffer, filename, metadata = {}) {
   return new Promise((resolve, reject) => {
-    const upload = b.openUploadStream(filename, { metadata });
-    stream.pipe(upload)
-      .on('error', reject)
-      .on('finish', () => resolve(upload.id));
+    const uploadStream = bucket().openUploadStream(filename, { metadata });
+    uploadStream.on('finish', () => resolve(uploadStream.id));
+    uploadStream.on('error', reject);
+    uploadStream.end(buffer);
   });
 }
 
 async function listFiles(userId) {
-  const b = bucket();
-  const cur = b.find({ 'metadata.userId': String(userId) });
-  return await cur.toArray();
+  const files = await bucket().find({ 'metadata.userId': String(userId) }).toArray();
+  return files.sort((a, b) => new Date(b.uploadDate) - new Date(a.uploadDate));
 }
 
-module.exports = { saveBufferToGridFS, listFiles };
+async function deleteFileById(id, userId) {
+  const _id = new ObjectId(String(id));
+  const files = await bucket().find({ _id, 'metadata.userId': String(userId) }).toArray();
+  if (files.length === 0) {
+    const err = new Error('Not found'); err.code = 404; throw err;
+  }
+  await bucket().delete(_id);
+  return true;
+}
+
+module.exports = { saveBufferToGridFS, listFiles, deleteFileById };
