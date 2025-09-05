@@ -1,0 +1,64 @@
+<!-- frontend/components/sidebar.html -->
+<aside class="app-sidebar" data-collapsed="true">
+    <nav class="app-nav">
+        <div class="app-nav-title">
+            <i class="bi bi-grid-1x2"></i>
+            
+            <span class="label">Menu</span>
+        </div>
+
+        <div class="app-nav-sep" role="separator" aria-label="Overview / Personal"></div>
+
+      <!-- Group: Overview -->
+      <div class="app-nav-title">
+        <i class="bi bi-grid-1x2"></i>
+        <span class="label">Overview</span>
+      </div>
+      <a href="/home.html" class="app-nav-item" data-route="home.html" title="Dashboard">
+        <i class="bi bi-speedometer2"></i>
+        <span class="label">Dashboard</span>
+      </a>
+  
+      <a href="/documents.html" class="app-nav-item" data-route="documents.html" title="Documents">
+        <i class="bi bi-folder2-open"></i>
+        <span class="label">Documents</span>
+      </a>
+
+      <div class="app-nav-sep" role="separator" aria-label="Overview / Personal"></div>
+
+      <div class="app-nav-title">
+        <i class="bi bi-grid-1x2"></i>
+        <span class="label">Personal</span>
+      </div>
+  
+      <a href="/billing.html" class="app-nav-item" data-route="billing.html" title="Billing">
+        <i class="bi bi-sliders2"></i>
+        <span class="label">Billing</span>
+      </a>
+
+      <a href="/scenarios.html" class="app-nav-item" data-route="scenarios.html" title="Scenario Lab">
+        <i class="bi bi-sliders2"></i>
+        <span class="label">Scenario Lab</span>
+      </a>
+  
+      <a href="/gifts.html" class="app-nav-item" data-route="gifts.html" title="Gifts & IHT">
+        <i class="bi bi-gift"></i>
+        <span class="label">Gifts &amp; IHT</span>
+      </a>
+  
+      <a href="/profile.html" class="app-nav-item" data-route="profile.html" title="Profile">
+        <i class="bi bi-person-circle"></i>
+        <span class="label">Profile</span>
+      </a>
+    </nav>
+  
+    <!-- Spacer pushes signout to bottom -->
+    <div class="app-nav-spacer"></div>
+  
+    <!-- Sign out -->
+    <button id="nav-signout" class="app-nav-item signout" title="Sign out">
+      <i class="bi bi-box-arrow-right"></i>
+      <span class="label">Sign out</span>
+    </button>
+  </aside>
+  

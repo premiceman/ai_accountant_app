@@ -50,17 +50,19 @@ function safeRequire(p) { try { return require(p); } catch { return null; } }
 // Try both locations in case files live under ./src/...
 const authRoutes = safeRequire('./routes/auth') || safeRequire('./src/routes/auth');
 const userRoutes = safeRequire('./routes/user') || safeRequire('./src/routes/user');
+// backend/index.js (near the other requires)
+const eventsRouter = require('./src/routes/events.routes'); // <-- add this
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
-
+app.use('/api/docs', require('./src/routes/documents.routes'));
 app.use(morgan('combined'));
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '1mb' }));
-app.use('/api/summary', require('./src/routes/summary.routes'));
-app.use('/api/docs', require('./src/routes/documents.routes'));
 
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 
 // Helper to mount and log
@@ -77,6 +79,15 @@ function mount(pathPrefix, router, name) {
 app.get('/api/ping', (req, res) => res.json({ message: 'pong' }));
 mount('/api/auth', authRoutes, 'auth');
 mount('/api/user', userRoutes, 'user');
+app.use('/api/summary', require('./src/routes/summary.routes'));
+app.use('/api/docs', require('./src/routes/documents.routes'));
+app.use('/api/billing', require('./routes/billing')); // 🆕 Billing API
+
+// Health
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// Events API
+app.use('/api/events', eventsRouter);
 
 // TEMP: route inspector to verify what's mounted
 app.get('/__routes', (req, res) => {

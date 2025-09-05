@@ -1,26 +1,145 @@
 <!doctype html>
-<html lang="en"><head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Profile — AI Accountant</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-</head><body>
-  <div id="navbar-container"></div>
+<html lang="en">
+<head>
+  <script src="/js/head-include.js"></script>
+</head>
+<body>
+  <!--navbar elements-->
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
   <main class="container py-4">
     <h1 class="page-title" data-page-title>Profile</h1>
-    <form id="profile-form" class="card p-3 shadow-sm" style="max-width:720px">
-      <div class="row g-2">
-        <div class="col-md-6"><label class="form-label">First name</label><input id="firstName" class="form-control" required></div>
-        <div class="col-md-6"><label class="form-label">Last name</label><input id="lastName" class="form-control" required></div>
+
+    <ul class="nav nav-tabs" id="profileTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-profile" data-bs-toggle="tab" data-bs-target="#pane-profile" type="button" role="tab">Profile</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-security" data-bs-toggle="tab" data-bs-target="#pane-security" type="button" role="tab">Security</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-license" data-bs-toggle="tab" data-bs-target="#pane-license" type="button" role="tab">License</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-eula" data-bs-toggle="tab" data-bs-target="#pane-eula" type="button" role="tab">End-User Agreement</button>
+      </li>
+    </ul>
+
+    <div class="tab-content pt-4">
+      <!-- Profile -->
+      <div class="tab-pane fade show active" id="pane-profile" role="tabpanel" aria-labelledby="tab-profile">
+        <div class="card shadow-sm form-section">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Your details</h5>
+            <div id="profile-alert"></div>
+            <form id="profile-form" novalidate>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label for="firstName" class="form-label">First name</label>
+                  <input type="text" id="firstName" name="firstName" class="form-control" required>
+                </div>
+                <div class="col-md-6">
+                  <label for="lastName" class="form-label">Last name</label>
+                  <input type="text" id="lastName" name="lastName" class="form-control" required>
+                </div>
+                <div class="col-md-6">
+                  <label for="username" class="form-label">Username</label>
+                  <input type="text" id="username" name="username" class="form-control" autocomplete="username">
+                  <div class="small-help">Used for login if you prefer username over email.</div>
+                </div>
+                <div class="col-md-6">
+                  <label for="email" class="form-label">Email</label>
+                  <input type="email" id="email" name="email" class="form-control" autocomplete="email" required>
+                </div>
+              </div>
+              <div class="d-flex gap-2 mt-4">
+                <button type="submit" class="btn btn-primary">Save changes</button>
+                <button type="button" class="btn btn-outline-secondary" id="profile-reset">Reset</button>
+              </div>
+            </form>
+          </div>
+        </div>
       </div>
-      <div class="mb-3"><label class="form-label">Email</label><input id="email" type="email" class="form-control" required></div>
-      <div class="mb-3"><label class="form-label">Phone</label><input id="phone" class="form-control"></div>
-      <div class="mb-3"><label class="form-label">Address</label><input id="address" class="form-control"></div>
-      <div id="p-msg" class="text-muted small mb-2"></div>
-      <button class="btn btn-primary" type="submit">Save</button>
-    </form>
+
+      <!-- Security -->
+      <div class="tab-pane fade" id="pane-security" role="tabpanel" aria-labelledby="tab-security">
+        <div class="card shadow-sm form-section">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Change password</h5>
+            <div id="pwd-alert"></div>
+            <form id="password-form" novalidate>
+              <div class="mb-3">
+                <label for="currentPassword" class="form-label">Current password</label>
+                <input type="password" id="currentPassword" name="currentPassword" class="form-control" autocomplete="current-password" required>
+              </div>
+              <div class="row g-3">
+                <div class="col-md-6">
+                  <label for="newPassword" class="form-label">New password</label>
+                  <input type="password" id="newPassword" name="newPassword" class="form-control" autocomplete="new-password" required minlength="8">
+                  <div class="small-help">Min 8 chars; use a mix of letters, numbers, symbols.</div>
+                </div>
+                <div class="col-md-6">
+                  <label for="confirmPassword" class="form-label">Confirm new password</label>
+                  <input type="password" id="confirmPassword" name="confirmPassword" class="form-control" autocomplete="new-password" required minlength="8">
+                </div>
+              </div>
+              <div class="d-flex gap-2 mt-4">
+                <button type="submit" class="btn btn-primary">Update password</button>
+                <button type="button" class="btn btn-outline-secondary" id="password-reset">Clear</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- License -->
+      <div class="tab-pane fade" id="pane-license" role="tabpanel" aria-labelledby="tab-license">
+        <div class="card shadow-sm form-section">
+          <div class="card-body">
+            <h5 class="card-title mb-3">Your plan</h5>
+            <p class="mb-1">Current tier: <span class="badge bg-primary" id="license-tier">Free</span></p>
+            <p class="text-muted small mb-3" id="license-caption">You’re on our Free plan. Upgrade options are coming soon.</p>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-secondary" disabled>Free</button>
+              <button class="btn btn-outline-secondary" disabled>Basic (coming soon)</button>
+              <button class="btn btn-outline-secondary" disabled>Premium (coming soon)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EULA -->
+      <div class="tab-pane fade" id="pane-eula" role="tabpanel" aria-labelledby="tab-eula">
+        <div class="card shadow-sm form-section">
+          <div class="card-body">
+            <h5 class="card-title mb-3">End-User Agreement</h5>
+            <dl class="row mb-3">
+              <dt class="col-sm-4">Status</dt>
+              <dd class="col-sm-8"><span id="eula-status" class="badge bg-secondary">Unknown</span></dd>
+              <dt class="col-sm-4">Accepted at</dt>
+              <dd class="col-sm-8" id="eula-accepted-at">—</dd>
+              <dt class="col-sm-4">Version</dt>
+              <dd class="col-sm-8" id="eula-version">—</dd>
+            </dl>
+            <p class="text-muted small">You accepted the EULA at sign-up. We’ll show the text and version here once finalised.</p>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-secondary" disabled>View current EULA (coming soon)</button>
+              <button class="btn btn-outline-secondary" disabled>Re-accept (coming soon)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
-  <script>(async()=>{ try{ const r=await fetch('./components/navbar.html',{cache:'no-store'}); if(r.ok) document.getElementById('navbar-container').innerHTML = await r.text(); }catch{} })();</script>
+
+  <!-- navbar + scripts -->
+  <script src="./js/nav.js"></script>
+  <script src="./js/config.js"></script>
   <script src="./js/auth.js"></script>
   <script>Auth.enforce();</script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="./js/profile.js"></script>
-</body></html>
+</body>
+</html>
+

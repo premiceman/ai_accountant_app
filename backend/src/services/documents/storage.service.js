@@ -9,7 +9,7 @@ function bucket() {
 
 async function saveBufferToGridFS(buffer, filename, metadata = {}) {
   return new Promise((resolve, reject) => {
-    const uploadStream = bucket().openUploadStream(filename, { metadata });
+    const uploadStream = bucket().openUploadStream(filename || 'file', { metadata });
     uploadStream.on('finish', () => resolve(uploadStream.id));
     uploadStream.on('error', reject);
     uploadStream.end(buffer);
