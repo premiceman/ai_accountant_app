@@ -1,19 +1,16 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Shared head (Bootstrap CSS, Bootstrap Icons, styles, Chart.js, etc.) -->
   <script src="/js/head-include.js"></script>
   <title>Documents & Integrations — AI Accountant</title>
 </head>
 <body>
-  <!-- Topbar + Sidebar (loaded by nav.js) -->
   <div id="topbar-container"></div>
   <div id="sidebar-container"></div>
 
   <main class="container py-4">
     <h1 class="page-title" data-page-title>Documents & Integrations</h1>
 
-    <!-- Progress -->
     <div class="card shadow-sm mb-4">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -27,55 +24,6 @@
       </div>
     </div>
 
-    <!-- Integrations -->
-    <section class="mb-4">
-      <h5 class="mb-3">Bank & Data Integrations</h5>
-      <div class="row g-3">
-        <div class="col-12 col-md-6 col-lg-4">
-          <div class="card h-100 shadow-sm">
-            <div class="card-body d-flex flex-column">
-              <h6 class="card-title">Open Banking (TrueLayer)</h6>
-              <p class="text-muted small flex-grow-1">
-                Connect bank accounts to auto-ingest transactions and classify income/expenses.
-                <br><strong>Status:</strong> Coming soon.
-              </p>
-              <button class="btn btn-secondary" disabled>Connect (coming soon)</button>
-              <p class="text-muted small mt-2 mb-0">
-                How we’ll build it: OAuth2 to TrueLayer; store tokens per user; read-only scopes; nightly sync.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-md-6 col-lg-4">
-          <div class="card h-100 shadow-sm">
-            <div class="card-body d-flex flex-column">
-              <h6 class="card-title">HMRC (Self Assessment)</h6>
-              <p class="text-muted small flex-grow-1">
-                Fetch SA status and payments on account for deadline nudges.
-                <br><strong>Status:</strong> Planned.
-              </p>
-              <button class="btn btn-secondary" disabled>Connect (planned)</button>
-              <p class="text-muted small mt-2 mb-0">
-                How we’ll build it: HMRC OAuth; MTD APIs; scoped calls only.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-md-6 col-lg-4">
-          <div class="card h-100 shadow-sm">
-            <div class="card-body d-flex flex-column">
-              <h6 class="card-title">Payroll & Brokers</h6>
-              <p class="text-muted small flex-grow-1">
-                Upload P60/P45/payslips and broker CSVs/PDFs now; provider APIs later.
-              </p>
-              <a class="btn btn-outline-primary" href="#doc-reqs">Go to required docs</a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Required & Helpful Documents -->
     <section id="doc-reqs">
       <h5 class="mb-3">Required & Helpful Documents</h5>
       <div class="table-responsive">
@@ -101,7 +49,7 @@
     </section>
   </main>
 
-  <!-- Modal: All files for a document type -->
+  <!-- Files Modal -->
   <div class="modal fade" id="filesModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
       <div class="modal-content">
@@ -112,34 +60,22 @@
         <div class="modal-body">
           <div class="table-responsive">
             <table class="table table-sm align-middle">
-              <thead>
-                <tr>
-                  <th>Filename</th>
-                  <th>Uploaded</th>
-                  <th>Size</th>
-                  <th class="text-end">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="filesModalBody">
-                <tr><td colspan="4" class="text-muted small">Loading…</td></tr>
-              </tbody>
+              <thead><tr><th>Filename</th><th>Uploaded</th><th>Size</th><th class="text-end">Actions</th></tr></thead>
+              <tbody id="filesModalBody"><tr><td colspan="4" class="text-muted small">Loading…</td></tr></tbody>
             </table>
           </div>
           <div class="text-muted small">Tip: you can delete individual files here.</div>
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        </div>
+        <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
       </div>
     </div>
   </div>
 
-  <!-- Page scripts -->
-  <script src="./js/nav.js"></script>
-  <script src="./js/config.js"></script>
-  <script src="./js/auth.js"></script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
   <script>Auth.enforce();</script>
-  <script src="./js/ui-hygiene.js"></script>
-  <script src="./js/documents.js"></script>
+  <script src="/js/documents.js"></script>
 </body>
 </html>
+

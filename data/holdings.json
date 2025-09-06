@@ -1,0 +1,7 @@
+{
+  "holdings": [
+    { "symbol": "VWRL", "assetClass": "Equities", "qty": 120 },
+    { "symbol": "AGGH", "assetClass": "Bonds",    "qty": 220 },
+    { "symbol": "IGLT", "assetClass": "Bonds",    "qty": 150 }
+  ]
+}

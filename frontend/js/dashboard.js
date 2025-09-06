@@ -1,5 +1,7 @@
-// frontend/js/dashboard.js
+// frontend/js/dashboard.js (fixed, preserves existing UI)
 (function () {
+  const RANGE_KEY = 'dashboardRangeV1';
+
   init().catch(err => {
     console.error('Dashboard init failed:', err);
     softError('Could not load dashboard: ' + (err?.message || err));
@@ -11,65 +13,156 @@
     const g = document.getElementById('greeting-name');
     if (g && me?.firstName) g.textContent = me.firstName;
 
-    // fetch summary (best effort)
+    wireRangePicker();
+    await reloadDashboard();
+  }
+
+  // ---------------- Range state & UI ----------------
+  function defaultRangeState() { return { mode: 'quick', preset: 'last-month', start: null, end: null }; }
+  function loadRangeState() { try { return JSON.parse(localStorage.getItem(RANGE_KEY) || 'null') || defaultRangeState(); } catch { return defaultRangeState(); } }
+  function saveRangeState(st) { try { localStorage.setItem(RANGE_KEY, JSON.stringify(st)); } catch {} }
+
+  function wireRangePicker() {
+    const st = loadRangeState();
+    const btnQuick  = byId('rng-btn-quick');
+    const btnCustom = byId('rng-btn-custom');
+    const paneQuick = byId('rng-quick');
+    const paneCustom= byId('rng-custom');
+
+    if (!btnQuick || !btnCustom || !paneQuick || !paneCustom) return;
+
+    function setMode(mode) {
+      st.mode = mode;
+      btnQuick.classList.toggle('active', mode === 'quick');
+      btnCustom.classList.toggle('active', mode === 'custom');
+      paneQuick.style.display = (mode === 'quick') ? '' : 'none';
+      paneCustom.style.display = (mode === 'custom') ? '' : 'none';
+      saveRangeState(st);
+      updateRangeLabel(st);
+    }
+    btnQuick.addEventListener('click', () => setMode('quick'));
+    btnCustom.addEventListener('click', ()=> setMode('custom'));
+
+    const quickRadios = [ 'rng-last-month', 'rng-last-quarter', 'rng-last-year' ].map(byId).filter(Boolean);
+    const applyQuick  = byId('rng-apply-quick');
+    quickRadios.forEach(r => r.addEventListener('change', () => { st.preset = r.value; saveRangeState(st); }));
+    if (applyQuick) applyQuick.addEventListener('click', async () => { await reloadDashboard(); });
+
+    const startEl = byId('rng-start'), endEl = byId('rng-end'), applyCustom = byId('rng-apply-custom');
+    if (applyCustom) applyCustom.addEventListener('click', async () => {
+      const s = startEl.value, e = endEl.value;
+      if (!s || !e) return alert('Please select both start and end dates.');
+      if (new Date(s) > new Date(e)) return alert('Start date must be before end date.');
+      st.start = s; st.end = e; saveRangeState(st);
+      await reloadDashboard();
+    });
+
+    setMode(st.mode || 'quick');
+    const presetEl = byId(st.preset === 'last-year' ? 'rng-last-year' : (st.preset === 'last-quarter' ? 'rng-last-quarter' : 'rng-last-month'));
+    if (presetEl) presetEl.checked = true;
+    if (st.start && startEl) startEl.value = st.start;
+    if (st.end && endEl)   endEl.value   = st.end;
+    updateRangeLabel(st);
+  }
+  function updateRangeLabel(st) {
+    const el = byId('range-current'); if (!el) return;
+    if (st.mode === 'quick') {
+      const pretty = st.preset === 'last-year' ? 'Last year' : st.preset === 'last-quarter' ? 'Last quarter' : 'Last month';
+      el.textContent = `Current: ${pretty}`;
+    } else if (st.start && st.end) {
+      el.textContent = `Current: ${new Date(st.start).toLocaleDateString()} – ${new Date(st.end).toLocaleDateString()}`;
+    } else el.textContent = '—';
+  }
+
+  // ---------------- Data fetch & render ----------------
+  async function reloadDashboard() {
+    setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
+
+    const st = loadRangeState();
+    const qs = st.mode === 'quick'
+      ? `preset=${encodeURIComponent(st.preset || 'last-month')}`
+      : (st.start && st.end) ? `start=${encodeURIComponent(st.start)}&end=${encodeURIComponent(st.end)}` : `preset=last-month`;
+
     let data = {};
     try {
-      const res = await API.fetch('/api/summary/current-year', { headers: { Authorization: `Bearer ${Auth.getToken()}` } });
+      // IMPORTANT: use Auth.fetch (adds Authorization). API.fetch does not exist in this project.
+      const res = await Auth.fetch(`/api/summary/current-year?${qs}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) data = await res.json();
+      else throw new Error(`Summary ${res.status}`);
     } catch (e) {
-      console.warn('Summary API failed, using fallbacks.', e);
+      console.warn('Summary API failed:', e);
+      softError('Summary API failed.');
+      return;
     }
 
-    // Year label
-    setText('dash-year', `Tax year ${data?.year || safeTaxYearLabel(new Date())}`);
+    // Charts/tiles
+    try { renderWaterfall('chart-waterfall', data.waterfall || []); } catch (e) { console.error('Waterfall render:', e); }
+    try { renderEMTR('chart-emtr', data.emtr || []); } catch (e) { console.error('EMTR render:', e); }
+    try { renderGauges('gauges', data.gauges || {}); } catch (e) { console.error('Gauges render:', e); }
 
-    // Render parts (never let one failure kill the rest)
-    try { renderWaterfall('chart-waterfall', data.waterfall || mockWaterfall(), data.currency || 'GBP'); } catch (e) { console.error('Waterfall render:', e); }
-    try { renderEMTR('chart-emtr', data.emtr || mockEMTR()); } catch (e) { console.error('EMTR render:', e); }
-    try { renderGauges('gauges', data.gauges || mockGauges()); } catch (e) { console.error('Gauges render:', e); }
+    // KPIs (if their tiles exist in DOM)
+    if (data.kpis) {
+      setText('kpi-tax-band', data.kpis.taxBand || '—');
+      const pos = data.kpis.hmrc || {};
+      if (byId('kpi-tax-pos')) {
+        const net = Number(pos.netForRange || 0);
+        const nice = (n)=>'£'+Number(Math.abs(n)).toLocaleString();
+        byId('kpi-tax-pos').textContent = net > 0 ? `Owe ${nice(net)}` : net < 0 ? `Due ${nice(net)}` : 'Settled';
+        const sub = `Est. tax: £${Number(pos.estTaxForRange||0).toLocaleString()} · Payments: £${Number(pos.paymentsInRange||0).toLocaleString()}`;
+        setText('kpi-tax-pos-sub', sub);
+      }
+      setText('kpi-income', money(data.kpis.incomeTotal));
+      setText('kpi-spend',  money(data.kpis.spendTotal));
+    }
 
-    // Events (API may not provide — always show defaults + user events)
+    // Events
     try {
       const defaults = defaultUkEvents2025_26();
       const userEvents = loadUserEvents();
       renderEventsTable(defaults, userEvents);
-      wireAddEvent(defaults, userEvents);
-    } catch (e) {
-      console.error('Events render:', e);
-    }
+    } catch (e) { console.error('Events render:', e); }
 
-    // Financial Posture (mock analytics)
-    try { renderFinancialPosture(mockFinancialPosture()); } catch (e) { console.error('Financial Posture render:', e); }
-  }
+    // Financial Posture
+    try {
+      if (data.financialPosture) renderFinancialPosture(data.financialPosture, data.trends);
+    } catch (e) { console.error('Financial Posture render:', e); }
 
-  // ---------------- Utilities ----------------
-  function setText(id, txt) { const el = document.getElementById(id); if (el) el.textContent = txt; }
-  function softError(msg) {
-    const wf = document.getElementById('chart-waterfall');
-    if (wf) wf.insertAdjacentHTML('beforebegin', `<div class="text-danger small">${msg}</div>`);
-  }
-  function safeTaxYearLabel(d) {
-    const y = d.getFullYear(); const start = new Date(y, 3, 6);
-    const ty = d >= start ? `${y}/${String((y+1)%100).padStart(2,'0')}` : `${y-1}/${String(y%100).padStart(2,'0')}`;
-    return ty;
+    updateRangeLabel(st);
   }
 
   // ---------------- Charts ----------------
-  function renderWaterfall(canvasId, steps, currency = 'GBP') {
+  function themeColors(n) {
+    const root = getComputedStyle(document.documentElement);
+    const list = ['--chart-1','--chart-2','--chart-3','--chart-4','--chart-5','--chart-6','--chart-7','--chart-8']
+      .map(v => root.getPropertyValue(v).trim()).filter(Boolean);
+    const fallback = ['#4a78ff','#60c8ff','#7dd3a8','#f5a524','#ef4d72','#8b5cf6','#f59e0b','#10b981'];
+    const base = list.length ? list : fallback;
+    const out = [];
+    for (let i=0; i<n; i++) out.push(base[i % base.length]);
+    return out;
+  }
+
+  // ---- Waterfall (positive-only bars, themed colors)
+  function renderWaterfall(canvasId, steps) {
     const el = document.getElementById(canvasId);
     if (!el || !Array.isArray(steps) || steps.length === 0 || !window.Chart) return;
+    if (el._chart) el._chart.destroy();
+
     const labels = steps.map(s => s.label);
-    const values = steps.map(s => s.amount || 0);
-    new Chart(el, {
+    const values = steps.map(s => Math.max(0, Number(s.amount || 0))); // force positive
+    const colors = themeColors(values.length);
+
+    el._chart = new Chart(el, {
       type: 'bar',
-      data: { labels, datasets: [{ label: '£', data: values, borderWidth: 1 }] },
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
       options: {
         responsive: true,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: (ctx) => `£${(ctx.parsed.y || 0).toLocaleString()}` } }
+          tooltip: { callbacks: { label: (c) => `£${Number(c.parsed.y || 0).toLocaleString()}` } }
         },
         scales: {
+          x: { stacked: false },
           y: { beginAtZero: true, ticks: { callback: (v) => '£' + Number(v).toLocaleString() } }
         }
       }
@@ -79,26 +172,32 @@
   function renderEMTR(canvasId, points) {
     const el = document.getElementById(canvasId);
     if (!el || !Array.isArray(points) || points.length === 0 || !window.Chart) return;
+    if (el._chart) el._chart.destroy();
+
     const xs = points.map(p => p.income || 0);
     const ys = points.map(p => (p.rate || 0) * 100);
-    new Chart(el, {
+
+    el._chart = new Chart(el, {
       type: 'line',
       data: { labels: xs, datasets: [{ data: ys, borderWidth: 2, fill: false, tension: 0.2 }] },
       options: {
         responsive: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.parsed.y.toFixed(1)}% EMTR` } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => `${c.parsed.y.toFixed(1)}% EMTR` } }
+        },
         scales: {
-          x: { title: { display: true, text: 'Income (£)' }, ticks: { callback: (v, i) => '£' + Number(xs[i]).toLocaleString() } },
-          y: { title: { display: true, text: 'Rate (%)' }, min: 0, max: 100 }
+          x: { title: { display: true, text: 'Annualised income (£)' }, ticks: { callback: (v, i) => '£' + Number(xs[i]).toLocaleString() } },
+          y: { title: { display: true, text: 'Rate (%)' }, min: 0, max: 70 }
         }
       }
     });
   }
 
+  // ---- Gauges
   function renderGauges(containerId, gauges) {
     const c = document.getElementById(containerId);
-    if (!c) return;
-    c.innerHTML = '';
+    if (!c) return; c.innerHTML = '';
     const entries = [
       ['Personal allowance', gauges.personalAllowance],
       ['Dividend allowance', gauges.dividendAllowance],
@@ -127,34 +226,18 @@
     }
   }
 
-  // ---------------- Events ----------------
+  // ---- Events
   const USER_EVENTS_KEY = 'userEvents';
-
-  function loadUserEvents() {
-    try { return JSON.parse(localStorage.getItem(USER_EVENTS_KEY) || '[]'); } catch { return []; }
-  }
-  function saveUserEvents(arr) {
-    try { localStorage.setItem(USER_EVENTS_KEY, JSON.stringify(arr || [])); } catch {}
-  }
+  function loadUserEvents(){ try { return JSON.parse(localStorage.getItem(USER_EVENTS_KEY) || '[]'); } catch { return []; } }
   function renderEventsTable(defaults, userEvents) {
-    const tbody = document.getElementById('events-tbody');
-    const empty = document.getElementById('events-empty');
-    if (!tbody) return;
-
-    const rows = [];
+    const tbody = byId('events-tbody'), empty = byId('events-empty');
+    if (!tbody) return; tbody.innerHTML = '';
     const now = new Date();
-    const combined = [...defaults.map(d => ({...d, kind: 'default'})), ...userEvents.map(u => ({...u, kind:'user'}))];
-    combined
+    const combined = [...defaults.map(d => ({...d, kind:'default'})), ...userEvents.map(u => ({...u, kind:'user'}))]
       .filter(ev => !ev.date || new Date(ev.date) >= new Date(now.getFullYear(), now.getMonth(), now.getDate()))
-      .sort((a,b)=> new Date(a.date)-new Date(b.date));
-
-    tbody.innerHTML = '';
-    if (combined.length === 0) {
-      if (empty) empty.style.display = '';
-      return;
-    }
+      .sort((a,b)=> new Date(a.date) - new Date(b.date));
+    if (combined.length === 0) { if (empty) empty.style.display = ''; return; }
     if (empty) empty.style.display = 'none';
-
     for (const ev of combined) {
       const tr = document.createElement('tr');
       const d = ev.date ? new Date(ev.date) : null;
@@ -163,66 +246,16 @@
       tr.innerHTML = `
         <td class="text-nowrap">${dateStr}</td>
         <td><span class="event-title" title="${escapeHtml(ev.description || '')}">${escapeHtml(ev.title || 'Event')}</span></td>
-        <td class="text-end">
-          ${ev.kind === 'user' ? `<button class="btn btn-sm btn-link text-danger p-0" title="Delete" aria-label="Delete"><i class="bi bi-x-circle"></i></button>` : ''}
-        </td>
-      `;
-
-      if (ev.kind === 'user') {
-        tr.querySelector('button')?.addEventListener('click', () => {
-          const next = loadUserEvents().filter(x => x.id !== ev.id);
-          saveUserEvents(next);
-          renderEventsTable(defaults, next);
-        });
-      }
+        <td class="text-end">${ev.kind==='user'?`<button class="btn btn-sm btn-link text-danger p-0" title="Delete"><i class="bi bi-x-circle"></i></button>`:''}</td>`;
+      if (ev.kind === 'user') tr.querySelector('button')?.addEventListener('click', () => {
+        const next = loadUserEvents().filter(x => x.id !== ev.id);
+        localStorage.setItem(USER_EVENTS_KEY, JSON.stringify(next));
+        renderEventsTable(defaults, next);
+      });
       tbody.appendChild(tr);
     }
   }
-
-  function wireAddEvent(defaults, currentUserEvents) {
-    const btn = document.getElementById('btn-add-event');
-    if (!btn) return;
-    const modalEl = document.getElementById('eventModal');
-    const form = document.getElementById('event-form');
-    const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
-
-    btn.addEventListener('click', () => {
-      if (!modal) return;
-      form.reset();
-      modal.show();
-    });
-
-    form?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const title = document.getElementById('event-title').value.trim();
-      const date  = document.getElementById('event-date').value;
-      const repeat = document.getElementById('event-repeat').value;
-      const desc  = document.getElementById('event-desc').value.trim();
-      if (!title || !date) return;
-
-      const id = cryptoId();
-      const first = { id, title, date, description: desc };
-      let toSave = [first];
-
-      if (repeat === 'monthly') {
-        let dt = new Date(date);
-        for (let i=1;i<12;i++){ const n=new Date(dt); n.setMonth(n.getMonth()+i); toSave.push({ id: cryptoId(), title, date: isoDate(n), description: desc }); }
-      } else if (repeat === 'quarterly') {
-        let dt = new Date(date);
-        for (let i=1;i<4;i++){ const n=new Date(dt); n.setMonth(n.getMonth()+i*3); toSave.push({ id: cryptoId(), title, date: isoDate(n), description: desc }); }
-      } else if (repeat === 'yearly') {
-        let dt = new Date(date); const n=new Date(dt); n.setFullYear(n.getFullYear()+1); toSave.push({ id: cryptoId(), title, date: isoDate(n), description: desc });
-      }
-
-      const all = [...loadUserEvents(), ...toSave];
-      saveUserEvents(all);
-      renderEventsTable(defaults, all);
-      modal?.hide();
-    });
-  }
-
-  function defaultUkEvents2025_26() {
-    // UK highlights spanning TY 2025/26 context, plus key SA deadlines
+  function defaultUkEvents2025_26(){
     return [
       { title: 'Second payment on account (2024/25) due', date: '2025-07-31', description: 'HMRC SA 2nd payment on account (if applicable).' },
       { title: 'Register for Self Assessment (new filers)', date: '2025-10-05', description: 'Deadline to register if you need to file for 2024/25.' },
@@ -234,12 +267,11 @@
     ];
   }
 
-  // ---------------- Financial Posture ----------------
-  function renderFinancialPosture(fp) {
-    // Net worth totals & chart
+  // ---- Financial Posture render
+  function renderFinancialPosture(fp, trends) {
     setText('fp-networth-date', fp.asOf);
     setText('fp-networth-total', money(fp.netWorth.total));
-    const ul = document.getElementById('fp-networth-breakdown');
+    const ul = byId('fp-networth-breakdown');
     if (ul) {
       ul.innerHTML = '';
       for (const row of [
@@ -254,9 +286,10 @@
         ul.appendChild(li);
       }
     }
+    // Networth doughnut
     if (window.Chart) {
-      const nw = document.getElementById('fp-networth-chart');
-      if (nw) new Chart(nw, {
+      const nw = byId('fp-networth-chart');
+      if (nw) { if (nw._chart) nw._chart.destroy(); nw._chart = new Chart(nw, {
         type: 'doughnut',
         data: {
           labels: ['Savings','Investments','Assets','Credit','Loans'],
@@ -269,137 +302,71 @@
           ]}]
         },
         options: { plugins: { legend: { display: true, position: 'bottom' } }, cutout: '60%' }
-      });
+      });}
     }
-
-    // Income & spend
+    // Inc/Spend KPIs + bar
     setText('fp-inc-total', money(fp.lastMonth.incomeTotal));
-    setText('fp-inc-notes', fp.lastMonth.incomeNote);
     setText('fp-spend-total', money(fp.lastMonth.spendTotal));
-    setText('fp-spend-notes', fp.lastMonth.spendNote);
+    setText('fp-spend-notes', fp.lastMonth.spendNote || '');
     if (window.Chart) {
-      const isEl = document.getElementById('fp-incspend-chart');
-      if (isEl) new Chart(isEl, {
+      const isEl = byId('fp-incspend-chart');
+      if (isEl) { if (isEl._chart) isEl._chart.destroy(); isEl._chart = new Chart(isEl, {
         type: 'bar',
-        data: {
-          labels: fp.lastMonth.categories.map(c => c.name),
-          datasets: [{ data: fp.lastMonth.categories.map(c => c.amount) }]
-        },
+        data: { labels: fp.lastMonth.categories.map(c => c.name), datasets: [{ data: fp.lastMonth.categories.map(c => c.amount) }] },
         options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { callback: v => '£'+Number(v).toLocaleString() } } } }
-      });
+      });}
     }
-
-    // Top costs
-    const tbody = document.getElementById('fp-top-costs-body');
-    if (tbody) {
-      tbody.innerHTML = '';
-      fp.lastMonth.categories
-        .slice().sort((a,b)=> b.amount - a.amount).slice(0,5)
-        .forEach(c => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td class="text-end fw-semibold">${money(c.amount)}</td>`;
-          tbody.appendChild(tr);
-        });
-    }
-
-    // Investments perf + allocation
-    setText('fp-perf-ytd', `YTD ${fp.investments.ytdReturnPct > 0 ? '+' : ''}${fp.investments.ytdReturnPct.toFixed(1)}%`);
+    // Allocation donut
     if (window.Chart) {
-      const alloc = document.getElementById('fp-allocation-chart');
-      if (alloc) new Chart(alloc, { type: 'doughnut', data: {
-        labels: fp.investments.allocation.map(a=>a.label),
-        datasets: [{ data: fp.investments.allocation.map(a=>a.pct) }]
-      }, options: { plugins: { legend: { display: true, position: 'bottom' } }, cutout: '60%'} });
-
-      const line = document.getElementById('fp-portfolio-line');
-      if (line) new Chart(line, {
-        type: 'line',
-        data: { labels: fp.investments.history.map(h=>h.label), datasets: [{ data: fp.investments.history.map(h=>h.value), borderWidth:2, fill:false, tension:.2 }] },
-        options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '£'+Number(v).toLocaleString() } } } }
-      });
-    }
-  }
-
-  // ---------------- Mock data ----------------
-  function mockWaterfall() {
-    return [
-      { label: 'Gross pay', amount: 65000 },
-      { label: 'Income tax', amount: -12000 },
-      { label: 'NI', amount: -5200 },
-      { label: 'Pension', amount: -6000 },
-      { label: 'Take-home', amount: 41800 }
-    ];
-  }
-  function mockEMTR() {
-    const pts = [];
-    for (let i=0;i<=8;i++){ const inc = 20000 + i*7500; pts.push({ income: inc, rate: 0.1 + (i*0.03) }); }
-    return pts;
-  }
-  function mockGauges() {
-    return {
-      personalAllowance: { used: 12570, total: 12570 },
-      dividendAllowance: { used: 300, total: 500 },
-      cgtAllowance:      { used: 1500, total: 3000 },
-      pensionAnnual:     { used: 12000, total: 60000 },
-      isa:               { used: 6000, total: 20000 }
-    };
-  }
-  function mockFinancialPosture() {
-    const today = new Date();
-    const asOf = today.toLocaleDateString();
-    // Net worth
-    const savings = 22000, investments = 68000, assets = 15000, credit = 2500, loans = 12000;
-    // Last month
-    const categories = [
-      { name: 'Rent/Mortgage', amount: 1500 },
-      { name: 'Food & Groceries', amount: 520 },
-      { name: 'Transport', amount: 210 },
-      { name: 'Utilities', amount: 190 },
-      { name: 'Insurance', amount: 110 },
-      { name: 'Entertainment', amount: 160 },
-      { name: 'Shopping', amount: 230 }
-    ];
-    const spendTotal = categories.reduce((a,b)=>a+b.amount,0);
-    const incomeTotal = 5100;
-    // Investments
-    const allocation = [
-      { label: 'Equities', pct: 60 },
-      { label: 'Bonds',    pct: 20 },
-      { label: 'Cash',     pct: 10 },
-      { label: 'Alt',      pct: 10 }
-    ];
-    const history = [];
-    let v = 72000;
-    for (let i=11; i>=0; i--) {
-      const d = new Date(today); d.setMonth(d.getMonth()-i);
-      v += (Math.random()-0.4)*1200;
-      history.push({ label: d.toLocaleDateString(undefined, { month:'short' }), value: Math.max(55000, Math.round(v)) });
-    }
-    const ytd = ((history.at(-1).value / history[0].value) - 1) * 100;
-
-    return {
-      asOf,
-      netWorth: {
-        total: savings + investments + assets - credit - loans,
-        savings, investments, assets, credit, loans
-      },
-      lastMonth: {
-        incomeTotal, spendTotal,
-        incomeNote: 'Incl. salary + dividends',
-        spendNote:  'All card & bank tx',
-        categories
-      },
-      investments: {
-        ytdReturnPct: ytd,
-        allocation,
-        history
+      const alloc = byId('fp-allocation-chart');
+      if (alloc && fp.investments && Array.isArray(fp.investments.allocation)) {
+        if (alloc._chart) alloc._chart.destroy();
+        alloc._chart = new Chart(alloc, {
+          type: 'doughnut',
+          data: { labels: fp.investments.allocation.map(a=>a.label), datasets: [{ data: fp.investments.allocation.map(a=>a.pct) }] },
+          options: { plugins: { legend: { display: true, position: 'bottom' } }, cutout: '60%' }
+        });
       }
-    };
+      const line = byId('fp-portfolio-line');
+      if (line && fp.investments && Array.isArray(fp.investments.history)) {
+        if (line._chart) line._chart.destroy();
+        line._chart = new Chart(line, {
+          type: 'line',
+          data: { labels: fp.investments.history.map(h=>h.label), datasets: [{ data: fp.investments.history.map(h=>h.value), borderWidth:2, fill:false, tension:.2 }] },
+          options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '£'+Number(v).toLocaleString() } } } }
+        });
+      }
+    }
+    // Top costs table with trend
+    const tbody = byId('fp-top-costs-body');
+    if (tbody && trends?.expensesTop) {
+      tbody.innerHTML = '';
+      for (const c of trends.expensesTop) {
+        const ch = Number(c.changePct || 0);
+        const cls = ch > 0 ? 'text-danger' : ch < 0 ? 'text-success' : 'text-muted';
+        const arrow = ch > 0 ? '▲' : ch < 0 ? '▼' : '•';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(c.name)}</td>
+          <td class="text-end">${money(c.amount)}</td>
+          <td class="text-end ${cls}"><span class="fw-semibold">${arrow} ${Math.abs(ch)}%</span></td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
   }
 
-  // --------------- helpers ---------------
+  // ---- utils
+  function byId(id){ return document.getElementById(id); }
+  function setText(id, txt) { const el = byId(id); if (el) el.textContent = txt; }
+  function softError(msg) {
+    const wf = byId('chart-waterfall');
+    if (wf) wf.insertAdjacentHTML('beforebegin', `<div class="text-danger small">${escapeHtml(msg)}</div>`);
+  }
+  function safeTaxYearLabel(d) {
+    const y = d.getFullYear(), start = new Date(y, 3, 6);
+    return d >= start ? `${y}/${String((y+1)%100).padStart(2,'0')}` : `${y-1}/${String(y%100).padStart(2,'0')}`;
+  }
   function money(n){ return '£' + Number(n || 0).toLocaleString(); }
   function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-  function isoDate(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), da=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${da}`; }
-  function cryptoId(){ return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)); }
 })();

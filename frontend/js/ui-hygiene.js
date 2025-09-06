@@ -11,4 +11,4 @@
     document.addEventListener('hidden.bs.offcanvas', cleanup);
     window.addEventListener('pageshow', cleanup);
   })();
-  
+

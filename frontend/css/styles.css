@@ -564,6 +564,108 @@ body{ padding-top: var(--topbar-h); padding-left: var(--sidebar-collapsed); }
   line-height: 1;
 }
 
+/* ===================== Billing Cycle Toggle (smaller) ===================== */
+:root {
+  --toggle-accent: var(--brand, var(--bs-success, #198754));
+  --toggle-fg: var(--fg-2, #6c757d);
+  --toggle-bg: var(--bg-surface, #ffffff);
+  --toggle-border: color-mix(in oklab, var(--toggle-accent) 80%, #0000);
+}
+
+.billing-toggle {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Smaller, sleeker container */
+.billing-toggle__inner {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  isolation: isolate;
+  width: 260px;                 /* was 320px */
+  min-height: 38px;             /* was 44px */
+  background: var(--toggle-bg);
+  border: 2px solid var(--toggle-border);
+  border-radius: 9999px;
+  box-shadow: 0 1px 6px rgba(0,0,0,.06), inset 0 0 0 1px rgba(0,0,0,.03);
+  padding: 2px;                 /* was 3px */
+}
+
+.billing-toggle__option {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 6px 8px;             /* was 8px 10px */
+  font-weight: 600;
+  font-size: 0.9rem;            /* was 0.95rem */
+  line-height: 1.1;
+  color: var(--toggle-fg);
+  cursor: pointer;
+  user-select: none;
+  transition: color .18s ease, transform .18s ease;
+}
+.billing-toggle__option:hover { transform: translateY(-1px); }
+
+/* Move the "Save 10–15%" under 'Yearly' */
+.billing-toggle__option .save {
+  display: block;               /* forces a new line */
+  margin-top: 2px;
+  font-size: 0.72rem;           /* slightly smaller */
+  font-weight: 700;
+  line-height: 1;
+  padding: .12rem .35rem;
+  border-radius: .4rem;
+  margin-left: auto;            /* center within label */
+  margin-right: auto;
+  background: color-mix(in oklab, var(--toggle-accent) 12%, #fff);
+  color: color-mix(in oklab, var(--toggle-accent) 85%, #000);
+}
+
+/* The moving pill (smaller to match container) */
+.billing-toggle__knob {
+  position: absolute;
+  top: 2px;                     /* was 3px */
+  bottom: 2px;                  /* was 3px */
+  left: 2px;                    /* was 3px */
+  width: calc(50% - 4px);       /* was calc(50% - 6px) */
+  border-radius: 9999px;
+  background: var(--toggle-accent);
+  box-shadow:
+    inset 0 -1px 0 rgba(0,0,0,.12),
+    0 4px 14px color-mix(in oklab, var(--toggle-accent) 40%, transparent);
+  transition: transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease;
+  z-index: 0;
+}
+
+.billing-toggle__inner:focus-within {
+  box-shadow:
+    0 1px 8px rgba(0,0,0,.08),
+    0 0 0 4px color-mix(in oklab, var(--toggle-accent) 20%, transparent);
+}
+
+/* Checked state: move knob + white active text */
+#cycle-monthly:checked ~ .billing-toggle__inner .billing-toggle__knob { transform: translateX(0%); }
+#cycle-yearly:checked  ~ .billing-toggle__inner .billing-toggle__knob { transform: translateX(100%); }
+
+#cycle-monthly:checked ~ .billing-toggle__inner .opt-month { color: #fff; }
+#cycle-yearly:checked  ~ .billing-toggle__inner .opt-year  { color: #fff; }
+
+/* Keyboard focus */
+#cycle-monthly:focus-visible + #cycle-yearly + .billing-toggle__inner,
+#cycle-yearly:focus-visible  ~ .billing-toggle__inner {
+  outline: none;
+  box-shadow:
+    0 1px 8px rgba(0,0,0,.08),
+    0 0 0 4px color-mix(in oklab, var(--toggle-accent) 25%, transparent);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .billing-toggle__option,
+  .billing-toggle__knob { transition: none !important; }
+}
 
 
   

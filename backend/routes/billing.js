@@ -6,56 +6,52 @@ const PaymentMethod = require('../models/PaymentMethod');
 const Subscription = require('../models/Subscription');
 const User = require('../models/User');
 
-// In-memory plan catalog (could move to DB/config later)
+// ---------- Plan catalogue (GBP) ----------
+const GBP = 'GBP';
+const MONTHLY = { free: 0.00, basic: 3.99, professional: 6.99 };
+const round2 = (n) => Math.round(n * 100) / 100;
+// Yearly: Basic 10% off annualised, Professional 15% off annualised
+const YEARLY = {
+  free:         0.00,
+  basic:        round2(MONTHLY.basic * 12 * 0.90),
+  professional: round2(MONTHLY.professional * 12 * 0.85)
+};
+
+const FEATURES = {
+  free: [
+    '1-month full-feature trial',
+    'After trial: document vault (up to 10 files)',
+    'Manual uploads & basic reminders',
+    'One portfolio, basic dashboards',
+    'Email support (48h)'
+  ],
+  basic: [
+    'TrueLayer bank integration',
+    'Automated transaction sync & categorisation',
+    'Financial analytics & Biggest Costs',
+    'Deadline nudges & document reminders',
+    'CSV import for brokers/accounts',
+    'Document vault (standard)',
+    'Priority support (24h)'
+  ],
+  professional: [
+    'Everything in Basic',
+    'All product features & advanced dashboards',
+    'Self Assessment prep helper',
+    'Equity/CGT engine & disposal planner',
+    'Gifts & IHT log with timelines',
+    'Scenario Lab & multi-portfolio',
+    'Document Vault (advanced OCR & stale flags)',
+    'Priority support (same day)'
+  ]
+};
+
 const PLANS = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: 0,
-    currency: 'USD',
-    badge: '1-month Basic trial included',
-    features: [
-      'Get started with core dashboard',
-      'Upload key documents (limited)',
-      'Basic insights & reminders',
-      'Email support (48h)',
-      '1-month Basic features trial'
-    ]
-  },
-  {
-    id: 'basic',
-    name: 'Basic',
-    price: 6.99,
-    currency: 'USD',
-    badge: 'Best for everyday finances',
-    features: [
-      'Open Banking connection (bank feeds)',
-      'Upload statements from investments',
-      'Spending analytics & biggest expenses',
-      'Income, tax paid, savings & net-worth tracking',
-      'Document Vault (standard)',
-      'Priority support (24h)'
-    ]
-  },
-  {
-    id: 'premium',
-    name: 'Premium',
-    price: 9.99,
-    currency: 'USD',
-    badge: 'Full accounting toolkit',
-    features: [
-      'Everything in Basic',
-      'Self Assessment preparation helper',
-      'Equity/CGT engine & disposal planner',
-      'Gifts & IHT log with timelines',
-      'Smart tasks & deadline nudges',
-      'Document Vault (advanced, OCR & stale flags)',
-      'Priority support (same day)'
-    ]
-  }
+  { id: 'free', name: 'Free', priceMonthly: MONTHLY.free, priceYearly: YEARLY.free, currency: GBP, badge: '1-month full trial', features: FEATURES.free },
+  { id: 'basic', name: 'Basic', priceMonthly: MONTHLY.basic, priceYearly: YEARLY.basic, currency: GBP, badge: 'Great for everyday finance', features: FEATURES.basic },
+  { id: 'professional', name: 'Professional', priceMonthly: MONTHLY.professional, priceYearly: YEARLY.professional, currency: GBP, badge: 'All features', features: FEATURES.professional }
 ];
 
-// Helpers
 function brandFromNumber(num) {
   const s = String(num || '');
   if (/^4\d{6,}$/.test(s)) return 'Visa';
@@ -65,56 +61,72 @@ function brandFromNumber(num) {
   return 'Card';
 }
 
-// GET /api/billing/plans
+function findPlanDef(id) { return PLANS.find(p => p.id === id); }
+
+// --- helper: infer interval for legacy subs missing it (by price match)
+function inferInterval(sub) {
+  if (!sub) return 'monthly';
+  if (sub.interval) return sub.interval;
+  const def = findPlanDef(sub.plan);
+  if (!def) return 'monthly';
+  const p = Number(sub.price || 0);
+  const close = (a,b) => Math.abs(Number(a)-Number(b)) < 0.01;
+  if (close(p, def.priceYearly)) return 'yearly';
+  if (close(p, def.priceMonthly)) return 'monthly';
+  return 'monthly';
+}
+
+// ---------- Plans (returns current plan + cycle) ----------
 router.get('/plans', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   const current = (user?.licenseTier || 'free').toLowerCase();
-  res.json({ current, plans: PLANS });
+
+  // Use latest ACTIVE subscription to determine cycle
+  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
+    .sort({ startedAt: -1, createdAt: -1 })
+    .lean();
+
+  const currentCycle = inferInterval(sub);
+
+  return res.json({ current, currentCycle, plans: PLANS });
 });
 
-// GET /api/billing/payment-methods
+// ---------- Payment methods ----------
 router.get('/payment-methods', auth, async (req, res) => {
-  const items = await PaymentMethod.find({ userId: req.user.id }).sort({ isDefault: -1, createdAt: -1 }).lean();
+  const items = await PaymentMethod.find({ userId: req.user.id })
+    .sort({ isDefault: -1, createdAt: -1 })
+    .lean();
   res.json({ methods: items });
 });
 
-// POST /api/billing/payment-methods
 router.post('/payment-methods', auth, async (req, res) => {
-  // ⚠️ Demo mode: accept any details. DO NOT store PAN/CVC in production.
-  const { holder, cardNumber, expMonth, expYear, cvc } = req.body || {};
+  const { holder, cardNumber, expMonth, expYear } = req.body || {};
   if (!holder || !cardNumber || !expMonth || !expYear) {
     return res.status(400).json({ error: 'holder, cardNumber, expMonth, expYear are required' });
   }
   const last4 = String(cardNumber).slice(-4);
   const brand = brandFromNumber(cardNumber);
-
-  const existing = await PaymentMethod.find({ userId: req.user.id }).countDocuments();
+  const existing = await PaymentMethod.countDocuments({ userId: req.user.id });
   const pm = await PaymentMethod.create({
     userId: req.user.id,
-    holder,
-    brand,
-    last4,
+    holder, brand, last4,
     expMonth: Number(expMonth),
     expYear: Number(expYear),
     isDefault: existing === 0
   });
-
   res.status(201).json({ method: pm });
 });
 
-// PATCH /api/billing/payment-methods/:id/default
 router.patch('/payment-methods/:id/default', auth, async (req, res) => {
   const id = req.params.id;
   const method = await PaymentMethod.findOne({ _id: id, userId: req.user.id });
   if (!method) return res.status(404).json({ error: 'Payment method not found' });
-
   await PaymentMethod.updateMany({ userId: req.user.id }, { $set: { isDefault: false } });
   method.isDefault = true;
   await method.save();
   res.json({ ok: true });
 });
 
-// DELETE /api/billing/payment-methods/:id
 router.delete('/payment-methods/:id', auth, async (req, res) => {
   const id = req.params.id;
   const user = await User.findById(req.user.id).lean();
@@ -122,50 +134,55 @@ router.delete('/payment-methods/:id', auth, async (req, res) => {
   const target = methods.find(m => String(m._id) === String(id));
   if (!target) return res.status(404).json({ error: 'Payment method not found' });
 
-  // Enforce: cannot delete the last PM if user is on paid plan
   const onPaidPlan = (user?.licenseTier || 'free') !== 'free';
   if (onPaidPlan && methods.length === 1) {
-    return res.status(400).json({
-      error: 'Cannot delete your last payment method while on a paid plan. Please add another method or downgrade to Free.'
-    });
+    return res.status(400).json({ error: 'Deleting your last payment method will move you to the Free tier. Continue?' });
   }
 
   await PaymentMethod.deleteOne({ _id: target._id, userId: req.user.id });
-
-  // Ensure someone remains default
   if (target.isDefault) {
     const remaining = await PaymentMethod.findOne({ userId: req.user.id }).sort({ createdAt: 1 });
     if (remaining) { remaining.isDefault = true; await remaining.save(); }
   }
-
   res.json({ ok: true });
 });
 
-// GET /api/billing/subscription
+// ---------- Subscription ----------
 router.get('/subscription', auth, async (req, res) => {
-  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' }).sort({ createdAt: -1 });
+  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
+    .sort({ startedAt: -1, createdAt: -1 });
   const user = await User.findById(req.user.id);
+
   res.json({
     licenseTier: user?.licenseTier || 'free',
-    subscription: sub || null
+    subscription: sub ? {
+      id: sub._id,
+      plan: sub.plan,
+      price: sub.price,
+      currency: sub.currency,
+      status: sub.status,
+      interval: inferInterval(sub),
+      startedAt: sub.startedAt
+    } : null
   });
 });
 
-// POST /api/billing/subscribe
 router.post('/subscribe', auth, async (req, res) => {
-  const { plan, paymentMethodId } = req.body || {};
-  if (!['free','basic','premium'].includes(String(plan))) {
+  const { plan, paymentMethodId, interval, billingCycle } = req.body || {};
+  const planId = String(plan || '').toLowerCase();
+  if (!['free','basic','professional'].includes(planId)) {
     return res.status(400).json({ error: 'Invalid plan' });
   }
+  const chosen = String(interval || billingCycle || 'monthly').toLowerCase() === 'yearly' ? 'yearly' : 'monthly';
 
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const planDef = PLANS.find(p => p.id === plan);
-  if (!planDef) return res.status(400).json({ error: 'Plan not found' });
+  const def = findPlanDef(planId);
+  if (!def) return res.status(400).json({ error: 'Plan not found' });
 
-  // For paid plans, ensure a payment method exists
-  if (plan !== 'free') {
+  // Paid tiers must have a payment method
+  if (planId !== 'free') {
     let pm = null;
     if (paymentMethodId) {
       pm = await PaymentMethod.findOne({ _id: paymentMethodId, userId: req.user.id });
@@ -174,34 +191,42 @@ router.post('/subscribe', auth, async (req, res) => {
       pm = await PaymentMethod.findOne({ userId: req.user.id, isDefault: true });
       if (!pm) return res.status(400).json({ error: 'Add a payment method before subscribing' });
     }
-    // ⚠️ Demo: No actual charge. In production, call PSP (Stripe) to create subscription.
   }
 
-  // Cancel any active subscription and create a new one if not free
+  // Cancel previous active sub
   const active = await Subscription.findOne({ userId: req.user.id, status: 'active' });
   if (active) { active.status = 'canceled'; await active.save(); }
 
-  if (plan === 'free') {
+  if (planId === 'free') {
     user.licenseTier = 'free';
     await user.save();
-    return res.json({ ok: true, licenseTier: user.licenseTier, subscription: null });
+    return res.json({ ok: true, licenseTier: 'free', subscription: null });
   }
 
+  const price = chosen === 'yearly' ? def.priceYearly : def.priceMonthly;
   const sub = await Subscription.create({
     userId: req.user.id,
-    plan,
-    price: planDef.price,
-    currency: planDef.currency,
+    plan: planId,
+    price,
+    currency: def.currency,
     status: 'active',
+    interval: chosen,            // ✅ persist interval
     startedAt: new Date()
   });
-  user.licenseTier = plan;
+
+  user.licenseTier = planId;
   await user.save();
 
-  res.json({ ok: true, licenseTier: user.licenseTier, subscription: sub });
+  res.json({
+    ok: true,
+    licenseTier: user.licenseTier,
+    subscription: {
+      id: sub._id, plan: sub.plan, price: sub.price, currency: sub.currency,
+      status: sub.status, interval: sub.interval, startedAt: sub.startedAt
+    }
+  });
 });
 
-// POST /api/billing/cancel  (downgrade to free)
 router.post('/cancel', auth, async (req, res) => {
   const active = await Subscription.findOne({ userId: req.user.id, status: 'active' });
   if (active) { active.status = 'canceled'; await active.save(); }
