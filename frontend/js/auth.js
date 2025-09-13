@@ -54,21 +54,10 @@
   }
 
   function enforce(opts = {}) {
-    const options = Object.assign({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: false }, opts);
     const path = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
-    const allow = new Set(options.allowAnonymous.map(s => s.toLowerCase()));
-
+    const allow = new Set((opts.allowAnonymous || ['login.html','signup.html','index.html']).map(s => s.toLowerCase()));
     const t = getToken();
     const authed = !!t && !isExpiredJWT(t);
-
-    // If already authed and we're on a public page with bounceIfAuthed, send to next/home
-    if (options.bounceIfAuthed && authed && allow.has(path)) {
-      const params = new URLSearchParams(location.search);
-      const next = params.get('next') || '/home.html';
-      location.replace(next);
-      return;
-    }
-    // If not authed and this page isn't allowed, bounce to login
     if (!allow.has(path) && !authed) {
       const next = encodeURIComponent(location.pathname + location.search);
       location.replace(`/login.html?next=${next}`);

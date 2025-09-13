@@ -1,6 +1,5 @@
 // backend/routes/auth.js
 const express = require('express');
-// Use bcryptjs (pure JS) to avoid native build issues on hosts
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
@@ -16,37 +15,33 @@ function issueToken(userId) {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: TOKEN_TTL });
 }
 function toPublicUser(u) {
-  if (!u) return null;
-  const plain = u.toObject ? u.toObject() : u;
-  delete plain.passwordHash;
-  delete plain.password; // legacy
-  // Normalise legacy ‘professional’ for UI continuity
-  if (plain.licenseTier === 'professional') plain.licenseTier = 'premium';
-  return plain;
+  const o = u.toObject();
+  delete o.passwordHash;
+  delete o.password; // tolerate any legacy field
+  if (o.licenseTier === 'professional') o.licenseTier = 'premium';
+  return o;
 }
 
 // POST /api/auth/signup
 router.post('/signup', async (req, res) => {
   try {
     const { firstName, lastName, username, email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Missing email or password' });
-
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
     const normalisedEmail = String(email).toLowerCase().trim();
-    const existingEmail = await User.findOne({ email: normalisedEmail });
-    if (existingEmail) return res.status(409).json({ error: 'Email already in use' });
-
-    if (username) {
-      const existingU = await User.findOne({ username: String(username).trim() });
-      if (existingU) return res.status(409).json({ error: 'Username already in use' });
+    if (await User.findOne({ email: normalisedEmail })) {
+      return res.status(409).json({ error: 'Email already in use' });
+    }
+    if (username && await User.findOne({ username })) {
+      return res.status(409).json({ error: 'Username already in use' });
     }
 
-    const hash = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({
-      firstName: firstName || '',
-      lastName: lastName || '',
-      username: username ? String(username).trim() : undefined,
+      firstName, lastName, username,
       email: normalisedEmail,
-      passwordHash: hash,
+      passwordHash: hashedPassword,          // <-- FIXED
     });
 
     const token = issueToken(user._id);
@@ -67,18 +62,21 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Please provide email/username and password' });
     }
 
-    const query = email
-      ? { email: String(email).toLowerCase().trim() }
-      : { username: String(username).trim() };
-
-    // Select both to tolerate legacy docs with `password`
-    const user = await User.findOne(query).select('+passwordHash password');
+    const query = email ? { email: String(email).toLowerCase().trim() } : { username: String(username).trim() };
+    const user = await User.findOne(query).select('+passwordHash password'); // <-- tolerate legacy
     if (!user) return res.status(400).json({ error: 'Invalid credentials' });
 
     const hash = user.passwordHash || user.password;
     if (!hash) return res.status(500).json({ error: 'User record missing password' });
 
-    const ok = await bcrypt.compare(password, hash);
+    // Defensive compare: treat malformed hashes as invalid credentials
+    let ok = false;
+    try {
+      ok = (typeof hash === 'string' && hash.startsWith('$2')) ? await bcrypt.compare(password, hash) : false;
+    } catch (cmpErr) {
+      console.error('bcrypt compare failed:', cmpErr && cmpErr.message);
+      ok = false;
+    }
     if (!ok) return res.status(400).json({ error: 'Invalid credentials' });
 
     const token = issueToken(user._id);
@@ -90,4 +88,3 @@ router.post('/login', async (req, res) => {
 });
 
 module.exports = router;
-
