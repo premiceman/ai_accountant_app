@@ -2,25 +2,25 @@
 const mongoose = require('mongoose');
 
 const UserSchema = new mongoose.Schema({
-  email:       { type: String, required: true, unique: true, index: true },
-  passwordHash:{ type: String, required: true },
-  firstName:   { type: String },
-  lastName:    { type: String },
+  email:        { type: String, required: true, unique: true, index: true, lowercase: true, trim: true },
+  username:     { type: String, trim: true, unique: true, sparse: true, index: true }, // optional but supported
+  passwordHash: { type: String, required: true },
 
-  // ✅ Allow both 'professional' and legacy 'premium'
+  firstName:    { type: String, trim: true },
+  lastName:     { type: String, trim: true },
+
+  // Accept both for backward compatibility; present 'premium' to the client
   licenseTier: {
     type: String,
-    enum: ['free', 'basic', 'professional', 'premium'],
+    enum: ['free', 'basic', 'premium', 'professional'],
     default: 'free',
     index: true
-  },
-
-  // any other fields you already have…
+  }
 }, { timestamps: true });
 
-/** Canonicalise legacy values on save (no behavior removal) */
+// Normalise legacy values on save: map 'professional' -> 'premium'
 UserSchema.pre('save', function(next) {
-  if (this.licenseTier === 'premium') this.licenseTier = 'professional';
+  if (this.licenseTier === 'professional') this.licenseTier = 'premium';
   next();
 });
 

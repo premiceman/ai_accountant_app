@@ -1,50 +1,33 @@
 // backend/routes/user.js
 const express = require('express');
-
-// Prefer native 'bcrypt' if present; otherwise fall back to 'bcryptjs'
-let bcrypt;
-try { bcrypt = require('bcrypt'); } catch { bcrypt = require('bcryptjs'); }
-
-const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const auth = require('../middleware/auth');
 const User = require('../models/User');
 
 const router = express.Router();
 
-function requireEnv() {
-  ['JWT_SECRET'].forEach((k) => {
-    if (!process.env[k]) throw new Error(`Missing required env: ${k}`);
-  });
-}
-
-// Minimal auth middleware: accepts JWT in cookie 'token' or 'Authorization: Bearer <jwt>'
-function auth(req, res, next) {
-  try {
-    requireEnv();
-    const header = req.get('authorization') || '';
-    const bearer = header.toLowerCase().startsWith('bearer ')
-      ? header.slice(7).trim()
-      : null;
-    const cookieToken = req.cookies && req.cookies.token;
-    const token = bearer || cookieToken;
-    if (!token) return res.status(401).json({ error: 'Unauthorised' });
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = { id: payload.id };
-    next();
-  } catch (e) {
-    return res.status(401).json({ error: 'Unauthorised' });
-  }
+function publicUser(u) {
+  if (!u) return null;
+  return {
+    id: u._id,
+    firstName: u.firstName || '',
+    lastName: u.lastName || '',
+    username: u.username || '',
+    email: u.email,
+    licenseTier: u.licenseTier === 'professional' ? 'premium' : (u.licenseTier || 'free'),
+    createdAt: u.createdAt,
+    updatedAt: u.updatedAt
+  };
 }
 
 // GET /api/user/me
 router.get('/me', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).lean();
-    if (!user) return res.status(404).json({ error: 'Not found' });
-    delete user.passwordHash;
-    delete user.password;
-    return res.json({ user });
+    const u = await User.findById(req.user.id).lean();
+    if (!u) return res.status(404).json({ error: 'Not found' });
+    return res.json({ user: publicUser(u) });
   } catch (e) {
-    console.error('Me error:', e);
+    console.error('GET /user/me error:', e);
     return res.status(500).json({ error: 'Server error' });
   }
 });
@@ -56,27 +39,25 @@ router.post('/change-password', auth, async (req, res) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ error: 'Missing password(s)' });
     }
-    const user = await User.findById(req.user.id).select('+passwordHash password');
-    if (!user) return res.status(404).json({ error: 'Not found' });
 
-    const hash = user.passwordHash || user.password;
-    if (!hash) return res.status(500).json({ error: 'User record missing password' });
+    const u = await User.findById(req.user.id).select('+passwordHash password');
+    if (!u) return res.status(404).json({ error: 'Not found' });
 
-    const ok = await bcrypt.compare(currentPassword, hash);
-    if (!ok) return res.status(400).json({ error: 'Incorrect current password' });
+    const currentHash = u.passwordHash || u.password;
+    if (!currentHash) return res.status(500).json({ error: 'User record missing password' });
 
-    const newHash = await bcrypt.hash(newPassword, 10);
-    user.passwordHash = newHash;
+    const ok = await bcrypt.compare(currentPassword, currentHash);
+    if (!ok) return res.status(400).json({ error: 'Current password is incorrect' });
 
-    // Save only modified fields; avoid validating unrelated legacy fields
-    await user.save({ validateModifiedOnly: true });
+    const hash = await bcrypt.hash(newPassword, 10);
+    u.passwordHash = hash;
 
-    return res.json({ ok: true });
+    await u.save({ validateModifiedOnly: true });
+    return res.json({ ok: true, message: 'Password updated' });
   } catch (e) {
-    console.error('Change-password error:', e);
+    console.error('POST /user/change-password error:', e);
     return res.status(500).json({ error: 'Server error' });
   }
 });
 
 module.exports = router;
-
