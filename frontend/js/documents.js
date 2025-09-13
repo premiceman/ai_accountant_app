@@ -1,5 +1,9 @@
 // frontend/js/documents.js
-let ALL_FILES = []; // cache of /api/docs to render lists & modals
+// Minimal fix: point to the actual backend route (/api/documents), not /api/docs.
+// Also fixes a small XHR status check bug.
+
+const DOCS_API = '/api/documents';
+let ALL_FILES = []; // cache of /api/documents to render lists & modals
 
 // -------------------------------- Init ------------------------------------
 (async function init() {
@@ -77,7 +81,7 @@ async function renderDocsTable() {
   // fetch all files (best-effort)
   ALL_FILES = [];
   try {
-    const r = await Auth.fetch('/api/docs');
+    const r = await Auth.fetch(DOCS_API);
     if (r.ok) {
       const j = await r.json();
       ALL_FILES = Array.isArray(j.files) ? j.files : [];
@@ -260,7 +264,7 @@ function openFilesModal(typeKey, label) {
 
 async function deleteFile(fileId, refreshModal=false, typeKey=null, label='') {
   try {
-    const res = await Auth.fetch(`/api/docs/${fileId}`, { method: 'DELETE' });
+    const res = await Auth.fetch(`${DOCS_API}/${fileId}`, { method: 'DELETE' });
     if (!res.ok) {
       const t = await res.text().catch(()=> '');
       alert('Delete failed: ' + t);
@@ -307,8 +311,7 @@ function triggerUpload(typeKey, btnEl) {
 
     // Build upload URL consistent with server
     const year = currentTaxYearStart(new Date());
-    const url = window.API?.url(`/api/docs?type=${encodeURIComponent(typeKey)}&year=${year}`)
-              || `/api/docs?type=${encodeURIComponent(typeKey)}&year=${year}`;
+    const url = `${DOCS_API}?type=${encodeURIComponent(typeKey)}&year=${year}`;
 
     try {
       await uploadWithProgressToUrl(url, file, (p) => setWrapProgress(p));
@@ -340,9 +343,8 @@ function uploadWithProgressToUrl(url, file, onProgress = () => {}) {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr < 400) {
-        resolve(JSON.parse(xhr.responseText || '{}'));
-      } else if (xhr.status >= 200 && xhr.status < 300) { // safety (correct check)
+      // FIX: check xhr.status, not xhr
+      if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText || '{}'));
       } else {
         reject(new Error(`Upload failed (${xhr.status})`));
@@ -404,7 +406,7 @@ function humanSize(bytes) {
   const mb = kb/1024; if (mb < 1024) return `${mb.toFixed(1)} MB`;
   const gb = mb/1024; return `${gb.toFixed(1)} GB`;
 }
-function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function setMsg(t){ const el=document.getElementById('docs-msg'); if(el) el.textContent=t||''; }
 function currentTaxYearStart(d){ const y=d.getFullYear(); const starts=new Date(y,3,6); return d>=starts?y:y-1; }
 function countFiles(typeKey){ return ALL_FILES.filter(f => (f.type||'other')===typeKey).length; }
