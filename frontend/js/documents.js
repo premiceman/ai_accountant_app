@@ -1,5 +1,5 @@
 // frontend/js/documents.js
-// Minimal fix: point to the actual backend route (/api/documents), not /api/docs.
+// Use the actual backend route (/api/documents), not /api/docs.
 // Also fixes a small XHR status check bug.
 
 const DOCS_API = '/api/documents';
@@ -78,7 +78,6 @@ const DOCS = [
 async function renderDocsTable() {
   setMsg('Loading…');
 
-  // fetch all files (best-effort)
   ALL_FILES = [];
   try {
     const r = await Auth.fetch(DOCS_API);
@@ -88,7 +87,6 @@ async function renderDocsTable() {
     }
   } catch {}
 
-  // latest per type
   const latestByType = {};
   for (const f of ALL_FILES) {
     const t = f.type || 'other';
@@ -97,11 +95,9 @@ async function renderDocsTable() {
     }
   }
 
-  // completion
   const cmp = computeCompletion(latestByType);
   updateProgress(cmp);
 
-  // table
   const tbody = document.getElementById('docs-table-body');
   tbody.innerHTML = '';
 
@@ -122,60 +118,30 @@ async function renderDocsTable() {
       <td class="small text-muted doc-where">${escapeHtml(d.where)}</td>
       <td class="text-end">
         <div class="btn-group" role="group" aria-label="Actions">
-          <!-- Upload -->
-          <button
-            class="btn btn-sm btn-primary btn-icon"
-            data-action="upload"
-            data-type="${d.key}"
-            data-bs-toggle="tooltip"
-            data-bs-title="Upload ${escapeHtml(d.label)}"
-            aria-label="Upload ${escapeHtml(d.label)}">
-            <i class="bi bi-upload"></i>
-            <span class="visually-hidden">Upload</span>
+          <button class="btn btn-sm btn-primary btn-icon" data-action="upload" data-type="${d.key}">
+            <i class="bi bi-upload"></i><span class="visually-hidden">Upload</span>
           </button>
-
-          <!-- View files -->
-          <button
-            class="btn btn-sm btn-outline-secondary btn-icon"
-            data-action="view"
-            data-type="${d.key}"
-            data-bs-toggle="tooltip"
-            data-bs-title="View files (${countFiles(d.key)})"
-            aria-label="View files for ${escapeHtml(d.label)}">
-            <i class="bi bi-eye"></i>
-            <span class="visually-hidden">View files</span>
+          <button class="btn btn-sm btn-outline-secondary btn-icon" data-action="view" data-type="${d.key}">
+            <i class="bi bi-eye"></i><span class="visually-hidden">View files</span>
           </button>
-
-          <!-- Delete latest -->
-          <button
-            class="btn btn-sm btn-outline-danger btn-icon"
-            data-action="delete-latest"
-            data-type="${d.key}"
-            ${latest ? '' : 'disabled'}
-            data-bs-toggle="tooltip"
-            data-bs-title="${latest ? 'Delete latest upload' : 'Nothing to delete'}"
-            aria-label="Delete latest for ${escapeHtml(d.label)}">
-            <i class="bi bi-trash3"></i>
-            <span class="visually-hidden">Delete latest</span>
+          <button class="btn btn-sm btn-outline-danger btn-icon" data-action="delete-latest" data-type="${d.key}" ${latest ? '' : 'disabled'}>
+            <i class="bi bi-trash3"></i><span class="visually-hidden">Delete latest</span>
           </button>
         </div>
       </td>
     `;
 
-    // actions
     const uploadBtn = tr.querySelector('[data-action="upload"]');
     const viewBtn   = tr.querySelector('[data-action="view"]');
     const delLatest = tr.querySelector('[data-action="delete-latest"]');
 
     uploadBtn.addEventListener('click', (e) => triggerUpload(d.key, e.currentTarget));
     viewBtn.addEventListener('click', () => openFilesModal(d.key, d.label));
-    if (delLatest) delLatest.addEventListener('click', async () => {
-      if (!latest) return;
+    if (delLatest && latest) delLatest.addEventListener('click', async () => {
       if (!confirm('Delete the latest uploaded file for this document?')) return;
       await deleteFile(latest.id);
     });
 
-    // enable tooltips for the three buttons
     [uploadBtn, viewBtn, delLatest].forEach(el => {
       if (el) new bootstrap.Tooltip(el, { container: 'body', placement: 'top' });
     });
@@ -190,21 +156,17 @@ async function renderDocsTable() {
 function computeCompletion(latestByType) {
   const required = DOCS.filter(d => d.required);
   const overall  = DOCS;
-
   const isUpToDate = (d) => {
     const last = latestByType[d.key]?.uploadDate ? new Date(latestByType[d.key].uploadDate) : null;
     return !!last && !isOverdue(d.cadence, last);
   };
-
   const reqDone = required.filter(isUpToDate).length;
   const allDone = overall.filter(isUpToDate).length;
-
   return {
     required: { done: reqDone, total: required.length, pct: pct(reqDone, required.length) },
     overall:  { done: allDone, total: overall.length,  pct: pct(allDone, overall.length) }
   };
 }
-
 function updateProgress(cmp) {
   const bar = document.getElementById('progress-bar');
   const cap = document.getElementById('progress-caption');
@@ -222,11 +184,9 @@ function openFilesModal(typeKey, label) {
   const list = ALL_FILES
     .filter(f => (f.type || 'other') === typeKey)
     .sort((a,b)=> new Date(b.uploadDate)-new Date(a.uploadDate));
-
   const body = document.getElementById('filesModalBody');
   const title = document.getElementById('filesModalLabel');
   title.textContent = `${label} — Files`;
-
   if (list.length === 0) {
     body.innerHTML = `<tr><td colspan="4" class="text-muted small">No files uploaded yet.</td></tr>`;
   } else {
@@ -238,13 +198,8 @@ function openFilesModal(typeKey, label) {
         <td>${f.uploadDate ? fmtDateTime(new Date(f.uploadDate)) : '—'}</td>
         <td>${humanSize(f.length)}</td>
         <td class="text-end">
-          <button class="btn btn-sm btn-outline-danger btn-icon"
-                  data-id="${f.id}"
-                  data-bs-toggle="tooltip"
-                  data-bs-title="Delete file"
-                  aria-label="Delete ${escapeHtml(f.filename || 'file')}">
-            <i class="bi bi-trash3"></i>
-            <span class="visually-hidden">Delete</span>
+          <button class="btn btn-sm btn-outline-danger btn-icon" data-id="${f.id}">
+            <i class="bi bi-trash3"></i><span class="visually-hidden">Delete</span>
           </button>
         </td>
       `;
@@ -257,7 +212,6 @@ function openFilesModal(typeKey, label) {
       body.appendChild(tr);
     }
   }
-
   const modal = new bootstrap.Modal(document.getElementById('filesModal'));
   modal.show();
 }
@@ -270,7 +224,6 @@ async function deleteFile(fileId, refreshModal=false, typeKey=null, label='') {
       alert('Delete failed: ' + t);
       return;
     }
-    // refresh cache + UI
     await renderDocsTable();
     if (refreshModal && typeKey) openFilesModal(typeKey, label);
   } catch (e) {
@@ -288,9 +241,7 @@ function triggerUpload(typeKey, btnEl) {
     const file = input.files?.[0];
     if (!file) return;
 
-    // Nearest table wrapper for thin top progress bar
     const tableWrap = btnEl?.closest('.table-responsive');
-
     const setWrapProgress = (pFloat) => {
       if (!tableWrap) return;
       tableWrap.classList.add('table-uploading');
@@ -306,10 +257,8 @@ function triggerUpload(typeKey, btnEl) {
       }, 350);
     };
 
-    // Button loading overlay
     if (btnEl) btnEl.classList.add('is-loading');
 
-    // Build upload URL consistent with server
     const year = currentTaxYearStart(new Date());
     const url = `${DOCS_API}?type=${encodeURIComponent(typeKey)}&year=${year}`;
 
@@ -321,14 +270,14 @@ function triggerUpload(typeKey, btnEl) {
     } finally {
       clearWrapProgress();
       if (btnEl) btnEl.classList.remove('is-loading');
-      input.value = ''; // reset ephemeral input
+      input.value = '';
     }
   };
 
   input.click();
 }
 
-// XHR helper: POST to a specific URL with real upload progress
+// POST helper with real upload progress
 function uploadWithProgressToUrl(url, file, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
@@ -343,7 +292,6 @@ function uploadWithProgressToUrl(url, file, onProgress = () => {}) {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
     xhr.onload = () => {
-      // FIX: check xhr.status, not xhr
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText || '{}'));
       } else {
@@ -361,7 +309,6 @@ function statusBadge(latest, overdue) {
   if (overdue) return '<span class="badge text-bg-warning">Overdue</span>';
   return '<span class="badge text-bg-success">Up to date</span>';
 }
-
 function isOverdue(cadence, last) {
   if (cadence?.adhoc) return false;
   const now = new Date();
@@ -379,7 +326,6 @@ function isOverdue(cadence, last) {
   const next = new Date(last); next.setMonth(next.getMonth() + 12);
   return now > next;
 }
-
 function dueLabel(cadence, last) {
   if (cadence?.adhoc) return 'As needed';
   const now = new Date();
@@ -397,7 +343,6 @@ function dueLabel(cadence, last) {
   const next = new Date(last); next.setMonth(next.getMonth() + 12);
   return (now > next) ? `Overdue (was due ${next.toLocaleDateString()})` : `Due ${next.toLocaleDateString()}`;
 }
-
 function fmtDateTime(d) { try { return d.toLocaleString(); } catch { return '—'; } }
 function humanSize(bytes) {
   const b = Number(bytes||0);

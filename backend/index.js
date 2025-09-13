@@ -13,7 +13,14 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 // ---- Routers (mount only if found) ----
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
-const docsRouter    = safeRequire('./src/routes/documents.routes')  || safeRequire('./routes/documents.routes');
+
+// IMPORTANT: try both documents.routes and docs.routes so either filename works
+const docsRouter =
+  safeRequire('./src/routes/documents.routes')  ||
+  safeRequire('./routes/documents.routes')      ||
+  safeRequire('./src/routes/docs.routes')       ||
+  safeRequire('./routes/docs.routes');
+
 const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequire('./routes/events.routes');
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
@@ -27,6 +34,8 @@ const DATA_DIR     = path.join(__dirname, '../data');
 
 // ---- Middleware ----
 app.use(morgan('combined'));
+
+// Keep your existing CORS. Same-origin (Render) won’t hit CORS anyway.
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
@@ -52,7 +61,11 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 // ---- API mounts (once each) ----
 mount('/api/auth', authRouter, 'auth');
 mount('/api/user', userRouter, 'user');
+
+// Mount the same docs router at BOTH paths so either client URL works
 mount('/api/docs', docsRouter, 'documents');
+mount('/api/documents', docsRouter, 'documents (alias)');
+
 mount('/api/events', eventsRouter, 'events');
 mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
