@@ -52,6 +52,13 @@ const PLANS = [
   { id: 'professional', name: 'Professional', priceMonthly: MONTHLY.professional, priceYearly: YEARLY.professional, currency: GBP, badge: 'All features', features: FEATURES.professional }
 ];
 
+// --- NEW: canonicalize legacy 'premium' → 'professional'
+function canonicalPlanId(id) {
+  const v = String(id || '').toLowerCase();
+  if (v === 'premium') return 'professional';
+  return v;
+}
+
 function brandFromNumber(num) {
   const s = String(num || '');
   if (/^4\d{6,}$/.test(s)) return 'Visa';
@@ -61,13 +68,18 @@ function brandFromNumber(num) {
   return 'Card';
 }
 
-function findPlanDef(id) { return PLANS.find(p => p.id === id); }
+// UPDATED: use canonical id when looking up plan definition
+function findPlanDef(id) {
+  const canon = canonicalPlanId(id);
+  return PLANS.find(p => p.id === canon);
+}
 
 // --- helper: infer interval for legacy subs missing it (by price match)
 function inferInterval(sub) {
   if (!sub) return 'monthly';
   if (sub.interval) return sub.interval;
-  const def = findPlanDef(sub.plan);
+  // UPDATED: canonicalize sub.plan before lookup
+  const def = findPlanDef(canonicalPlanId(sub.plan));
   if (!def) return 'monthly';
   const p = Number(sub.price || 0);
   const close = (a,b) => Math.abs(Number(a)-Number(b)) < 0.01;
@@ -79,7 +91,8 @@ function inferInterval(sub) {
 // ---------- Plans (returns current plan + cycle) ----------
 router.get('/plans', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
-  const current = (user?.licenseTier || 'free').toLowerCase();
+  // UPDATED: canonicalize licenseTier for legacy 'premium' values
+  const current = canonicalPlanId(user?.licenseTier || 'free');
 
   // Use latest ACTIVE subscription to determine cycle
   const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
@@ -134,7 +147,7 @@ router.delete('/payment-methods/:id', auth, async (req, res) => {
   const target = methods.find(m => String(m._id) === String(id));
   if (!target) return res.status(404).json({ error: 'Payment method not found' });
 
-  const onPaidPlan = (user?.licenseTier || 'free') !== 'free';
+  const onPaidPlan = (canonicalPlanId(user?.licenseTier || 'free') !== 'free'); // UPDATED: canonicalize
   if (onPaidPlan && methods.length === 1) {
     return res.status(400).json({ error: 'Deleting your last payment method will move you to the Free tier. Continue?' });
   }
@@ -154,10 +167,12 @@ router.get('/subscription', auth, async (req, res) => {
   const user = await User.findById(req.user.id);
 
   res.json({
-    licenseTier: user?.licenseTier || 'free',
+    // UPDATED: canonicalize licenseTier in response
+    licenseTier: canonicalPlanId(user?.licenseTier || 'free'),
     subscription: sub ? {
       id: sub._id,
-      plan: sub.plan,
+      // UPDATED: canonicalize plan in response
+      plan: canonicalPlanId(sub.plan),
       price: sub.price,
       currency: sub.currency,
       status: sub.status,
@@ -169,7 +184,8 @@ router.get('/subscription', auth, async (req, res) => {
 
 router.post('/subscribe', auth, async (req, res) => {
   const { plan, paymentMethodId, interval, billingCycle } = req.body || {};
-  const planId = String(plan || '').toLowerCase();
+  // UPDATED: canonicalize incoming plan id (maps 'premium' -> 'professional')
+  const planId = canonicalPlanId(plan);
   if (!['free','basic','professional'].includes(planId)) {
     return res.status(400).json({ error: 'Invalid plan' });
   }
@@ -206,15 +222,15 @@ router.post('/subscribe', auth, async (req, res) => {
   const price = chosen === 'yearly' ? def.priceYearly : def.priceMonthly;
   const sub = await Subscription.create({
     userId: req.user.id,
-    plan: planId,
+    plan: planId,            // ✅ store canonical id
     price,
     currency: def.currency,
     status: 'active',
-    interval: chosen,            // ✅ persist interval
+    interval: chosen,        // ✅ persist interval
     startedAt: new Date()
   });
 
-  user.licenseTier = planId;
+  user.licenseTier = planId; // ✅ keep user record canonical too
   await user.save();
 
   res.json({

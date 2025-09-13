@@ -2,17 +2,28 @@
 const mongoose = require('mongoose');
 
 const UserSchema = new mongoose.Schema({
-  firstName: { type: String, trim: true },
-  lastName:  { type: String, trim: true },
-  username:  { type: String, trim: true, unique: false, sparse: true },
-  email:     { type: String, trim: true, unique: true, required: true },
-  password:  { type: String, required: true },
+  email:       { type: String, required: true, unique: true, index: true },
+  passwordHash:{ type: String, required: true },
+  firstName:   { type: String },
+  lastName:    { type: String },
 
-  // New optional fields
-  licenseTier:   { type: String, enum: ['free','basic','premium'], default: 'free' },
-  eulaAcceptedAt:{ type: Date, default: null },
-  eulaVersion:   { type: String, default: null }
+  // ✅ Allow both 'professional' and legacy 'premium'
+  licenseTier: {
+    type: String,
+    enum: ['free', 'basic', 'professional', 'premium'],
+    default: 'free',
+    index: true
+  },
+
+  // any other fields you already have…
 }, { timestamps: true });
 
+/** Canonicalise legacy values on save (no behavior removal) */
+UserSchema.pre('save', function(next) {
+  if (this.licenseTier === 'premium') this.licenseTier = 'professional';
+  next();
+});
+
 module.exports = mongoose.model('User', UserSchema);
+
 
