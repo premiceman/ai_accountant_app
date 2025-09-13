@@ -13,18 +13,13 @@ const MONTHLY = {
   basic:        3.99,
   professional: 6.99
 };
-
 function round2(n){ return Math.round(n * 100) / 100; }
-
 // Yearly prices: Basic 10% cheaper than 12 months, Professional 15% cheaper
 const YEARLY = {
   free:         0.00,
   basic:        round2(MONTHLY.basic * 12 * 0.90),
   professional: round2(MONTHLY.professional * 12 * 0.85),
 };
-
-// Keep a single source of truth you can export in responses
-const TABLE = { monthly: MONTHLY, yearly: YEARLY };
 
 const FEATURES = {
   free: [
@@ -85,52 +80,53 @@ const PLANS = [
   }
 ];
 
-// ---------- Helpers ----------
+// ---------- Helpers (ADD: normalize + id mapping) ----------
 function normalizeInterval(v) {
   const s = String(v || '').toLowerCase().trim();
-  if (['y', 'yr', 'year', 'yearly', 'annual', 'annually'].includes(s)) return 'yearly';
-  if (['m', 'mo', 'mon', 'month', 'monthly'].includes(s)) return 'monthly';
+  if (['y','yr','year','yearly','annual','annually'].includes(s)) return 'yearly';
+  if (['m','mo','mon','month','monthly'].includes(s)) return 'monthly';
   return 'monthly';
 }
 
-// Accept either 'premium' or 'professional' from the UI; internally we store 'professional'
-function inPlanSet(id) {
-  return ['free','basic','professional','premium'].includes(String(id || '').toLowerCase());
-}
+// UI uses 'professional'; DB schema allows 'premium' (not 'professional')
 function toInternalPlanId(id) {
+  const v = String(id || '').toLowerCase().trim();
+  if (v === 'professional') return 'premium';
+  return v;
+}
+// When sending data back to the UI, show the id it expects
+function toUiPlanId(id) {
   const v = String(id || '').toLowerCase().trim();
   if (v === 'premium') return 'professional';
   return v;
 }
 
-// Convenience: expose a prices object matching a given interval
-function pricesFor(interval) {
-  const i = normalizeInterval(interval);
-  return TABLE[i];
+function brandFromNumber(num) {
+  const s = String(num || '');
+  if (/^4\d{6,}$/.test(s)) return 'Visa';
+  if (/^5[1-5]\d{5,}$/.test(s)) return 'Mastercard';
+  if (/^3[47]\d{5,}$/.test(s)) return 'Amex';
+  if (/^6(?:011|5)\d{4,}$/.test(s)) return 'Discover';
+  return 'Card';
 }
 
 // ---------- Plans (returns current plan + cycle) ----------
 router.get('/plans', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
-  const current = (user?.licenseTier || 'free').toLowerCase();
+
+  // Map any stored 'premium' back to UI's 'professional'
+  const currentRaw = (user?.licenseTier || 'free').toLowerCase();
+  const current = toUiPlanId(currentRaw);
 
   // Read most recent active subscription to determine cycle
   let currentCycle = 'monthly';
-  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
+  const sub = await Subscription
+    .findOne({ userId: req.user.id, status: 'active' })
     .sort({ createdAt: -1 })
     .lean();
   if (sub) currentCycle = String(sub.interval || sub.billingInterval || 'monthly').toLowerCase();
 
-  // Optional: UI may request a preferred interval; we still return the same shape
-  const interval = normalizeInterval(req.query.interval);
-
-  res.json({
-    current,
-    currentCycle,
-    interval,           // harmless extra (doesn't break old clients)
-    prices: pricesFor(interval), // harmless extra (doesn't break old clients)
-    plans: PLANS
-  });
+  res.json({ current, currentCycle, plans: PLANS });
 });
 
 // ---------- Payment methods ----------
@@ -195,24 +191,16 @@ router.delete('/payment-methods/:id', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-function brandFromNumber(num) {
-  const s = String(num || '');
-  if (/^4\d{6,}$/.test(s)) return 'Visa';
-  if (/^5[1-5]\d{5,}$/.test(s)) return 'Mastercard';
-  if (/^3[47]\d{5,}$/.test(s)) return 'Amex';
-  if (/^6(?:011|5)\d{4,}$/.test(s)) return 'Discover';
-  return 'Card';
-}
-
 // ---------- Subscription ----------
 router.get('/subscription', auth, async (req, res) => {
   const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' }).sort({ createdAt: -1 });
   const user = await User.findById(req.user.id);
   res.json({
-    licenseTier: user?.licenseTier || 'free',
+    // Map stored 'premium' back to UI 'professional'
+    licenseTier: toUiPlanId(user?.licenseTier || 'free'),
     subscription: sub ? {
       id: sub._id,
-      plan: sub.plan,
+      plan: toUiPlanId(sub.plan), // map for UI
       price: sub.price,
       currency: sub.currency,
       status: sub.status,
@@ -224,22 +212,25 @@ router.get('/subscription', auth, async (req, res) => {
 
 router.post('/subscribe', auth, async (req, res) => {
   const { plan, paymentMethodId, interval, billingCycle } = req.body || {};
-  const planRaw  = String(plan || '').toLowerCase();
-  if (!inPlanSet(planRaw)) {
+  const planIdRaw = String(plan || '').toLowerCase();
+  if (!['free','basic','professional','premium'].includes(planIdRaw)) {
     return res.status(400).json({ error: 'Invalid plan' });
   }
-  const planId = toInternalPlanId(planRaw); // map premium -> professional
 
-  const chosen = normalizeInterval(interval || billingCycle); // accept 'year','annual','yr' etc.
+  // Convert UI id -> DB id (professional -> premium) to satisfy your Subscription enum
+  const planIdInternal = toInternalPlanId(planIdRaw);
+
+  // Accept common spellings for yearly/monthly
+  const chosen = normalizeInterval(interval || billingCycle);
 
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const def = PLANS.find(p => p.id === planId);
+  const def = PLANS.find(p => p.id === toUiPlanId(planIdInternal)); // find by UI id
   if (!def) return res.status(400).json({ error: 'Plan not found' });
 
   // Paid tiers must have a payment method
-  if (planId !== 'free') {
+  if (planIdInternal !== 'free') {
     let pm = null;
     if (paymentMethodId) {
       pm = await PaymentMethod.findOne({ _id: paymentMethodId, userId: req.user.id });
@@ -254,33 +245,38 @@ router.post('/subscribe', auth, async (req, res) => {
   const active = await Subscription.findOne({ userId: req.user.id, status: 'active' });
   if (active) { active.status = 'canceled'; await active.save(); }
 
-  if (planId === 'free') {
-    user.licenseTier = 'free';
+  if (planIdInternal === 'free') {
+    user.licenseTier = 'free'; // store internal id
     await user.save();
-    return res.json({ ok: true, licenseTier: 'free', subscription: null });
+    return res.json({ ok: true, licenseTier: toUiPlanId('free'), subscription: null });
   }
 
   const price = chosen === 'yearly' ? def.priceYearly : def.priceMonthly;
 
   const sub = await Subscription.create({
     userId: req.user.id,
-    plan: planId,
+    plan: planIdInternal,       // <-- write 'premium' (NOT 'professional')
     price,
     currency: def.currency,
     status: 'active',
-    interval: chosen,         // store the chosen interval
+    interval: chosen,
     startedAt: new Date()
   });
 
-  user.licenseTier = planId;
+  user.licenseTier = planIdInternal; // store 'premium' internally
   await user.save();
 
   res.json({
     ok: true,
-    licenseTier: user.licenseTier,
+    licenseTier: toUiPlanId(user.licenseTier), // send 'professional' back to UI
     subscription: {
-      id: sub._id, plan: sub.plan, price: sub.price, currency: sub.currency,
-      status: sub.status, interval: sub.interval, startedAt: sub.startedAt
+      id: sub._id,
+      plan: toUiPlanId(sub.plan), // send 'professional' back to UI
+      price: sub.price,
+      currency: sub.currency,
+      status: sub.status,
+      interval: sub.interval,
+      startedAt: sub.startedAt
     }
   });
 });
@@ -290,25 +286,6 @@ router.post('/cancel', auth, async (req, res) => {
   if (active) { active.status = 'canceled'; await active.save(); }
   await User.findByIdAndUpdate(req.user.id, { $set: { licenseTier: 'free' } });
   res.json({ ok: true, licenseTier: 'free' });
-});
-
-// ---------- Read-only helpers (don’t break existing clients) ----------
-// GET /api/billing/prices?interval=monthly|yearly|year|annual|...
-router.get('/prices', auth, (req, res) => {
-  const interval = normalizeInterval(req.query.interval);
-  res.json({ interval, prices: pricesFor(interval) });
-});
-
-// GET /api/billing/price?plan=premium|professional|basic|free&interval=...
-router.get('/price', auth, (req, res) => {
-  const interval = normalizeInterval(req.query.interval);
-  const planId = toInternalPlanId(req.query.plan);
-  const table = pricesFor(interval);
-  const amount = table?.[planId];
-  if (typeof amount !== 'number') {
-    return res.status(400).json({ error: `Unknown plan '${req.query.plan}' or interval '${req.query.interval || 'monthly'}'` });
-  }
-  res.json({ plan: req.query.plan, planInternal: planId, interval, amount });
 });
 
 module.exports = router;
