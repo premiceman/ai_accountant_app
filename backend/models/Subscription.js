@@ -1,14 +1,36 @@
 // backend/models/Subscription.js
 const mongoose = require('mongoose');
 
-const SubscriptionSchema = new mongoose.Schema({
-  userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, required: true },
-  plan:    { type: String, enum: ['free','basic','premium'], required: true },
-  price:   { type: Number, default: 0 },     // cents or currency units (we keep units for demo)
-  currency:{ type: String, default: 'USD' },
-  status:  { type: String, enum: ['active','canceled'], default: 'active' },
-  startedAt: { type: Date, default: () => new Date() },
-  currentPeriodEnd: { type: Date, default: null }
-}, { timestamps: true });
+const SubscriptionSchema = new mongoose.Schema(
+  {
+    userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, required: true },
+
+    // Plan stored in DB must match your enum (free/basic/premium).
+    // Your routes should already map UI 'professional' -> 'premium' before saving.
+    plan:    { type: String, enum: ['free','basic','premium'], required: true },
+
+    // Store the billing interval so 'yearly' doesn't get lost.
+    interval: { type: String, enum: ['monthly','yearly'], default: 'monthly', index: true },
+
+    price:   { type: Number, default: 0 },     // currency units (demo)
+    currency:{ type: String, default: 'USD' }, // routes set GBP explicitly; default kept for safety
+    status:  { type: String, enum: ['active','canceled'], default: 'active' },
+
+    startedAt: { type: Date, default: () => new Date() },
+    currentPeriodEnd: { type: Date, default: null }
+  },
+  {
+    timestamps: true,
+    // Expose the virtual below if anyone ever serializes the doc
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  }
+);
+
+// Back-compat alias: some code may look for `billingInterval`.
+// This ensures reads/writes to that name hit `interval`.
+SubscriptionSchema.virtual('billingInterval')
+  .get(function () { return this.interval; })
+  .set(function (v) { this.interval = String(v || '').toLowerCase().trim(); });
 
 module.exports = mongoose.model('Subscription', SubscriptionSchema);
