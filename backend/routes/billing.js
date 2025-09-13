@@ -8,13 +8,17 @@ const User = require('../models/User');
 
 // ---------- Plan catalogue (GBP) ----------
 const GBP = 'GBP';
-const MONTHLY = { free: 0.00, basic: 3.99, professional: 6.99 };
-const round2 = (n) => Math.round(n * 100) / 100;
-// Yearly: Basic 10% off annualised, Professional 15% off annualised
+const MONTHLY = {
+  free:         0.00,
+  basic:        3.99,
+  professional: 6.99
+};
+function round2(n){ return Math.round(n * 100) / 100; }
+// Yearly prices: Basic 10% cheaper than 12 months, Professional 15% cheaper
 const YEARLY = {
   free:         0.00,
   basic:        round2(MONTHLY.basic * 12 * 0.90),
-  professional: round2(MONTHLY.professional * 12 * 0.85)
+  professional: round2(MONTHLY.professional * 12 * 0.85),
 };
 
 const FEATURES = {
@@ -47,17 +51,34 @@ const FEATURES = {
 };
 
 const PLANS = [
-  { id: 'free', name: 'Free', priceMonthly: MONTHLY.free, priceYearly: YEARLY.free, currency: GBP, badge: '1-month full trial', features: FEATURES.free },
-  { id: 'basic', name: 'Basic', priceMonthly: MONTHLY.basic, priceYearly: YEARLY.basic, currency: GBP, badge: 'Great for everyday finance', features: FEATURES.basic },
-  { id: 'professional', name: 'Professional', priceMonthly: MONTHLY.professional, priceYearly: YEARLY.professional, currency: GBP, badge: 'All features', features: FEATURES.professional }
+  {
+    id: 'free',
+    name: 'Free',
+    priceMonthly: MONTHLY.free,
+    priceYearly: YEARLY.free,
+    currency: GBP,
+    badge: '1-month full trial',
+    features: FEATURES.free
+  },
+  {
+    id: 'basic',
+    name: 'Basic',
+    priceMonthly: MONTHLY.basic,
+    priceYearly: YEARLY.basic,
+    currency: GBP,
+    badge: 'Great for everyday finance',
+    features: FEATURES.basic
+  },
+  {
+    id: 'professional',
+    name: 'Professional',
+    priceMonthly: MONTHLY.professional,
+    priceYearly: YEARLY.professional,
+    currency: GBP,
+    badge: 'All features',
+    features: FEATURES.professional
+  }
 ];
-
-// --- NEW: canonicalize legacy 'premium' → 'professional'
-function canonicalPlanId(id) {
-  const v = String(id || '').toLowerCase();
-  if (v === 'premium') return 'professional';
-  return v;
-}
 
 function brandFromNumber(num) {
   const s = String(num || '');
@@ -68,40 +89,19 @@ function brandFromNumber(num) {
   return 'Card';
 }
 
-// UPDATED: use canonical id when looking up plan definition
-function findPlanDef(id) {
-  const canon = canonicalPlanId(id);
-  return PLANS.find(p => p.id === canon);
-}
-
-// --- helper: infer interval for legacy subs missing it (by price match)
-function inferInterval(sub) {
-  if (!sub) return 'monthly';
-  if (sub.interval) return sub.interval;
-  // UPDATED: canonicalize sub.plan before lookup
-  const def = findPlanDef(canonicalPlanId(sub.plan));
-  if (!def) return 'monthly';
-  const p = Number(sub.price || 0);
-  const close = (a,b) => Math.abs(Number(a)-Number(b)) < 0.01;
-  if (close(p, def.priceYearly)) return 'yearly';
-  if (close(p, def.priceMonthly)) return 'monthly';
-  return 'monthly';
-}
-
 // ---------- Plans (returns current plan + cycle) ----------
 router.get('/plans', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
-  // UPDATED: canonicalize licenseTier for legacy 'premium' values
-  const current = canonicalPlanId(user?.licenseTier || 'free');
+  const current = (user?.licenseTier || 'free').toLowerCase();
 
-  // Use latest ACTIVE subscription to determine cycle
+  // Read most recent active subscription to determine cycle
+  let currentCycle = 'monthly';
   const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
-    .sort({ startedAt: -1, createdAt: -1 })
+    .sort({ createdAt: -1 })
     .lean();
+  if (sub) currentCycle = String(sub.interval || sub.billingInterval || 'monthly').toLowerCase();
 
-  const currentCycle = inferInterval(sub);
-
-  return res.json({ current, currentCycle, plans: PLANS });
+  res.json({ current, currentCycle, plans: PLANS });
 });
 
 // ---------- Payment methods ----------
@@ -113,12 +113,14 @@ router.get('/payment-methods', auth, async (req, res) => {
 });
 
 router.post('/payment-methods', auth, async (req, res) => {
+  // Demo only – do not store real PAN/CVC in production.
   const { holder, cardNumber, expMonth, expYear } = req.body || {};
   if (!holder || !cardNumber || !expMonth || !expYear) {
     return res.status(400).json({ error: 'holder, cardNumber, expMonth, expYear are required' });
   }
   const last4 = String(cardNumber).slice(-4);
   const brand = brandFromNumber(cardNumber);
+
   const existing = await PaymentMethod.countDocuments({ userId: req.user.id });
   const pm = await PaymentMethod.create({
     userId: req.user.id,
@@ -134,6 +136,7 @@ router.patch('/payment-methods/:id/default', auth, async (req, res) => {
   const id = req.params.id;
   const method = await PaymentMethod.findOne({ _id: id, userId: req.user.id });
   if (!method) return res.status(404).json({ error: 'Payment method not found' });
+
   await PaymentMethod.updateMany({ userId: req.user.id }, { $set: { isDefault: false } });
   method.isDefault = true;
   await method.save();
@@ -147,12 +150,15 @@ router.delete('/payment-methods/:id', auth, async (req, res) => {
   const target = methods.find(m => String(m._id) === String(id));
   if (!target) return res.status(404).json({ error: 'Payment method not found' });
 
-  const onPaidPlan = (canonicalPlanId(user?.licenseTier || 'free') !== 'free'); // UPDATED: canonicalize
+  const onPaidPlan = (user?.licenseTier || 'free') !== 'free';
   if (onPaidPlan && methods.length === 1) {
-    return res.status(400).json({ error: 'Deleting your last payment method will move you to the Free tier. Continue?' });
+    return res.status(400).json({
+      error: 'Deleting your last payment method will move you to the Free tier. Continue?'
+    });
   }
 
   await PaymentMethod.deleteOne({ _id: target._id, userId: req.user.id });
+
   if (target.isDefault) {
     const remaining = await PaymentMethod.findOne({ userId: req.user.id }).sort({ createdAt: 1 });
     if (remaining) { remaining.isDefault = true; await remaining.save(); }
@@ -162,21 +168,17 @@ router.delete('/payment-methods/:id', auth, async (req, res) => {
 
 // ---------- Subscription ----------
 router.get('/subscription', auth, async (req, res) => {
-  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
-    .sort({ startedAt: -1, createdAt: -1 });
+  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' }).sort({ createdAt: -1 });
   const user = await User.findById(req.user.id);
-
   res.json({
-    // UPDATED: canonicalize licenseTier in response
-    licenseTier: canonicalPlanId(user?.licenseTier || 'free'),
+    licenseTier: user?.licenseTier || 'free',
     subscription: sub ? {
       id: sub._id,
-      // UPDATED: canonicalize plan in response
-      plan: canonicalPlanId(sub.plan),
+      plan: sub.plan,
       price: sub.price,
       currency: sub.currency,
       status: sub.status,
-      interval: inferInterval(sub),
+      interval: sub.interval || sub.billingInterval || 'monthly',
       startedAt: sub.startedAt
     } : null
   });
@@ -184,8 +186,7 @@ router.get('/subscription', auth, async (req, res) => {
 
 router.post('/subscribe', auth, async (req, res) => {
   const { plan, paymentMethodId, interval, billingCycle } = req.body || {};
-  // UPDATED: canonicalize incoming plan id (maps 'premium' -> 'professional')
-  const planId = canonicalPlanId(plan);
+  const planId = String(plan || '').toLowerCase();
   if (!['free','basic','professional'].includes(planId)) {
     return res.status(400).json({ error: 'Invalid plan' });
   }
@@ -194,7 +195,7 @@ router.post('/subscribe', auth, async (req, res) => {
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const def = findPlanDef(planId);
+  const def = PLANS.find(p => p.id === planId);
   if (!def) return res.status(400).json({ error: 'Plan not found' });
 
   // Paid tiers must have a payment method
@@ -220,17 +221,18 @@ router.post('/subscribe', auth, async (req, res) => {
   }
 
   const price = chosen === 'yearly' ? def.priceYearly : def.priceMonthly;
+
   const sub = await Subscription.create({
     userId: req.user.id,
-    plan: planId,            // ✅ store canonical id
+    plan: planId,
     price,
     currency: def.currency,
     status: 'active',
-    interval: chosen,        // ✅ persist interval
+    interval: chosen,         // store the chosen interval
     startedAt: new Date()
   });
 
-  user.licenseTier = planId; // ✅ keep user record canonical too
+  user.licenseTier = planId;
   await user.save();
 
   res.json({

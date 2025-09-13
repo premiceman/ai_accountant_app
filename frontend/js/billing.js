@@ -52,18 +52,6 @@ function wireCycleToggle() {
   }
 }
 
-/* keep the toggle in sync with server-reported cycle */
-function syncToggleToCurrentCycle() {
-  const m = $id('cycle-monthly'), y = $id('cycle-yearly');
-  if (CURRENT_CYCLE === 'yearly') {
-    if (y && !y.checked) y.checked = true;
-    CYCLE = 'yearly';
-  } else {
-    if (m && !m.checked) m.checked = true;
-    CYCLE = 'monthly';
-  }
-}
-
 /* ------------------------------ plans ----------------------------- */
 async function loadPlans() {
   try {
@@ -74,7 +62,6 @@ async function loadPlans() {
     CURRENT_PLAN  = (j.current || 'free').toLowerCase();
     CURRENT_CYCLE = (j.currentCycle || 'monthly').toLowerCase();
     PLANS = Array.isArray(j.plans) ? j.plans : [];
-    syncToggleToCurrentCycle();   // 👈 reflect server state in the UI
     renderPlans();
   } catch (err) {
     console.error('[billing] loadPlans error', err);
@@ -101,6 +88,7 @@ function renderPlans() {
     const per = CYCLE === 'yearly' ? '/yr' : '/mo';
     const recommended = (CYCLE === 'yearly' && p.id === 'professional');
 
+    // Button label/disabled logic:
     let btnDisabled = false;
     let btnLabel = '';
     if (isCurrent) {
@@ -148,6 +136,7 @@ function renderPlans() {
 
 /* ------------------------- select / subscribe ------------------------- */
 async function onSelectPlan(planId) {
+  // Button UX
   const btn = document.activeElement?.closest('button[data-plan]');
   const setBusy = (v) => { if (btn) { btn.disabled = !!v; btn.setAttribute('aria-busy', v ? 'true' : 'false'); } };
 
@@ -167,6 +156,7 @@ async function onSelectPlan(planId) {
       return;
     }
 
+    // Paid tiers: send desired interval
     setBusy(true);
     const resp = await Auth.fetch('/api/billing/subscribe', {
       method: 'POST',
@@ -182,7 +172,7 @@ async function onSelectPlan(planId) {
       if (form) form.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
-    await loadPlans();
+    await loadPlans(); // refresh current plan + cycle from server
     setMsg('Subscription updated.');
   } finally {
     setBusy(false);
