@@ -80,25 +80,12 @@ const PLANS = [
   }
 ];
 
-// ---------- Helpers (ADD: normalize + id mapping) ----------
+// ---------- Helpers (ADDED) ----------
 function normalizeInterval(v) {
-  const s = String(v || '').toLowerCase().trim();
-  if (['y','yr','year','yearly','annual','annually'].includes(s)) return 'yearly';
-  if (['m','mo','mon','month','monthly'].includes(s)) return 'monthly';
+  const s = String(v ?? '').toLowerCase().trim();
+  if (['yearly','year','annual','annually','yr','y'].includes(s)) return 'yearly';
+  if (['monthly','month','mon','mo','m'].includes(s)) return 'monthly';
   return 'monthly';
-}
-
-// UI uses 'professional'; DB schema allows 'premium' (not 'professional')
-function toInternalPlanId(id) {
-  const v = String(id || '').toLowerCase().trim();
-  if (v === 'professional') return 'premium';
-  return v;
-}
-// When sending data back to the UI, show the id it expects
-function toUiPlanId(id) {
-  const v = String(id || '').toLowerCase().trim();
-  if (v === 'premium') return 'professional';
-  return v;
 }
 
 function brandFromNumber(num) {
@@ -113,15 +100,11 @@ function brandFromNumber(num) {
 // ---------- Plans (returns current plan + cycle) ----------
 router.get('/plans', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
-
-  // Map any stored 'premium' back to UI's 'professional'
-  const currentRaw = (user?.licenseTier || 'free').toLowerCase();
-  const current = toUiPlanId(currentRaw);
+  const current = (user?.licenseTier || 'free').toLowerCase();
 
   // Read most recent active subscription to determine cycle
   let currentCycle = 'monthly';
-  const sub = await Subscription
-    .findOne({ userId: req.user.id, status: 'active' })
+  const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' })
     .sort({ createdAt: -1 })
     .lean();
   if (sub) currentCycle = String(sub.interval || sub.billingInterval || 'monthly').toLowerCase();
@@ -196,11 +179,10 @@ router.get('/subscription', auth, async (req, res) => {
   const sub = await Subscription.findOne({ userId: req.user.id, status: 'active' }).sort({ createdAt: -1 });
   const user = await User.findById(req.user.id);
   res.json({
-    // Map stored 'premium' back to UI 'professional'
-    licenseTier: toUiPlanId(user?.licenseTier || 'free'),
+    licenseTier: user?.licenseTier || 'free',
     subscription: sub ? {
       id: sub._id,
-      plan: toUiPlanId(sub.plan), // map for UI
+      plan: sub.plan,
       price: sub.price,
       currency: sub.currency,
       status: sub.status,
@@ -212,25 +194,22 @@ router.get('/subscription', auth, async (req, res) => {
 
 router.post('/subscribe', auth, async (req, res) => {
   const { plan, paymentMethodId, interval, billingCycle } = req.body || {};
-  const planIdRaw = String(plan || '').toLowerCase();
-  if (!['free','basic','professional','premium'].includes(planIdRaw)) {
+  const planId = String(plan || '').toLowerCase();
+  if (!['free','basic','professional'].includes(planId)) {
     return res.status(400).json({ error: 'Invalid plan' });
   }
 
-  // Convert UI id -> DB id (professional -> premium) to satisfy your Subscription enum
-  const planIdInternal = toInternalPlanId(planIdRaw);
-
-  // Accept common spellings for yearly/monthly
+  // *** CHANGED: normalize yearly/monthly synonyms instead of strict 'yearly' check
   const chosen = normalizeInterval(interval || billingCycle);
 
   const user = await User.findById(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const def = PLANS.find(p => p.id === toUiPlanId(planIdInternal)); // find by UI id
+  const def = PLANS.find(p => p.id === planId);
   if (!def) return res.status(400).json({ error: 'Plan not found' });
 
   // Paid tiers must have a payment method
-  if (planIdInternal !== 'free') {
+  if (planId !== 'free') {
     let pm = null;
     if (paymentMethodId) {
       pm = await PaymentMethod.findOne({ _id: paymentMethodId, userId: req.user.id });
@@ -245,38 +224,33 @@ router.post('/subscribe', auth, async (req, res) => {
   const active = await Subscription.findOne({ userId: req.user.id, status: 'active' });
   if (active) { active.status = 'canceled'; await active.save(); }
 
-  if (planIdInternal === 'free') {
-    user.licenseTier = 'free'; // store internal id
+  if (planId === 'free') {
+    user.licenseTier = 'free';
     await user.save();
-    return res.json({ ok: true, licenseTier: toUiPlanId('free'), subscription: null });
+    return res.json({ ok: true, licenseTier: 'free', subscription: null });
   }
 
   const price = chosen === 'yearly' ? def.priceYearly : def.priceMonthly;
 
   const sub = await Subscription.create({
     userId: req.user.id,
-    plan: planIdInternal,       // <-- write 'premium' (NOT 'professional')
+    plan: planId,
     price,
     currency: def.currency,
     status: 'active',
-    interval: chosen,
+    interval: chosen,         // store the chosen interval
     startedAt: new Date()
   });
 
-  user.licenseTier = planIdInternal; // store 'premium' internally
+  user.licenseTier = planId;
   await user.save();
 
   res.json({
     ok: true,
-    licenseTier: toUiPlanId(user.licenseTier), // send 'professional' back to UI
+    licenseTier: user.licenseTier,
     subscription: {
-      id: sub._id,
-      plan: toUiPlanId(sub.plan), // send 'professional' back to UI
-      price: sub.price,
-      currency: sub.currency,
-      status: sub.status,
-      interval: sub.interval,
-      startedAt: sub.startedAt
+      id: sub._id, plan: sub.plan, price: sub.price, currency: sub.currency,
+      status: sub.status, interval: sub.interval, startedAt: sub.startedAt
     }
   });
 });
