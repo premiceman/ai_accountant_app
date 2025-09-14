@@ -24,8 +24,8 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-// ---- AUTH GATE ----
-const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
+// ---- Strict Auth ----
+const { requireAuthStrict } = safeRequire('./middleware/strictAuth') || { requireAuthStrict: null };
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,39 +42,40 @@ app.use(express.json({ limit: '10mb' }));
 // ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/data', express.static(DATA_DIR)); // optional
-app.use(express.static(FRONTEND_DIR));      // serves your HTML/JS/CSS
-
-// ---- Mount helper ----
-function mount(prefix, router, name) {
-  if (!router) {
-    console.warn(`⚠️  Skipping ${name} router (module not found)`);
-    return;
-  }
-  app.use(prefix, router);
-  console.log(`✅ Mounted ${name} at ${prefix}`);
-}
+app.use(express.static(FRONTEND_DIR));
 
 // ---- Health ----
 app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// ---- API mounts ----
-mount('/api/auth', authRouter, 'auth');
-mount('/api/user', userRouter, 'user');
-
-// Protect docs endpoints with Unauthorized page/JSON
-if (requireAuthOrHtmlUnauthorized && docsRouter) {
-  app.use('/api/docs', requireAuthOrHtmlUnauthorized);
-  app.use('/api/documents', requireAuthOrHtmlUnauthorized);
+// Helper to mount protected routers
+function mountProtected(prefix, router, name) {
+  if (!router) {
+    console.warn(`⚠️  Skipping ${name} router (module not found)`);
+    return;
+  }
+  if (!requireAuthStrict) {
+    console.warn(`⚠️  Strict auth middleware missing; denying unauthenticated relies on router internals`);
+    app.use(prefix, router);
+  } else {
+    app.use(prefix, requireAuthStrict, router);
+  }
+  console.log(`✅ Mounted PROTECTED ${name} at ${prefix}`);
 }
-mount('/api/docs', docsRouter, 'documents');
-mount('/api/documents', docsRouter, 'documents (alias)');
 
-mount('/api/events', eventsRouter, 'events');
-mount('/api/summary', summaryRouter, 'summary');
-mount('/api/billing', billingRouter, 'billing');
+// ---- API mounts ----
+// Public:
+if (authRouter) { app.use('/api/auth', authRouter); console.log('✅ Mounted auth at /api/auth'); }
 
-// ---- Frontend landing (keep explicit root) ----
+// Protected (no guests, must be logged in):
+mountProtected('/api/user', userRouter, 'user');
+mountProtected('/api/docs', docsRouter, 'documents');
+mountProtected('/api/documents', docsRouter, 'documents (alias)');
+mountProtected('/api/events', eventsRouter, 'events');
+mountProtected('/api/summary', summaryRouter, 'summary');
+mountProtected('/api/billing', billingRouter, 'billing');
+
+// ---- Frontend landing ----
 app.get('/', (_req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
 
 // ---- API 404s (JSON) AFTER all API routes ----
@@ -82,13 +83,11 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // ---- Pretty 404 for non-API requests (HTML) ----
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api')) return next(); // already handled above
+  if (req.path.startsWith('/api')) return next();
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-
   const accept = (req.headers.accept || '').toLowerCase();
   const wantsHtml = accept.includes('text/html') || accept === '*/*' || accept === '';
   if (!wantsHtml) return res.status(404).type('text/plain').send('Not Found');
-
   res.status(404).sendFile(path.join(FRONTEND_DIR, '404.html'));
 });
 

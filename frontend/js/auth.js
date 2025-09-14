@@ -1,71 +1,54 @@
 // frontend/js/auth.js
-(function () {
-    const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
-    const USER_CACHE_KEY = 'me';
-  
-    function getToken() {
-      for (const k of STORAGE_KEYS) {
-        const v = localStorage.getItem(k) || sessionStorage.getItem(k);
-        if (v) return v;
+const Auth = (() => {
+  const TOKEN_KEY = 'auth_token';
+
+  function getToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
+  }
+
+  function setToken(token) {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {}
+  }
+
+  async function fetchWithAuth(input, init = {}) {
+    const headers = new Headers(init.headers || {});
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const res = await fetch(input, { ...init, headers, credentials: 'include' });
+
+    if (res.status === 401) {
+      // nuke any stale token and bounce to login
+      setToken('');
+      if (!location.pathname.endsWith('/login.html')) {
+        location.href = '/login.html';
       }
-      return null;
+      throw new Error('Unauthorized');
     }
-    function setToken(token, { session = false } = {}) {
-      clearTokens();
-      (session ? sessionStorage : localStorage).setItem('token', token || '');
+    return res;
+  }
+
+  async function requireAuth() {
+    const token = getToken();
+    if (!token) {
+      location.href = '/login.html';
+      return;
     }
-    function clearTokens() {
-      STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
-      STORAGE_KEYS.forEach(k => sessionStorage.removeItem(k));
-      try { localStorage.removeItem(USER_CACHE_KEY); } catch {}
+    // Optionally ping /api/user/me to ensure the token is valid
+    const res = await fetchWithAuth('/api/user/me');
+    if (!res.ok) {
+      location.href = '/login.html';
+      return;
     }
-  
-    const redirectTo = (p) => { location.href = p; };
-    const redirectToHome = () => redirectTo('./home.html');
-  
-    async function requireAuth() {
-      // tolerant: fetch user but don't hard-fail UI
-      const t = getToken();
-      try {
-        const res = await fetch(window.API.url('/api/user/me'), {
-          headers: t ? { Authorization: `Bearer ${t}` } : {},
-          cache: 'no-store'
-        });
-        const me = res.ok ? await res.json() : { firstName: 'Guest' };
-        window.__ME__ = me;
-        const h = document.querySelector('h1.page-title, h1');
-        if (h && !h.dataset.lockTitle) {
-          const name = (me?.firstName || '').trim();
-          if (name && !h.textContent.includes(name)) h.textContent = `${name} — ${h.textContent}`;
-        }
-        const g = document.getElementById('greeting-name');
-        if (g && me?.firstName) g.textContent = me.firstName;
-        return { token: t, me };
-      } catch {
-        return { token: t, me: { firstName: 'Guest' } };
-      }
-    }
-  
-    function fetchWithAuth(url, options = {}) {
-      const t = getToken();
-      const headers = Object.assign({}, options.headers || {}, t ? { Authorization: `Bearer ${t}` } : {});
-      return fetch(window.API.url(url), Object.assign({}, options, { headers }));
-    }
-  
-    function enforce() { /* optional: add redirects if you need */ }
-    function setBannerTitle(suffix) {
-      const name = (window.__ME__?.firstName || '').trim();
-      const title = name ? `${name} — ${suffix}` : suffix;
-      document.title = title;
-      const h = document.querySelector('h1.page-title, h1');
-      if (h && !h.dataset.lockTitle) h.textContent = title;
-      const g = document.getElementById('greeting-name');
-      if (g && name) g.textContent = name;
-    }
-  
-    window.Auth = {
-      getToken, setToken, clearTokens,
-      requireAuth, fetch: fetchWithAuth, enforce, setBannerTitle
-    };
-  })();
-  
+  }
+
+  function logout() {
+    setToken('');
+    // Optionally call your backend logout if you have one
+    location.href = '/login.html';
+  }
+
+  return { getToken, setToken, fetch: fetchWithAuth, requireAuth, logout };
+})();

@@ -2,10 +2,16 @@
 const express = require('express');
 const router = express.Router();
 
-// Minimal /api/user/me for dashboard greeting
+// GET /api/user/me
 router.get('/me', (req, res) => {
-  // If you already have auth, replace this with real user extraction
-  res.json({ id: 'demo', email: 'demo@example.com', firstName: 'Alex' });
+  if (!req.user || !req.user.id) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json({
+    id: req.user.id,
+    email: req.user.email,
+    role: req.user.role || 'user'
+  });
 });
 
 module.exports = router;
