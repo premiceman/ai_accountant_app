@@ -14,7 +14,7 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
 
-// IMPORTANT: try both documents.routes and docs.routes so either filename works
+// Try both filenames for documents router
 const docsRouter =
   safeRequire('./src/routes/documents.routes')  ||
   safeRequire('./routes/documents.routes')      ||
@@ -25,6 +25,9 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
+// ---- AUTH GATE (new) ----
+const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -34,8 +37,6 @@ const DATA_DIR     = path.join(__dirname, '../data');
 
 // ---- Middleware ----
 app.use(morgan('combined'));
-
-// Keep your existing CORS. Same-origin (Render) won’t hit CORS anyway.
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
@@ -62,7 +63,11 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 mount('/api/auth', authRouter, 'auth');
 mount('/api/user', userRouter, 'user');
 
-// Mount the same docs router at BOTH paths so either client URL works
+// ---- Protect documents API with gate (HTML 401 page for browsers, JSON 401 for API) ----
+if (requireAuthOrHtmlUnauthorized && docsRouter) {
+  app.use('/api/docs', requireAuthOrHtmlUnauthorized);
+  app.use('/api/documents', requireAuthOrHtmlUnauthorized);
+}
 mount('/api/docs', docsRouter, 'documents');
 mount('/api/documents', docsRouter, 'documents (alias)');
 
