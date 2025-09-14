@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Page Not Found — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <script src="/js/head-include.js"></script>
+  <link rel="preload" href="/css/styles.css" as="style">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    :root { --hero-h: clamp(540px, 80vh, 860px); }
+    body{ background: var(--bg-body); color: var(--fg); }
+    .hero{ min-height: var(--hero-h); display:grid; place-items:center; position:relative; overflow:hidden; }
+    .panel{ max-width: 820px; width:100%; padding: clamp(1.25rem, 2.5vw, 2rem); border:1px solid var(--bd-hairline);
+      background: var(--bg-surface); border-radius: 1.25rem; box-shadow: var(--shadow); text-align:center }
+    .eyebrow{ color: var(--fg-3); text-transform: uppercase; font-weight:600; letter-spacing:.12em }
+    h1{ font-size: clamp(1.9rem, 5vw, 2.8rem); line-height:1.1; margin:.35rem 0 .5rem }
+    p.lede{ color: var(--fg-2); max-width: 68ch; margin: 0 auto 1rem }
+    .actions{ display:flex; gap:.75rem; flex-wrap:wrap; justify-content:center; margin-top:1rem }
+    .scene{
+      position:absolute; inset:-10% -10% 0 -10%; pointer-events:none; z-index:-1;
+      background:
+        radial-gradient(1400px 700px at 15% 25%, color-mix(in oklab, var(--brand) 18%, transparent), transparent),
+        radial-gradient(1400px 700px at 85% 20%, color-mix(in oklab, var(--brand-hover) 18%, transparent), transparent),
+        radial-gradient(1400px 700px at 50% 80%, color-mix(in oklab, #7FDCCB 20%, transparent), transparent);
+      mask-image: radial-gradient(1200px 600px at 50% 45%, #000, transparent 70%);
+      opacity:.65;
+      transform: translateZ(0);
+    }
+    .big404{
+      font-weight: 800;
+      letter-spacing: .02em;
+      font-size: clamp(3.5rem, 12vw, 8rem);
+      line-height: .9;
+      margin: 0 0 .25rem;
+      background: linear-gradient(90deg, var(--brand), color-mix(in oklab, var(--brand-hover) 60%, var(--brand)));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .emoji{ font-size: 2.6rem; line-height:1; }
+    .grid{
+      margin-top: 1rem;
+      display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: .75rem;
+    }
+    .tip{ padding:.75rem 1rem; border:1px dashed var(--bd-subtle); border-radius:.75rem; color: var(--fg-2); text-align:left }
+    .tip strong{ color: var(--fg-1) }
+  </style>
+</head>
+<body>
+  <main class="hero container">
+    <div class="scene" aria-hidden="true"></div>
+    <div class="panel">
+      <div class="emoji" aria-hidden="true">🧭</div>
+      <div class="eyebrow">404 — Not Found</div>
+      <div class="big404">404</div>
+      <h1>We couldn’t find that page</h1>
+      <p class="lede">
+        The link might be broken or the page may have moved. You can head back home, or sign in to access your dashboard.
+      </p>
+
+      <div class="actions">
+        <a class="btn btn-primary btn-lg" href="/"><i class="bi bi-house-door me-1"></i>Home</a>
+        <a class="btn btn-outline btn-lg" href="/login.html"><i class="bi bi-box-arrow-in-right me-1"></i>Login</a>
+        <a class="btn btn-ghost btn-lg" href="/home.html"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
+      </div>
+
+      <div class="grid">
+        <div class="tip"><strong>Tip:</strong> Check the URL for typos or missing parts.</div>
+        <div class="tip"><strong>Docs:</strong> Uploads live inside the app after you sign in.</div>
+        <div class="tip"><strong>Need help?</strong> Use the Help link in the app’s sidebar.</div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -14,7 +14,6 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
 
-// Try both filenames for documents router
 const docsRouter =
   safeRequire('./src/routes/documents.routes')  ||
   safeRequire('./routes/documents.routes')      ||
@@ -25,7 +24,7 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-// ---- AUTH GATE (new) ----
+// ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
 
 const app = express();
@@ -43,7 +42,7 @@ app.use(express.json({ limit: '10mb' }));
 // ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/data', express.static(DATA_DIR)); // optional
-app.use(express.static(FRONTEND_DIR));
+app.use(express.static(FRONTEND_DIR));      // serves your HTML/JS/CSS
 
 // ---- Mount helper ----
 function mount(prefix, router, name) {
@@ -59,11 +58,11 @@ function mount(prefix, router, name) {
 app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// ---- API mounts (once each) ----
+// ---- API mounts ----
 mount('/api/auth', authRouter, 'auth');
 mount('/api/user', userRouter, 'user');
 
-// ---- Protect documents API with gate (HTML 401 page for browsers, JSON 401 for API) ----
+// Protect docs endpoints with Unauthorized page/JSON
 if (requireAuthOrHtmlUnauthorized && docsRouter) {
   app.use('/api/docs', requireAuthOrHtmlUnauthorized);
   app.use('/api/documents', requireAuthOrHtmlUnauthorized);
@@ -75,11 +74,23 @@ mount('/api/events', eventsRouter, 'events');
 mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 
-// ---- Frontend fallback ----
+// ---- Frontend landing (keep explicit root) ----
 app.get('/', (_req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
 
-// ---- API 404s AFTER routes ----
+// ---- API 404s (JSON) AFTER all API routes ----
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+
+// ---- Pretty 404 for non-API requests (HTML) ----
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) return next(); // already handled above
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+
+  const accept = (req.headers.accept || '').toLowerCase();
+  const wantsHtml = accept.includes('text/html') || accept === '*/*' || accept === '';
+  if (!wantsHtml) return res.status(404).type('text/plain').send('Not Found');
+
+  res.status(404).sendFile(path.join(FRONTEND_DIR, '404.html'));
+});
 
 // ---- Error handler ----
 app.use((err, _req, res, _next) => {
