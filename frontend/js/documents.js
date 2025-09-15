@@ -202,7 +202,7 @@ function openFilesModal(typeKey, label) {
 
       tr.innerHTML = `
         <td class="doc-filename" data-filename="${safeName}">
-          <a href="#" class="doc-filename-link" aria-label="Preview or download">${safeName}</a>
+        <a href="#" class="doc-filename-link" data-filename="${safeName}" aria-label="Preview or download">${safeName}</a>
         </td>
         <td>${f.uploadDate ? fmtDateTime(new Date(f.uploadDate)) : '—'}</td>
         <td>${humanSize(f.length)}</td>
