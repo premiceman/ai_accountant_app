@@ -3,19 +3,21 @@ const mongoose = require('mongoose');
 const crypto = require('crypto');
 
 function generateUid() {
-  // Compact, URL-safe id (e.g., "u_jf2k3p9m4q6")
   const rand = crypto.randomBytes(12).toString('base64url');
   return 'u_' + rand.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 }
 
 const UserSchema = new mongoose.Schema({
-  firstName: { type: String, trim: true },
-  lastName:  { type: String, trim: true },
-  username:  { type: String, trim: true, unique: false, sparse: true },
+  firstName: { type: String, trim: true, required: true },
+  lastName:  { type: String, trim: true, required: true },
+  username:  { type: String, trim: true }, // no unique index (we validate at app level)
   email:     { type: String, trim: true, unique: true, required: true },
   password:  { type: String, required: true },
 
-  // New: permanent unique identifier for cross-linking documents/events
+  // New: DOB (required)
+  dateOfBirth: { type: Date, required: true },
+
+  // Permanent cross-link id
   uid:       { type: String, unique: true, index: true, default: generateUid },
 
   // Existing optional fields
