@@ -224,10 +224,11 @@
 
   <script>
     // --- Config (adjust endpoints if your backend differs)
-    const LOGIN_ENDPOINT  = (window.__API_BASE || '') + '/auth/login';
-    const GOOGLE_OAUTH    = (window.__API_BASE || '') + '/auth/google';
-    const APPLE_OAUTH     = (window.__API_BASE || '') + '/auth/apple';
+    const LOGIN_ENDPOINT  = (window.__API_BASE || '') + '/api/auth/login';
+    const GOOGLE_OAUTH    = (window.__API_BASE || '') + '/api/auth/google';
+    const APPLE_OAUTH     = (window.__API_BASE || '') + '/api/auth/apple';
     const AFTER_LOGIN_URL = '/home.html';
+
 
     // --- Enhance: reveal on view
     const io = new IntersectionObserver((entries) => {
