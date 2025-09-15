@@ -1,32 +1,106 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- add to <head> of login.html/signup.html/home.html/profile.html -->
-  <script>window.__API_BASE='http://localhost:3000';</script>
+  <meta charset="utf-8">
+  <title>Sign in — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Theme + libs -->
+  <script>window.__API_BASE = window.__API_BASE || 'http://localhost:3000';</script>
   <script src="/js/head-include.js"></script>
+
+  <style>
+    /* Landing nav + brand */
+    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter: saturate(1.2) blur(8px) }
+    .landing-nav .btn{ padding:.55rem 1rem }
+    .brand-mark{ display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg) }
+    .brand-dot{ width:12px; height:12px; border-radius:50%; background: var(--brand); box-shadow: 0 0 24px color-mix(in oklab, var(--brand) 45%, transparent) }
+
+    /* Background mesh gradient (from landing) */
+    .login-hero{ min-height: 100vh; position: relative; display:grid; place-items:center; overflow:hidden; background: var(--bg-body); }
+    .parallax{ position:absolute; inset:0; z-index:1; pointer-events:none; transform-style: preserve-3d }
+    .layer{ position:absolute; inset:auto; will-change: transform; transition: transform 60ms linear }
+    .blob{
+      width: min(64vw, 900px); height: min(64vw, 900px); border-radius: 50%; filter: blur(60px); opacity:.5;
+      background: conic-gradient(from 200deg at 50% 50%, color-mix(in oklab, var(--brand) 35%, #9BE3D5), #B4EEE3, color-mix(in oklab, var(--brand) 60%, white));
+    }
+    .mesh{
+      position:absolute; inset:-10% -10% auto -10%; height: 70%;
+      background:
+        radial-gradient(1200px 600px at 20% 30%, color-mix(in oklab,var(--brand) 18%,transparent), transparent),
+        radial-gradient(1200px 600px at 80% 20%, color-mix(in oklab,var(--brand-hover) 18%,transparent), transparent),
+        radial-gradient(1200px 600px at 50% 80%, color-mix(in oklab,#7FDCCB 20%,transparent), transparent);
+      mask-image: radial-gradient(1200px 600px at 50% 40%, #000, transparent 70%);
+      opacity:.6;
+    }
+    .grid{
+      position:absolute; inset:0;
+      background-image:
+        linear-gradient(to right, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px);
+      background-size: 52px 52px; opacity:.18; mask-image: linear-gradient(to bottom, #000, transparent 75%);
+    }
+
+    /* Card polish */
+    .auth-card{ position:relative; z-index:2; width:min(520px, 92vw) }
+    .auth-card .form-control{ border-color: var(--bd-hairline) }
+    .auth-card .btn-primary{ box-shadow: 0 4px 14px var(--shadow) }
+  </style>
 </head>
-<body class="bg-light">
-  <main class="container py-5" style="max-width:480px">
-    <h1 class="h4 mb-3" data-page-title>Sign in</h1>
-    <form id="login-form" class="card p-3 shadow-sm">
-      <div class="mb-3">
-        <label class="form-label">Email or Username</label>
-        <input id="identifier" class="form-control" autocomplete="username" required>
+<body>
+
+  <!-- Top nav (same as landing) -->
+  <nav class="landing-nav navbar navbar-expand-lg py-2 border-bottom bg-body-tertiary">
+    <div class="container">
+      <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
+      <div class="ms-auto d-flex align-items-center gap-2">
+        <a class="btn btn-outline" href="/#features">Features</a>
+        <a class="btn btn-outline" href="/#advisor">AI Advisor</a>
+        <a class="btn btn-outline" href="/#security">Security</a>
+        <a class="btn btn-outline" href="/#faq">FAQ</a>
+        <a class="btn btn-primary" href="/login.html"><i class="bi bi-box-arrow-in-right me-1"></i> Login</a>
       </div>
-      <div class="mb-3">
-        <label class="form-label">Password</label>
-        <input id="password" type="password" class="form-control" autocomplete="current-password" required>
-      </div>
-      <div class="form-check mb-3">
-        <input id="remember" class="form-check-input" type="checkbox">
-        <label class="form-check-label" for="remember">Remember me</label>
-      </div>
-      <div id="login-error" class="text-danger small d-none"></div>
-      <button id="login-btn" class="btn btn-primary w-100" type="submit">Sign in</button>
-    </form>
-    <p class="mt-3 text-center">No account? <a href="./signup.html">Sign up</a></p>
-  </main>
+    </div>
+  </nav>
+
+  <!-- Background + centered login -->
+  <header class="login-hero">
+    <!-- gradient layers -->
+    <div class="parallax">
+      <div class="layer blob" style="left:-10%; top:-10%"></div>
+      <div class="layer blob" style="right:-20%; bottom:-30%; transform:scale(.8)"></div>
+      <div class="layer mesh"></div>
+      <div class="layer grid"></div>
+    </div>
+
+    <main class="auth-card card shadow-lg border-0 p-4 p-md-5 bg-white rounded-4">
+      <h1 class="h4 mb-3 text-center" data-page-title>Sign in</h1>
+      <p class="text-center text-muted mb-4">Welcome back — let’s get your finances humming.</p>
+
+      <form id="login-form" novalidate>
+        <div class="mb-3">
+          <label class="form-label">Email or Username</label>
+          <input id="identifier" class="form-control" autocomplete="username" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input id="password" type="password" class="form-control" autocomplete="current-password" required>
+        </div>
+        <div class="form-check mb-3">
+          <input id="remember" class="form-check-input" type="checkbox">
+          <label class="form-check-label" for="remember">Remember me</label>
+        </div>
+        <div id="login-error" class="text-danger small d-none mb-2"></div>
+        <button id="login-btn" class="btn btn-primary w-100" type="submit">Sign in</button>
+      </form>
+
+      <p class="mt-4 text-center text-muted">No account? <a href="./signup.html">Sign up</a></p>
+    </main>
+  </header>
+
+  <!-- Scripts (unchanged) -->
   <script src="./js/auth.js"></script>
   <script>Auth.enforce({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: true });</script>
   <script src="./js/login.js"></script>
-</body></html>
+</body>
+</html>
