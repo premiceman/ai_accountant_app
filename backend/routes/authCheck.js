@@ -3,9 +3,29 @@ const express = require('express');
 const router = express.Router();
 
 const SESSION_COOKIE = process.env.SESSION_COOKIE || 'sid';
-const JWT_SECRET = process.env.JWT_SECRET; // if set, we verify; if not, we just check presence
+const JWT_SECRET = process.env.JWT_SECRET; // if set, we verify JWT
 
-// Lazy import jwt only if used
+// manual cookie parse (when cookie-parser isn't installed)
+function getCookie(req, name) {
+  // if cookie-parser is present:
+  if (req.cookies && Object.prototype.hasOwnProperty.call(req.cookies, name)) {
+    return req.cookies[name];
+  }
+  // fallback: parse header
+  const raw = req.headers.cookie || '';
+  const parts = raw.split(';').map(s => s.trim());
+  for (const p of parts) {
+    const i = p.indexOf('=');
+    if (i > -1) {
+      const k = p.slice(0, i);
+      const v = decodeURIComponent(p.slice(i + 1));
+      if (k === name) return v;
+    }
+  }
+  return undefined;
+}
+
+// lazy-load jsonwebtoken only if we need it
 let jwt;
 if (JWT_SECRET) {
   try { jwt = require('jsonwebtoken'); } catch { jwt = null; }
@@ -13,7 +33,7 @@ if (JWT_SECRET) {
 
 // GET /api/auth/check
 router.get('/check', (req, res) => {
-  const cookieToken = req.cookies && req.cookies[SESSION_COOKIE];
+  const cookieToken = getCookie(req, SESSION_COOKIE);
 
   // Optional Bearer fallback
   const auth = req.headers.authorization || '';
@@ -22,7 +42,7 @@ router.get('/check', (req, res) => {
   const token = cookieToken || bearerToken;
   if (!token) return res.status(401).json({ ok: false });
 
-  // If a JWT secret is configured and jsonwebtoken is available, verify the token
+  // If we have a secret & jsonwebtoken, verify; otherwise accept presence
   if (JWT_SECRET && jwt) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
@@ -34,12 +54,12 @@ router.get('/check', (req, res) => {
           name: payload.name
         }
       });
-    } catch (_e) {
+    } catch {
       return res.status(401).json({ ok: false });
     }
   }
 
-  // Else: accept presence of cookie as logged-in (compatibility mode)
+  // Compatibility mode: cookie presence = authenticated
   return res.json({ ok: true, user: null });
 });
 
