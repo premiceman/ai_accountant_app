@@ -19,7 +19,9 @@ function filesColl() {
 }
 
 /**
- * Save a Buffer to GridFS.
+ * Save a Buffer to GridFS (native driver).
+ * NOTE: The "finish" event does NOT pass a file doc. Use uploadStream.id and (optionally)
+ *       fetch the created file document from the files collection.
  * @param {Buffer} buffer
  * @param {String} filename
  * @param {Object} opts - { contentType?, metadata? }
@@ -27,22 +29,40 @@ function filesColl() {
  */
 async function saveBufferToGridFS(buffer, filename, opts = {}) {
   const { contentType = 'application/octet-stream', metadata = {} } = opts;
+
   return new Promise((resolve, reject) => {
     const uploadStream = bucket().openUploadStream(filename, {
       contentType,
       metadata,
     });
-    uploadStream.on('error', reject);
-    uploadStream.on('finish', (file) => {
-      resolve({
-        id: String(file._id),
-        length: file.length,
-        uploadDate: file.uploadDate,
-        contentType: file.contentType,
-        filename: file.filename,
-        metadata: file.metadata || {},
-      });
+
+    uploadStream.once('error', reject);
+    uploadStream.once('finish', async () => {
+      try {
+        const _id = uploadStream.id; // ObjectId of the stored file
+        // Fetch the file doc to get canonical length/uploadDate/etc.
+        const doc = await filesColl().findOne({ _id });
+        resolve({
+          id: String(_id),
+          length: doc?.length ?? buffer.length,
+          uploadDate: doc?.uploadDate ?? new Date(),
+          contentType: doc?.contentType ?? contentType,
+          filename: doc?.filename ?? filename,
+          metadata: doc?.metadata ?? metadata,
+        });
+      } catch (e) {
+        // Fallback: still return something usable even if the lookup failed
+        resolve({
+          id: String(uploadStream.id),
+          length: buffer.length,
+          uploadDate: new Date(),
+          contentType,
+          filename,
+          metadata,
+        });
+      }
     });
+
     uploadStream.end(buffer);
   });
 }
@@ -90,8 +110,8 @@ async function assertUserOwnsFile(fileId, userId) {
   return doc;
 }
 
-/** Stream a file if and only if it belongs to the user. */
-function streamFileById(fileId /* ownership was pre-checked */) {
+/** Stream a file if and only if it belongs to the user (ownership check must be done before calling). */
+function streamFileById(fileId) {
   const _id = typeof fileId === 'string' ? new ObjectId(fileId) : fileId;
   return bucket().openDownloadStream(_id);
 }
