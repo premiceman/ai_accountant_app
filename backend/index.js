@@ -7,26 +7,25 @@ const cors = require('cors');
 let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,next)=>next(); }
 const mongoose = require('mongoose');
 
-function safeRequire(p){ try { return require(p); } catch { return null; } }
+// Helper to require modules without crashing if missing
+function safeRequire(modPath) { try { return require(modPath); } catch { return null; } }
 
-// Routers (try multiple paths so filenames can vary)
+// ---- Routers (mount only if found) ----
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
-const docsRouter    =
-  safeRequire('./src/routes/documents.routes') ||
-  safeRequire('./routes/documents.routes')     ||
-  safeRequire('./src/routes/docs.routes')      ||
+
+const docsRouter =
+  safeRequire('./src/routes/documents.routes')  ||
+  safeRequire('./routes/documents.routes')      ||
+  safeRequire('./src/routes/docs.routes')       ||
   safeRequire('./routes/docs.routes');
+
 const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequire('./routes/events.routes');
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-// Auth middlewares
-const authMw   = safeRequire('./middleware/auth')                   || safeRequire('./src/middleware/auth'); // attaches req.user
-const realGate = (() => {
-  const m = safeRequire('./middleware/strictAuth') || safeRequire('./src/middleware/strictAuth');
-  return m ? m.requireRealUser : null; // enforces presence (401) but doesn't re-verify
-})();
+// ---- AUTH GATE ----
+const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,69 +34,71 @@ const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const UPLOADS_DIR  = path.join(__dirname, '../uploads');
 const DATA_DIR     = path.join(__dirname, '../data');
 
-// Middleware
+// ---- Middleware ----
 app.use(morgan('combined'));
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 
-// Static
+// ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));
-app.use('/data', express.static(DATA_DIR));
-app.use(express.static(FRONTEND_DIR));
+app.use('/data', express.static(DATA_DIR)); // optional
+app.use(express.static(FRONTEND_DIR));      // serves your HTML/JS/CSS
 
-// Health (public)
+// ---- Mount helper ----
+function mount(prefix, router, name) {
+  if (!router) {
+    console.warn(`⚠️  Skipping ${name} router (module not found)`);
+    return;
+  }
+  app.use(prefix, router);
+  console.log(`✅ Mounted ${name} at ${prefix}`);
+}
+
+// ---- Health ----
 app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// Helper to mount protected routers: auth (attach req.user) -> gate (401) -> router
-function protect(prefix, router, name) {
-  if (!router) { console.warn(`⚠️ Skipping ${name} router (module not found)`); return; }
-  const chain = [];
-  if (authMw) chain.push(authMw);
-  if (realGate) chain.push(realGate);
-  if (chain.length) {
-    app.use(prefix, ...chain, router);
-    console.log(`✅ Mounted PROTECTED ${name} at ${prefix}`);
-  } else {
-    app.use(prefix, router);
-    console.warn(`⚠️ Mounted UNPROTECTED ${name} at ${prefix}`);
-  }
+// ---- API mounts ----
+mount('/api/auth', authRouter, 'auth');
+mount('/api/user', userRouter, 'user');
+
+// Protect docs endpoints with Unauthorized page/JSON
+if (requireAuthOrHtmlUnauthorized && docsRouter) {
+  app.use('/api/docs', requireAuthOrHtmlUnauthorized);
+  app.use('/api/documents', requireAuthOrHtmlUnauthorized);
 }
+mount('/api/docs', docsRouter, 'documents');
+mount('/api/documents', docsRouter, 'documents (alias)');
 
-// Public auth routes
-if (authRouter) { app.use('/api/auth', authRouter); console.log('✅ Mounted auth at /api/auth'); }
+mount('/api/events', eventsRouter, 'events');
+mount('/api/summary', summaryRouter, 'summary');
+mount('/api/billing', billingRouter, 'billing');
 
-// Protected API routes
-protect('/api/user', userRouter, 'user');
-protect('/api/docs', docsRouter, 'documents');
-protect('/api/documents', docsRouter, 'documents (alias)');
-protect('/api/events', eventsRouter, 'events');
-protect('/api/summary', summaryRouter, 'summary');
-protect('/api/billing', billingRouter, 'billing');
-
-// Frontend landing
+// ---- Frontend landing (keep explicit root) ----
 app.get('/', (_req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
 
-// API 404 (JSON)
+// ---- API 404s (JSON) AFTER all API routes ----
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
-// Pretty 404 for non-API
+// ---- Pretty 404 for non-API requests (HTML) ----
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
+  if (req.path.startsWith('/api')) return next(); // already handled above
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+
   const accept = (req.headers.accept || '').toLowerCase();
   const wantsHtml = accept.includes('text/html') || accept === '*/*' || accept === '';
   if (!wantsHtml) return res.status(404).type('text/plain').send('Not Found');
+
   res.status(404).sendFile(path.join(FRONTEND_DIR, '404.html'));
 });
 
-// Error handler
+// ---- Error handler ----
 app.use((err, _req, res, _next) => {
   console.error('❌ Server error:', err);
   res.status(500).json({ error: 'Server error' });
 });
 
-// Mongo + start
+// ---- Mongo + start ----
 const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accountant_app';
 mongoose.connect(mongoUri, {})
   .then(() => {

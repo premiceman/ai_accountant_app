@@ -1,96 +1,60 @@
 // frontend/js/auth.js
 (function () {
-  const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
-  const USER_CACHE_KEY = '__me';
-
-  function getToken() {
-    for (const k of STORAGE_KEYS) {
-      const v = localStorage.getItem(k) || sessionStorage.getItem(k);
-      if (v) return v;
-    }
-    return '';
-  }
-  function setToken(token, { session = false } = {}) {
-    clearTokens();
-    const store = session ? sessionStorage : localStorage;
-    if (token) store.setItem('token', token);
-  }
-  function clearTokens() {
-    try {
+    const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
+    const USER_CACHE_KEY = 'me';
+  
+    function getToken() {
       for (const k of STORAGE_KEYS) {
-        localStorage.removeItem(k);
-        sessionStorage.removeItem(k);
+        const v = localStorage.getItem(k) || sessionStorage.getItem(k);
+        if (v) return v;
       }
-    } catch {}
-    try { delete window[USER_CACHE_KEY]; } catch {}
-  }
-  function redirectToLogin() {
-    if (!location.pathname.endsWith('/login.html')) location.href = '/login.html';
-  }
-
-  async function fetchWithAuth(url, options = {}) {
-    const t = getToken();
-    const headers = new Headers(options.headers || {});
-    headers.set('Accept', 'application/json');
-    if (t) headers.set('Authorization', `Bearer ${t}`);
-    const res = await fetch(window.API?.url ? window.API.url(url) : url, {
-      ...options,
-      headers,
-      credentials: 'include',
-      cache: 'no-store'
-    });
-    if (res.status === 401) {
-      clearTokens();
-      redirectToLogin();
-      throw new Error('Unauthorized');
+      return null;
     }
-    return res;
-  }
-
-  // Validate session via /api/user/me (works for cookie-only or token)
-  async function requireAuth() {
-    const t = getToken();
-    const headers = new Headers({ 'Accept': 'application/json' });
-    if (t) headers.set('Authorization', `Bearer ${t}`);
-
-    const res = await fetch(window.API?.url ? window.API.url('/api/user/me') : '/api/user/me', {
-      method: 'GET',
-      headers,
-      credentials: 'include',
-      cache: 'no-store'
-    });
-
-    if (res.status === 401 || !res.ok) {
+    function setToken(token, { session = false } = {}) {
       clearTokens();
-      return redirectToLogin();
+      (session ? sessionStorage : localStorage).setItem('token', token || '');
     }
-
-    const me = await res.json().catch(() => null);
-    if (!me || !me.id) {
-      clearTokens();
-      return redirectToLogin();
+    function clearTokens() {
+      STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
+      STORAGE_KEYS.forEach(k => sessionStorage.removeItem(k));
+      try { localStorage.removeItem(USER_CACHE_KEY); } catch {}
     }
-
-    try { window[USER_CACHE_KEY] = me; } catch {}
-
-    const g = document.getElementById('greeting-name');
-    if (g && me.firstName) g.textContent = me.firstName;
-
-    return { token: t, me };
-  }
-
-  function logout() {
-    clearTokens();
-    location.href = '/login.html';
-  }
-
-  window.Auth = {
-    getToken, setToken, clearTokens,
-    fetch: fetchWithAuth, requireAuth, logout,
-    setBannerTitle(suffix) {
-      if (!suffix) return;
-      const me = window[USER_CACHE_KEY];
-      const name = (me?.firstName || '').trim();
+  
+    const redirectTo = (p) => { location.href = p; };
+    const redirectToHome = () => redirectTo('./home.html');
+  
+    async function requireAuth() {
+      // tolerant: fetch user but don't hard-fail UI
+      const t = getToken();
+      try {
+        const res = await fetch(window.API.url('/api/user/me'), {
+          headers: t ? { Authorization: `Bearer ${t}` } : {},
+          cache: 'no-store'
+        });
+        const me = res.ok ? await res.json() : { firstName: 'Guest' };
+        window.__ME__ = me;
+        const h = document.querySelector('h1.page-title, h1');
+        if (h && !h.dataset.lockTitle) {
+          const name = (me?.firstName || '').trim();
+          if (name && !h.textContent.includes(name)) h.textContent = `${name} — ${h.textContent}`;
+        }
+        const g = document.getElementById('greeting-name');
+        if (g && me?.firstName) g.textContent = me.firstName;
+        return { token: t, me };
+      } catch {
+        return { token: t, me: { firstName: 'Guest' } };
+      }
+    }
+  
+    function fetchWithAuth(url, options = {}) {
+      const t = getToken();
+      const headers = Object.assign({}, options.headers || {}, t ? { Authorization: `Bearer ${t}` } : {});
+      return fetch(window.API.url(url), Object.assign({}, options, { headers }));
+    }
+  
+    function enforce() { /* optional: add redirects if you need */ }
+    function setBannerTitle(suffix) {
+      const name = (window.__ME__?.firstName || '').trim();
       const title = name ? `${name} — ${suffix}` : suffix;
       document.title = title;
       const h = document.querySelector('h1.page-title, h1');
@@ -98,5 +62,10 @@
       const g = document.getElementById('greeting-name');
       if (g && name) g.textContent = name;
     }
-  };
-})();
+  
+    window.Auth = {
+      getToken, setToken, clearTokens,
+      requireAuth, fetch: fetchWithAuth, enforce, setBannerTitle
+    };
+  })();
+  
