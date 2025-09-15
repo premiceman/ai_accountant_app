@@ -180,21 +180,30 @@ function updateProgress(cmp) {
 function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
 
 // ------------------------------ Modal (files) ----------------------------
+// ------------------------------ Modal (files) ----------------------------
 function openFilesModal(typeKey, label) {
   const list = ALL_FILES
     .filter(f => (f.type || 'other') === typeKey)
     .sort((a,b)=> new Date(b.uploadDate)-new Date(a.uploadDate));
-  const body = document.getElementById('filesModalBody');
+
+  const body  = document.getElementById('filesModalBody');
   const title = document.getElementById('filesModalLabel');
   title.textContent = `${label} — Files`;
+
   if (list.length === 0) {
     body.innerHTML = `<tr><td colspan="4" class="text-muted small">No files uploaded yet.</td></tr>`;
   } else {
     body.innerHTML = '';
     for (const f of list) {
       const tr = document.createElement('tr');
+      // expose the id so preview code can find it
+      tr.setAttribute('data-doc-id', String(f.id || ''));
+      const safeName = escapeHtml(f.filename || 'file');
+
       tr.innerHTML = `
-        <td>${escapeHtml(f.filename || 'file')}</td>
+        <td class="doc-filename" data-filename="${safeName}">
+          <a href="#" class="doc-filename-link" aria-label="Preview or download">${safeName}</a>
+        </td>
         <td>${f.uploadDate ? fmtDateTime(new Date(f.uploadDate)) : '—'}</td>
         <td>${humanSize(f.length)}</td>
         <td class="text-end">
@@ -203,18 +212,23 @@ function openFilesModal(typeKey, label) {
           </button>
         </td>
       `;
+
+      // keep your existing delete wiring
       const delBtn = tr.querySelector('button');
       new bootstrap.Tooltip(delBtn, { container: 'body', placement: 'top' });
       delBtn.addEventListener('click', async () => {
         if (!confirm(`Delete "${f.filename}"?`)) return;
         await deleteFile(f.id, /*refreshModal*/true, typeKey, label);
       });
+
       body.appendChild(tr);
     }
   }
+
   const modal = new bootstrap.Modal(document.getElementById('filesModal'));
   modal.show();
 }
+
 
 async function deleteFile(fileId, refreshModal=false, typeKey=null, label='') {
   try {
