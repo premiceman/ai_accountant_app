@@ -1,5 +1,5 @@
 // frontend/js/login.js
-(async function () {
+(function () {
   const form = document.getElementById('login-form') || document.querySelector('form');
 
   async function doLogin(e) {
@@ -7,13 +7,12 @@
 
     const email = (document.getElementById('email') || {}).value || '';
     const password = (document.getElementById('password') || {}).value || '';
-    const body = JSON.stringify({ email, password });
 
     const res = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       credentials: 'include', // accept httpOnly cookie sessions
-      body
+      body: JSON.stringify({ email, password })
     });
 
     if (!res.ok) {
@@ -22,29 +21,27 @@
       return;
     }
 
-    // Try to extract a token if the API returns one
-    let token = '';
+    // If API returns a token, store it. Cookie-only flows work even without this.
     try {
-      const j = await res.json();
-      token = j?.token || j?.jwt || j?.accessToken || j?.idToken || '';
-    } catch {
-      // Some backends return 204 or text; ignore
-    }
+      const j = await res.json().catch(() => ({}));
+      const token = j?.token || j?.jwt || j?.accessToken || j?.idToken || '';
+      if (token) Auth.setToken(token);
+    } catch {}
 
-    if (token) Auth.setToken(token); // store token if provided
-
-    // Validate session (cookie or token) and go to dashboard
-    await Auth.requireAuth();
+    // Avoid Set-Cookie timing races: go to dashboard; the page load will verify via /api/user/me
     location.href = '/home.html';
   }
 
   form?.addEventListener('submit', doLogin);
 
-  // If already logged in, go straight to home
-  try {
-    await Auth.requireAuth();
-    if (location.pathname.endsWith('/login.html')) {
-      location.href = '/home.html';
-    }
-  } catch {}
+  // If already authenticated (cookie or token), go straight to home
+  (async () => {
+    try {
+      const res = await fetch('/api/user/me', { credentials: 'include', headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+      if (res.ok) {
+        const me = await res.json().catch(()=>null);
+        if (me && me.id) location.href = '/home.html';
+      }
+    } catch {}
+  })();
 })();

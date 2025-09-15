@@ -10,13 +10,11 @@
     }
     return '';
   }
-
   function setToken(token, { session = false } = {}) {
     clearTokens();
     const store = session ? sessionStorage : localStorage;
     if (token) store.setItem('token', token);
   }
-
   function clearTokens() {
     try {
       for (const k of STORAGE_KEYS) {
@@ -26,7 +24,6 @@
     } catch {}
     try { delete window[USER_CACHE_KEY]; } catch {}
   }
-
   function redirectToLogin() {
     if (!location.pathname.endsWith('/login.html')) location.href = '/login.html';
   }
@@ -34,11 +31,12 @@
   async function fetchWithAuth(url, options = {}) {
     const t = getToken();
     const headers = new Headers(options.headers || {});
+    headers.set('Accept', 'application/json');
     if (t) headers.set('Authorization', `Bearer ${t}`);
     const res = await fetch(window.API?.url ? window.API.url(url) : url, {
       ...options,
       headers,
-      credentials: 'include', // send cookies if server uses httpOnly session
+      credentials: 'include',
       cache: 'no-store'
     });
     if (res.status === 401) {
@@ -49,12 +47,10 @@
     return res;
   }
 
-  // IMPORTANT: Try cookie-session flow even if no token is stored.
+  // Validate session via /api/user/me (works for cookie-only or token)
   async function requireAuth() {
-    let t = getToken();
-
-    // Always attempt to validate via /api/user/me (with or without token)
-    const headers = new Headers();
+    const t = getToken();
+    const headers = new Headers({ 'Accept': 'application/json' });
     if (t) headers.set('Authorization', `Bearer ${t}`);
 
     const res = await fetch(window.API?.url ? window.API.url('/api/user/me') : '/api/user/me', {
@@ -64,11 +60,7 @@
       cache: 'no-store'
     });
 
-    if (res.status === 401) {
-      clearTokens();
-      return redirectToLogin();
-    }
-    if (!res.ok) {
+    if (res.status === 401 || !res.ok) {
       clearTokens();
       return redirectToLogin();
     }
@@ -81,13 +73,6 @@
 
     try { window[USER_CACHE_KEY] = me; } catch {}
 
-    // Optional page title/greeting update
-    const h = document.querySelector('h1.page-title, h1');
-    if (h && !h.dataset.lockTitle) {
-      const base = h.dataset.baseTitle || h.textContent || document.title || 'Dashboard';
-      h.dataset.baseTitle = base;
-      if (me.firstName) h.textContent = `${me.firstName} — ${base}`;
-    }
     const g = document.getElementById('greeting-name');
     if (g && me.firstName) g.textContent = me.firstName;
 

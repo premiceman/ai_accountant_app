@@ -9,7 +9,7 @@ const mongoose = require('mongoose');
 
 function safeRequire(p){ try { return require(p); } catch { return null; } }
 
-// Routers
+// Routers (try multiple paths so filenames can vary)
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
 const docsRouter    =
@@ -21,10 +21,12 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-// Auth middleware(s)
-const existingAuth  = safeRequire('./middleware/auth')              || safeRequire('./src/middleware/auth'); // your original verifier (sets req.user)
-const strictAuthMod = safeRequire('./middleware/strictAuth');
-const requireAuthStrict = strictAuthMod ? strictAuthMod.requireAuthStrict : null;
+// Auth middlewares
+const authMw   = safeRequire('./middleware/auth')                   || safeRequire('./src/middleware/auth'); // attaches req.user
+const realGate = (() => {
+  const m = safeRequire('./middleware/strictAuth') || safeRequire('./src/middleware/strictAuth');
+  return m ? m.requireRealUser : null; // enforces presence (401) but doesn't re-verify
+})();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,17 +49,16 @@ app.use(express.static(FRONTEND_DIR));
 app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-// Helper to mount with both middlewares if available
+// Helper to mount protected routers: auth (attach req.user) -> gate (401) -> router
 function protect(prefix, router, name) {
   if (!router) { console.warn(`⚠️ Skipping ${name} router (module not found)`); return; }
   const chain = [];
-  if (existingAuth) chain.push(existingAuth);     // populate req.user using your current logic (JWT/cookie)
-  if (requireAuthStrict) chain.push(requireAuthStrict); // enforce "must be real user, never guest"
+  if (authMw) chain.push(authMw);
+  if (realGate) chain.push(realGate);
   if (chain.length) {
     app.use(prefix, ...chain, router);
-    console.log(`✅ Mounted PROTECTED ${name} at ${prefix} (middlewares: ${chain.length})`);
+    console.log(`✅ Mounted PROTECTED ${name} at ${prefix}`);
   } else {
-    // last resort (dev only)
     app.use(prefix, router);
     console.warn(`⚠️ Mounted UNPROTECTED ${name} at ${prefix}`);
   }
@@ -66,7 +67,7 @@ function protect(prefix, router, name) {
 // Public auth routes
 if (authRouter) { app.use('/api/auth', authRouter); console.log('✅ Mounted auth at /api/auth'); }
 
-// Protected API routes (now: existingAuth -> requireAuthStrict -> router)
+// Protected API routes
 protect('/api/user', userRouter, 'user');
 protect('/api/docs', docsRouter, 'documents');
 protect('/api/documents', docsRouter, 'documents (alias)');
