@@ -4,84 +4,108 @@
   <meta charset="utf-8">
   <title>AI Accountant — Personal Finance, Automated</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Loads Bootstrap, Icons, and /css/styles.css (your theme) -->
+
+  <!-- Theme + libs -->
   <script>window.__API_BASE = window.__API_BASE || 'http://localhost:3000';</script>
   <script src="/js/head-include.js"></script>
+
   <style>
     /* Landing-only styles that rely on your styles.css variables */
     :root{ --hero-h: clamp(640px, 86vh, 980px); }
-    body{background: var(--bg-body); color: var(--fg); overflow-x: hidden}
-    .landing-nav{position:sticky; top:0; z-index:1020; backdrop-filter: saturate(1.2) blur(8px)}
-    .landing-nav .btn{padding:.55rem 1rem}
-    .brand-mark{display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg)}
-    .brand-dot{width:12px; height:12px; border-radius:50%; background: radial-gradient(circle at 30% 30%, var(--brand), var(--brand-hover)); box-shadow: 0 0 24px color-mix(in oklab, var(--brand) 45%, transparent)}
 
-    .hero{min-height: var(--hero-h); position: relative; display:grid; place-items:center; overflow:hidden}
-    .hero-inner{position:relative; z-index:2; max-width:1100px; padding:6rem 1.25rem 4rem}
-    .eyebrow{color:var(--fg-3); font-weight:600; text-transform:uppercase; letter-spacing:.12em}
-    .hero h1{font-size: clamp(2rem, 4.8vw, 4rem); line-height:1.12; margin:.6rem 0 1rem;
+    body{ background: var(--bg-body); color: var(--fg); overflow-x: hidden }
+
+    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter: saturate(1.2) blur(8px)}
+    .landing-nav .btn{ padding:.55rem 1rem }
+    .brand-mark{ display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg)}
+    .brand-dot{ width:12px; height:12px; border-radius:50%; background: radial-gradient(circle at 30% 30%, var(--brand), var(--brand-hover)); box-shadow: 0 0 24px color-mix(in oklab, var(--brand) 45%, transparent)}
+
+    .hero{ min-height: var(--hero-h); position: relative; display:grid; place-items:center; overflow:hidden }
+    .hero-inner{ position:relative; z-index:2; max-width:1100px; padding:6rem 1.25rem 4rem }
+    .eyebrow{ color:var(--fg-3); font-weight:600; text-transform:uppercase; letter-spacing:.12em}
+    .hero h1{
+      font-size: clamp(2rem, 4.8vw, 4rem); line-height:1.12; margin:.6rem 0 1rem;
       background: linear-gradient(120deg, var(--fg), color-mix(in oklab, var(--brand) 35%, var(--fg)));
-      -webkit-background-clip: text; background-clip:text; color: transparent;}
-    .hero p.lede{font-size: clamp(1rem, 1.6vw, 1.25rem); color:var(--fg-2); max-width: 70ch}
-    .hero-cta{display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.5rem}
+      -webkit-background-clip:text; background-clip:text; color: transparent;
+    }
+    .hero p.lede{ font-size: clamp(1rem, 1.6vw, 1.25rem); color:var(--fg-2); max-width: 70ch }
+    .hero-cta{ display:flex; gap:.75rem; flex-wrap:wrap; margin-top:1.5rem }
+
     .btn-outline{
       --bs-btn-bg: transparent; --bs-btn-border-color: var(--bd-hairline); --bs-btn-color: var(--fg);
       --bs-btn-hover-bg: var(--bg-surface-2); --bs-btn-hover-border-color: var(--bd); box-shadow:none;
     }
 
     /* Parallax layers */
-    .parallax{position:absolute; inset:0; z-index:1; pointer-events:none; transform-style: preserve-3d}
-    .layer{position:absolute; inset:auto; will-change: transform; transition: transform 60ms linear}
-    .blob{width: min(64vw, 900px); height: min(64vw, 900px); border-radius: 50%; filter: blur(60px); opacity:.5;
-      background: conic-gradient(from 200deg at 50% 50%,
-        color-mix(in oklab, var(--brand) 70%, white),
-        color-mix(in oklab, var(--brand-hover) 55%, white),
-        #9BE3D5, #B4EEE3, color-mix(in oklab, var(--brand) 60%, white));}
-    .mesh{position:absolute; inset:-10% -10% auto -10%; height: 70%;
+    .parallax{ position:absolute; inset:0; z-index:1; pointer-events:none; transform-style: preserve-3d }
+    .layer{ position:absolute; inset:auto; will-change: transform; transition: transform 60ms linear }
+    .blob{
+      width: min(64vw, 900px); height: min(64vw, 900px); border-radius: 50%; filter: blur(60px); opacity:.5;
+      background: conic-gradient(from 200deg at 50% 50%, color-mix(in oklab, var(--brand) 70%, white), color-mix(in oklab, var(--brand-hover) 55%, white), #9BE3D5, #B4EEE3, color-mix(in oklab, var(--brand) 60%, white));
+    }
+    .mesh{
+      position:absolute; inset:-10% -10% auto -10%; height: 70%;
       background:
         radial-gradient(1200px 600px at 20% 30%, color-mix(in oklab,var(--brand) 18%,transparent), transparent),
         radial-gradient(1200px 600px at 80% 20%, color-mix(in oklab,var(--brand-hover) 18%,transparent), transparent),
         radial-gradient(1200px 600px at 50% 80%, color-mix(in oklab,#7FDCCB 20%,transparent), transparent);
-      mask-image: radial-gradient(1200px 600px at 50% 40%, #000, transparent 70%); opacity:.6;}
-    .grid{position:absolute; inset:0;
-      background-image:
-        linear-gradient(to right, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px),
-        linear-gradient(to bottom, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px);
-      background-size: 52px 52px; opacity:.18; mask-image: linear-gradient(to bottom, #000, transparent 75%)}
+      mask-image: radial-gradient(1200px 600px at 50% 40%, #000, transparent 70%);
+      opacity:.6;
+    }
+    .grid{ position:absolute; inset:0; background-image:
+      linear-gradient(to right, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px);
+      background-size: 52px 52px; opacity:.18; mask-image: linear-gradient(to bottom, #000, transparent 75%)
+    }
 
-    section{padding: calc(3rem + 2vw) 0}
-    .section-muted{background: var(--bg-surface-2); border-top:1px solid var(--bd-hairline); border-bottom:1px solid var(--bd-hairline)}
-    .section h2{font-size: clamp(1.5rem, 2.8vw, 2.25rem); margin-bottom: .75rem}
-    .section p.sub{color:var(--fg-2); max-width: 72ch}
+    section{ padding: calc(3rem + 2vw) 0 }
+    .section-muted{ background: var(--bg-surface-2); border-top:1px solid var(--bd-hairline); border-bottom:1px solid var(--bd-hairline) }
+    .section h2{ font-size: clamp(1.5rem, 2.8vw, 2.25rem); margin-bottom: .75rem }
+    .section p.sub{ color:var(--fg-2); max-width: 72ch }
 
-    .features{display:grid; grid-template-columns: repeat(12, 1fr); gap: 1rem; margin-top:2rem}
-    .feature{grid-column: span 4; background: var(--bg-surface); border:1px solid var(--bd-hairline);
-      border-radius: 1.25rem; padding:1.25rem; box-shadow: var(--shadow); display:flex; gap:1rem}
-    .feature.wide{grid-column: span 8}
-    .feature.tall{grid-row: span 2}
+    .features{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 1rem; margin-top:2rem }
+    .feature{
+      grid-column: span 4; background: var(--bg-surface); border:1px solid var(--bd-hairline);
+      border-radius: 1.25rem; padding:1.25rem; box-shadow: var(--shadow); display:flex; gap:1rem;
+      transform: translateY(8px); transition: transform .35s ease, box-shadow .35s ease;
+    }
+    .feature:hover{ transform: translateY(-4px); box-shadow: var(--shadow-2) }
+    .feature.wide{ grid-column: span 8 }
+    .feature.tall{ grid-row: span 2 }
     @media (max-width: 992px){ .feature, .feature.wide{ grid-column: span 12 } }
+    .illus{ width:72px; height:72px; flex:0 0 72px }
 
-    .illus{width:72px; height:72px; flex:0 0 72px}
-    .reveal{opacity:0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease}
-    .reveal.in{opacity:1; transform:none}
+    .reveal{ opacity:0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease }
+    .reveal.in{ opacity:1; transform:none }
 
-    .logos{display:flex; gap: clamp(1.5rem, 4vw, 4rem); align-items:center; justify-content:center; flex-wrap:wrap; opacity:.9}
-    .logo{height: 28px; opacity:.75}
+    .logos{ display:flex; gap: clamp(1.5rem, 4vw, 4rem); align-items:center; justify-content:center; flex-wrap:wrap; opacity:.9 }
+    .logo{ height: 28px; opacity:.75 }
 
-    .site-footer{background:var(--bg-surface); border-top:1px solid var(--bd-hairline)}
-    .site-footer .small{color:var(--fg-3)}
+    .chip{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--bd-hairline); padding:.35rem .6rem; border-radius:999px; background:var(--bg-surface); font-size:.9rem }
+    .checklist{ list-style:none; padding:0; margin:0 }
+    .checklist li{ display:flex; gap:.6rem; align-items:flex-start; margin:.4rem 0; color:var(--fg-2) }
+    .checklist i{ color:var(--success); margin-top:.15rem }
 
-    @media (prefers-reduced-motion: reduce){ .layer{transition:none} .reveal{transition:none} }
+    .site-footer{ background:var(--bg-surface); border-top:1px solid var(--bd-hairline) }
+    .site-footer .small{ color:var(--fg-3) }
+
+    @media (prefers-reduced-motion: reduce){
+      .layer{ transition:none }
+      .reveal{ transition:none }
+    }
   </style>
 </head>
 <body>
+
   <!-- Top nav -->
   <nav class="landing-nav navbar navbar-expand-lg py-2 border-bottom bg-body-tertiary">
     <div class="container">
       <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
       <div class="ms-auto d-flex align-items-center gap-2">
         <a class="btn btn-outline" href="#features">Features</a>
-        <a class="btn btn-outline" href="#how-it-works">How it works</a>
+        <a class="btn btn-outline" href="#advisor">AI Advisor</a>
+        <a class="btn btn-outline" href="#security">Security</a>
+        <a class="btn btn-outline" href="#faq">FAQ</a>
         <a class="btn btn-primary" href="/login.html" id="loginBtn"><i class="bi bi-box-arrow-in-right me-1"></i> Login</a>
       </div>
     </div>
@@ -95,6 +119,7 @@
       <div class="layer" data-depth="0.16" style="top:8%; left:-6%"><div class="blob"></div></div>
       <div class="layer" data-depth="0.22" style="bottom:-8%; right:-10%"><div class="blob"></div></div>
     </div>
+
     <div class="hero-inner text-center">
       <div class="eyebrow">Your finances, fully automated</div>
       <h1>Meet the AI Accountant that keeps you compliant, tax-efficient, and in control.</h1>
@@ -106,10 +131,15 @@
         <a class="btn btn-primary btn-lg" href="/login.html">Get started — Login</a>
         <a class="btn btn-outline btn-lg" href="#features">Explore features</a>
       </div>
+      <div class="d-flex gap-2 justify-content-center mt-3">
+        <span class="chip"><i class="bi bi-shield-lock"></i> 256-bit encryption</span>
+        <span class="chip"><i class="bi bi-bank"></i> Open Banking</span>
+        <span class="chip"><i class="bi bi-check2-circle"></i> HMRC-ready records</span>
+      </div>
     </div>
   </header>
 
-  <!-- SOCIAL PROOF (inline SVG logos made for you) -->
+  <!-- SOCIAL PROOF -->
   <section class="section section-muted">
     <div class="container text-center">
       <p class="text-uppercase small fw-semibold text-muted mb-3">Trusted foundations</p>
@@ -121,21 +151,17 @@
     </div>
   </section>
 
-  <!-- FEATURES (with inline SVG illustrations made for you) -->
+  <!-- FEATURES (high-level value) -->
   <section id="features" class="section">
     <div class="container">
       <h2 class="mb-1">Everything you need to stay ahead</h2>
       <p class="sub">From automatic transaction ingestion to insights that actually move the needle — designed for accuracy, speed, and peace of mind.</p>
 
       <div class="features">
+
         <article class="feature reveal">
           <div class="illus" aria-hidden="true">
-            <svg viewBox="0 0 120 120">
-              <defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="var(--brand-hover)"/></linearGradient></defs>
-              <circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/>
-              <path d="M24 52h72v8H24zM36 64h48v30H36z" fill="url(#g1)"/>
-              <circle cx="34" cy="48" r="6" fill="var(--brand)"/><circle cx="86" cy="48" r="6" fill="var(--brand)"/>
-            </svg>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="g1" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="var(--brand-hover)"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/><path d="M24 52h72v8H24zM36 64h48v30H36z" fill="url(#g1)"/><circle cx="34" cy="48" r="6" fill="var(--brand)"/><circle cx="86" cy="48" r="6" fill="var(--brand)"/></svg>
           </div>
           <div>
             <h3 class="h5 mb-1">Bank & data connections</h3>
@@ -145,14 +171,7 @@
 
         <article class="feature reveal">
           <div class="illus" aria-hidden="true">
-            <svg viewBox="0 0 120 120">
-              <defs><linearGradient id="g2" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="#7FDCCB"/></linearGradient></defs>
-              <circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/>
-              <path d="M28 76c12-12 20-18 32-18s20 6 32 18" fill="none" stroke="url(#g2)" stroke-width="8" stroke-linecap="round"/>
-              <rect x="30" y="80" width="12" height="18" rx="3" fill="var(--brand)"/>
-              <rect x="54" y="70" width="12" height="28" rx="3" fill="var(--brand)"/>
-              <rect x="78" y="60" width="12" height="38" rx="3" fill="var(--brand)"/>
-            </svg>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="g2" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="#7FDCCB"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/><path d="M28 76c12-12 20-18 32-18s20 6 32 18" fill="none" stroke="url(#g2)" stroke-width="8" stroke-linecap="round"/><rect x="30" y="80" width="12" height="18" rx="3" fill="var(--brand)"/><rect x="54" y="70" width="12" height="28" rx="3" fill="var(--brand)"/><rect x="78" y="60" width="12" height="38" rx="3" fill="var(--brand)"/></svg>
           </div>
           <div>
             <h3 class="h5 mb-1">Real-time insights</h3>
@@ -162,13 +181,7 @@
 
         <article class="feature reveal">
           <div class="illus" aria-hidden="true">
-            <svg viewBox="0 0 120 120">
-              <defs><linearGradient id="g3" x1="0" x2="1"><stop offset="0%" stop-color="#7FDCCB"/><stop offset="100%" stop-color="var(--brand)"/></linearGradient></defs>
-              <circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/>
-              <rect x="34" y="32" width="52" height="56" rx="8" fill="url(#g3)"/>
-              <path d="M44 44h24M44 56h32M44 68h20" stroke="var(--bg-surface)" stroke-width="4" stroke-linecap="round"/>
-              <path d="M86 80l8 8 12-14" stroke="var(--success)" stroke-width="6" stroke-linecap="round" fill="none"/>
-            </svg>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="g3" x1="0" x2="1"><stop offset="0%" stop-color="#7FDCCB"/><stop offset="100%" stop-color="var(--brand)"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/><rect x="34" y="32" width="52" height="56" rx="8" fill="url(#g3)"/><path d="M44 44h24M44 56h32M44 68h20" stroke="var(--bg-surface)" stroke-width="4" stroke-linecap="round"/><path d="M86 80l8 8 12-14" stroke="var(--success)" stroke-width="6" stroke-linecap="round" fill="none"/></svg>
           </div>
           <div>
             <h3 class="h5 mb-1">Built-in compliance</h3>
@@ -178,12 +191,7 @@
 
         <article class="feature wide reveal">
           <div class="illus" aria-hidden="true">
-            <svg viewBox="0 0 120 120">
-              <defs><linearGradient id="g4" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="#9BE3D5"/></linearGradient></defs>
-              <circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/>
-              <path d="M30 82c8-18 18-26 30-26s22 8 30 26" fill="none" stroke="url(#g4)" stroke-width="8" stroke-linecap="round"/>
-              <circle cx="60" cy="56" r="10" fill="var(--bg-surface)"/>
-            </svg>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="g4" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="#9BE3D5"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/><path d="M30 82c8-18 18-26 30-26s22 8 30 26" fill="none" stroke="url(#g4)" stroke-width="8" stroke-linecap="round"/><circle cx="60" cy="56" r="10" fill="var(--bg-surface)"/></svg>
           </div>
           <div>
             <h3 class="h5 mb-1">Scenario planning & forecasting</h3>
@@ -193,11 +201,7 @@
 
         <article class="feature reveal">
           <div class="illus" aria-hidden="true">
-            <svg viewBox="0 0 120 120">
-              <defs><linearGradient id="g5" x1="0" x2="1"><stop offset="0%" stop-color="#9BE3D5"/><stop offset="100%" stop-color="var(--brand)"/></linearGradient></defs>
-              <circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/>
-              <circle cx="60" cy="60" r="24" fill="url(#g5)"/><circle cx="60" cy="60" r="6" fill="var(--bg-surface)"/>
-            </svg>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="g5" x1="0" x2="1"><stop offset="0%" stop-color="#9BE3D5"/><stop offset="100%" stop-color="var(--brand)"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/><circle cx="60" cy="60" r="24" fill="url(#g5)"/><circle cx="60" cy="60" r="6" fill="var(--bg-surface)"/></svg>
           </div>
           <div>
             <h3 class="h5 mb-1">Document Vault</h3>
@@ -207,64 +211,350 @@
 
         <article class="feature reveal">
           <div class="illus" aria-hidden="true">
-            <svg viewBox="0 0 120 120">
-              <defs><linearGradient id="g6" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="#7FDCCB"/></linearGradient></defs>
-              <circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/>
-              <path d="M60 34c-12 0-20 8-20 20v10l-6 10h52l-6-10V54c0-12-8-20-20-20z" fill="url(#g6)"/>
-              <circle cx="60" cy="86" r="6" fill="var(--bg-surface)"/>
-            </svg>
+            <svg viewBox="0 0 120 120"><defs><linearGradient id="g6" x1="0" x2="1"><stop offset="0%" stop-color="var(--brand)"/><stop offset="100%" stop-color="#7FDCCB"/></linearGradient></defs><circle cx="60" cy="60" r="56" fill="var(--bg-surface-2)" stroke="var(--bd-hairline)"/><path d="M60 34c-12 0-20 8-20 20v10l-6 10h52l-6-10V54c0-12-8-20-20-20z" fill="url(#g6)"/><circle cx="60" cy="86" r="6" fill="var(--bg-surface)"/></svg>
           </div>
           <div>
             <h3 class="h5 mb-1">Smart alerts & tasks</h3>
             <p class="mb-0 text-secondary">Deadlines, renewals, and anomalies — surfaced proactively, with nudges you’ll actually appreciate.</p>
           </div>
         </article>
+
       </div>
     </div>
   </section>
 
-  <!-- HOW IT WORKS -->
-  <section id="how-it-works" class="section section-muted">
+  <!-- MODULES (ties to your roadmap) -->
+  <section id="modules" class="section section-muted">
     <div class="container">
-      <h2 class="mb-1">How it works</h2>
-      <p class="sub">Connect. Consolidate. Understand. Act.</p>
+      <h2 class="mb-1">Purpose-built modules</h2>
+      <p class="sub">Designed to cover daily finance, compliance, and planning — without juggling spreadsheets.</p>
 
-      <div class="row g-3 mt-2">
-        <div class="col-md-3 reveal">
-          <div class="card h-100 p-3">
-            <div class="text-muted small">Step 1</div>
-            <h3 class="h6 mt-1">Create your account</h3>
-            <p class="mb-0 text-secondary">Start with a secure login. Your data stays encrypted at rest and in transit.</p>
-          </div>
-        </div>
-        <div class="col-md-3 reveal">
-          <div class="card h-100 p-3">
-            <div class="text-muted small">Step 2</div>
-            <h3 class="h6 mt-1">Link data sources</h3>
-            <p class="mb-0 text-secondary">Connect bank accounts via TrueLayer, and upload documents to your Vault.</p>
-          </div>
-        </div>
-        <div class="col-md-3 reveal">
-          <div class="card h-100 p-3">
-            <div class="text-muted small">Step 3</div>
-            <h3 class="h6 mt-1">Let AI do the heavy lifting</h3>
-            <p class="mb-0 text-secondary">We extract, classify, and reconcile transactions — powering live dashboards.</p>
-          </div>
-        </div>
-        <div class="col-md-3 reveal">
-          <div class="card h-100 p-3">
-            <div class="text-muted small">Step 4</div>
-            <h3 class="h6 mt-1">Decide with confidence</h3>
-            <p class="mb-0 text-secondary">Explore scenarios, optimize taxes, and stay ahead of obligations.</p>
-          </div>
-        </div>
-      </div>
+      <div class="features">
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-speedometer2 fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Dashboard v1</h3><p class="mb-0 text-secondary">At-a-glance posture: income, outgoings, tax-to-date, savings rate, and runway.</p></div>
+        </article>
 
-      <div class="text-center mt-4">
-        <a class="btn btn-primary btn-lg" href="/login.html">Login to continue</a>
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-diagram-3 fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Income Explorer</h3><p class="mb-0 text-secondary">Classify and reconcile pay, dividends, rental, and ad-hoc income by source and period.</p></div>
+        </article>
+
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-folder2-open fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Document Vault</h3><p class="mb-0 text-secondary">Secure storage with reminders for expiring documents and missing evidence.</p></div>
+        </article>
+
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-graph-up fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Equity & CGT Core</h3><p class="mb-0 text-secondary">Track lots, base cost, and crystallised gains/losses to keep you CGT-aware year-round.</p></div>
+        </article>
+
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-magic fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Scenario Lab</h3><p class="mb-0 text-secondary">Run “what-ifs”: salary changes, ISA/SIPP contributions, property moves, and investment shifts.</p></div>
+        </article>
+
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-gift fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Gifts & IHT Log</h3><p class="mb-0 text-secondary">Record gifts, exemptions, and timelines to keep estate planning organised.</p></div>
+        </article>
+
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-calendar3 fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Calendar & Tasks</h3><p class="mb-0 text-secondary">HMRC deadlines, renewals, and to-dos with clear status and nudges.</p></div>
+        </article>
+
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-plugin fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Integrations</h3><p class="mb-0 text-secondary">TrueLayer, HMRC, and file imports so all your data flows into one place.</p></div>
+        </article>
       </div>
     </div>
   </section>
+
+  <!-- AI ADVISOR / COPILOT -->
+  <section id="advisor" class="section">
+    <div class="container">
+      <h2 class="mb-1">Your AI Financial Advisor</h2>
+      <p class="sub">A conversational copilot that understands your data and helps you act — from monthly tidy-ups to tax-time preparation.</p>
+
+      <div class="row g-3 mt-1">
+        <div class="col-lg-6 reveal">
+          <div class="card p-3 h-100">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="chip"><i class="bi bi-cpu"></i> Data-aware</span>
+              <span class="chip"><i class="bi bi-lightning"></i> Fast</span>
+              <span class="chip"><i class="bi bi-shield"></i> Private</span>
+            </div>
+            <div class="bg-body-tertiary rounded-4 border p-3">
+              <div class="small text-muted mb-2">Sample conversation</div>
+              <div class="d-flex gap-2 mb-2">
+                <div class="rounded-circle" style="width:28px;height:28px;background:var(--brand);opacity:.8"></div>
+                <div class="flex-1">
+                  <div class="small fw-semibold">You</div>
+                  <div class="text-secondary">“Why did my disposable income dip last month?”</div>
+                </div>
+              </div>
+              <div class="d-flex gap-2">
+                <div class="rounded-circle" style="width:28px;height:28px;background:var(--bg-surface-2);border:1px solid var(--bd-hairline)"></div>
+                <div class="flex-1">
+                  <div class="small fw-semibold">AI Advisor</div>
+                  <div class="text-secondary">
+                    “Two one-off expenses: car insurance (£412) and an annual subscription (£99). Your core spend stayed flat.
+                    Move the subscription to monthly to smooth cashflow? I can add a reminder.”
+                  </div>
+                </div>
+              </div>
+            </div>
+            <ul class="checklist mt-3">
+              <li><i class="bi bi-check2-circle"></i> Explains changes in plain English with linked transactions</li>
+              <li><i class="bi bi-check2-circle"></i> Suggests tax-efficient contributions and allowances</li>
+              <li><i class="bi bi-check2-circle"></i> Generates HMRC-ready summaries and evidence checklists</li>
+              <li><i class="bi bi-check2-circle"></i> Creates tasks and reminders from chat</li>
+            </ul>
+          </div>
+        </div>
+        <div class="col-lg-6 reveal">
+          <div class="card p-4 h-100 d-flex justify-content-center text-center">
+            <div class="mb-2 text-muted">Live KPIs (example)</div>
+            <div class="row g-3">
+              <div class="col-6">
+                <div class="p-3 rounded-4 border bg-body-tertiary">
+                  <div class="small text-muted">Savings rate</div>
+                  <div class="fs-3 fw-bold">28%</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-3 rounded-4 border bg-body-tertiary">
+                  <div class="small text-muted">Tax YTD</div>
+                  <div class="fs-3 fw-bold">£7,430</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-3 rounded-4 border bg-body-tertiary">
+                  <div class="small text-muted">Runway</div>
+                  <div class="fs-3 fw-bold">7.2 mo</div>
+                </div>
+              </div>
+              <div class="col-6">
+                <div class="p-3 rounded-4 border bg-body-tertiary">
+                  <div class="small text-muted">Net worth Δ</div>
+                  <div class="fs-3 fw-bold">+£4.1k</div>
+                </div>
+              </div>
+            </div>
+            <a class="btn btn-primary btn-lg mt-3" href="/login.html">Try the Advisor</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECURITY & COMPLIANCE -->
+  <section id="security" class="section section-muted">
+    <div class="container">
+      <h2 class="mb-1">Security & Compliance, by design</h2>
+      <p class="sub">We protect your data from the ground up and keep your records HMRC-ready.</p>
+
+      <div class="features">
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-shield-lock fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Encryption</h3><p class="mb-0 text-secondary">Data encrypted in transit and at rest with strict key management.</p></div>
+        </article>
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-diagram-2 fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Least-privilege</h3><p class="mb-0 text-secondary">Services only get minimum access needed to do their job.</p></div>
+        </article>
+        <article class="feature reveal">
+          <div class="illus" aria-hidden="true"><i class="bi bi-clipboard-check fs-2" style="color:var(--brand)"></i></div>
+          <div><h3 class="h6 mb-1">Audit-friendly</h3><p class="mb-0 text-secondary">Clear evidence trails with exportable summaries when you need them.</p></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- WHO IT'S FOR -->
+<section id="who" class="section">
+  <div class="container">
+    <h2 class="mb-1">Built for real life</h2>
+    <p class="sub">
+      Whether you’re salaried, self-employed, or juggling a few side streams, AI Accountant adapts to how you earn,
+      spend, and save — giving you clarity and control without spreadsheets.
+    </p>
+
+    <div class="features">
+      <article class="feature reveal">
+        <div class="illus" aria-hidden="true"><i class="bi bi-briefcase fs-2" style="color:var(--brand)"></i></div>
+        <div>
+          <h3 class="h6 mb-1">Salaried professionals</h3>
+          <ul class="checklist">
+            <li><i class="bi bi-check2-circle"></i> Track take-home, benefits, and pensions in one view</li>
+            <li><i class="bi bi-check2-circle"></i> Spot subscription creep and optimise monthly outgoings</li>
+            <li><i class="bi bi-check2-circle"></i> HMRC-ready summaries at tax time</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="illus" aria-hidden="true"><i class="bi bi-receipt fs-2" style="color:var(--brand)"></i></div>
+        <div>
+          <h3 class="h6 mb-1">Self-employed & contractors</h3>
+          <ul class="checklist">
+            <li><i class="bi bi-check2-circle"></i> Reconcile invoices, expenses, and VAT-related records</li>
+            <li><i class="bi bi-check2-circle"></i> Separate business vs. personal spend automatically</li>
+            <li><i class="bi bi-check2-circle"></i> Forecast tax set-asides so cash is never a surprise</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="illus" aria-hidden="true"><i class="bi bi-house fs-2" style="color:var(--brand)"></i></div>
+        <div>
+          <h3 class="h6 mb-1">Landlords</h3>
+          <ul class="checklist">
+            <li><i class="bi bi-check2-circle"></i> Track rent, mortgages, maintenance, and yields</li>
+            <li><i class="bi bi-check2-circle"></i> Attach receipts and tenancy docs to each property</li>
+            <li><i class="bi bi-check2-circle"></i> See year-to-date profit and tax position at a glance</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="illus" aria-hidden="true"><i class="bi bi-graph-up-arrow fs-2" style="color:var(--brand)"></i></div>
+        <div>
+          <h3 class="h6 mb-1">Investors</h3>
+          <ul class="checklist">
+            <li><i class="bi bi-check2-circle"></i> Consolidate ISAs, SIPPs, and brokerage accounts</li>
+            <li><i class="bi bi-check2-circle"></i> Track cost basis and crystallised gains/losses</li>
+            <li><i class="bi bi-check2-circle"></i> Model contributions and rebalancing scenarios</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="illus" aria-hidden="true"><i class="bi bi-lightning-charge fs-2" style="color:var(--brand)"></i></div>
+        <div>
+          <h3 class="h6 mb-1">Side-hustlers</h3>
+          <ul class="checklist">
+            <li><i class="bi bi-check2-circle"></i> Auto-categorise marketplace and payout income</li>
+            <li><i class="bi bi-check2-circle"></i> Track stock, materials, and small tools</li>
+            <li><i class="bi bi-check2-circle"></i> Nudge for missing invoices and evidence</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="illus" aria-hidden="true"><i class="bi bi-globe2 fs-2" style="color:var(--brand)"></i></div>
+        <div>
+          <h3 class="h6 mb-1">Expats & multi-income households</h3>
+          <ul class="checklist">
+            <li><i class="bi bi-check2-circle"></i> View finances by person, account, or currency</li>
+            <li><i class="bi bi-check2-circle"></i> Upload supporting docs and keep timelines tidy</li>
+            <li><i class="bi bi-check2-circle"></i> Scenario-plan contributions and big purchases</li>
+          </ul>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq" class="section section-muted">
+  <div class="container">
+    <h2 class="mb-1">Frequently asked questions</h2>
+    <p class="sub">Quick answers to the things people ask most. Want to know more? Just log in and try it.</p>
+
+    <div class="accordion" id="faqAccordion">
+      <div class="accordion-item reveal">
+        <h2 class="accordion-header" id="q1">
+          <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#a1" aria-expanded="true" aria-controls="a1">
+            How do bank connections work?
+          </button>
+        </h2>
+        <div id="a1" class="accordion-collapse collapse show" aria-labelledby="q1" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-secondary">
+            We use compliant Open Banking connections (e.g., via TrueLayer) so you can authorise read-only access to transactions.
+            You stay in control and can revoke at any time.
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item reveal">
+        <h2 class="accordion-header" id="q2">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#a2" aria-expanded="false" aria-controls="a2">
+            Is my data private and secure?
+          </button>
+        </h2>
+        <div id="a2" class="accordion-collapse collapse" aria-labelledby="q2" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-secondary">
+            Yes. Data is encrypted in transit and at rest, with strict key management and least-privilege access across services.
+            You can export or delete your data whenever you like.
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item reveal">
+        <h2 class="accordion-header" id="q3">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#a3" aria-expanded="false" aria-controls="a3">
+            Are you a replacement for an accountant or financial adviser?
+          </button>
+        </h2>
+        <div id="a3" class="accordion-collapse collapse" aria-labelledby="q3" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-secondary">
+            AI Accountant is software that organises your finances and helps you make informed decisions. It is not a substitute for
+            professional tax, accounting, or investment advice. Where needed, consult a qualified professional.
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item reveal">
+        <h2 class="accordion-header" id="q4">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#a4" aria-expanded="false" aria-controls="a4">
+            Which regions are supported?
+          </button>
+        </h2>
+        <div id="a4" class="accordion-collapse collapse" aria-labelledby="q4" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-secondary">
+            We’re focused on the UK with HMRC-friendly records and workflows. Additional regions will follow — watch this space.
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item reveal">
+        <h2 class="accordion-header" id="q5">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#a5" aria-expanded="false" aria-controls="a5">
+            What documents should I upload first?
+          </button>
+        </h2>
+        <div id="a5" class="accordion-collapse collapse" aria-labelledby="q5" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-secondary">
+            Start with payslips/P60s (or invoices), recent bank/credit statements, investment statements, and any receipts you’ll need
+            as evidence. The Document Vault shows gaps and expiry reminders automatically.
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item reveal">
+        <h2 class="accordion-header" id="q6">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#a6" aria-expanded="false" aria-controls="a6">
+            Can I export my data?
+          </button>
+        </h2>
+        <div id="a6" class="accordion-collapse collapse" aria-labelledby="q6" data-bs-parent="#faqAccordion">
+          <div class="accordion-body text-secondary">
+            Yes — export transactions, summaries, and evidence lists to common formats when you need to share or back things up.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center mt-4">
+      <a class="btn btn-primary btn-lg" href="/login.html">Get started — it’s free to try</a>
+    </div>
+  </div>
+</section>
+
 
   <!-- CTA -->
   <section class="section">
