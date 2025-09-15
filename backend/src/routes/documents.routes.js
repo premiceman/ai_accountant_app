@@ -141,21 +141,25 @@ router.delete('/:id', async (req, res) => {
  */
 // ...existing imports and setup above...
 
+// GET /api/documents/:id/stream
 router.get('/:id/stream', async (req, res) => {
   try {
     const userId = String(req.user.id);
     const { id } = req.params;
 
-    // Validate ownership; returns the GridFS files doc (has contentType, filename, metadata)
+    // Validate ownership; returns GridFS files doc
     const fileDoc = await assertUserOwnsFile(id, userId);
 
-    // Content type & inline disposition for PDFs (and images)
     const ct = fileDoc?.contentType || 'application/octet-stream';
+    const fname = (fileDoc?.filename || 'download').replace(/"/g, '');
     res.setHeader('Content-Type', ct);
     res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+
+    // Let browsers/iframe render PDFs inline; other types can still download client-side
     if (ct.startsWith('application/pdf')) {
-      const fname = (fileDoc?.filename || 'document.pdf').replace(/"/g, '');
       res.setHeader('Content-Disposition', `inline; filename="${fname}"`);
+    } else {
+      // No Content-Disposition header here; front-end forces download via Blob
     }
 
     const stream = streamFileById(id);
@@ -167,6 +171,7 @@ router.get('/:id/stream', async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 
 module.exports = router;
