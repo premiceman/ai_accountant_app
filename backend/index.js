@@ -27,12 +27,14 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
+// ✅ Auth gate
+const { requireAuth, requireAuthOrHtmlUnauthorized } =
+  safeRequire('./middleware/authGate') || { requireAuth: null, requireAuthOrHtmlUnauthorized: null };
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.set('trust proxy', 1); // Render proxy -> required for secure cookies
+app.set('trust proxy', 1); // ✅ Render proxy for secure cookies
 
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const UPLOADS_DIR  = path.join(__dirname, '../uploads');
@@ -41,14 +43,14 @@ const DATA_DIR     = path.join(__dirname, '../data');
 // ---- Middleware ----
 app.use(morgan('combined'));
 
-// CORS mainly for local dev; same-origin on Render won’t need it
+// CORS mostly for local dev; same-origin on Render doesn’t need it
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 
 app.use(express.json({ limit: '10mb' }));
 if (cookieParser) {
   app.use(cookieParser());
 } else {
-  console.warn('⚠️ cookie-parser not installed. Cookies will be parsed manually in routes where needed.');
+  console.warn('⚠️ cookie-parser not installed. Cookies will be parsed manually where needed.');
 }
 
 // ---- Static ----
@@ -71,17 +73,29 @@ app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // ---- API mounts ----
-mount('/api/auth', authRouter, 'auth'); // includes availability + session check + login/signup
-mount('/api/user', userRouter, 'user');
+// Public auth endpoints (login/signup + combined /api/auth/check in routes/auth.js)
+mount('/api/auth', authRouter, 'auth');
 
-// Protect docs endpoints with Unauthorized page/JSON
-if (requireAuthOrHtmlUnauthorized && docsRouter) {
-  app.use('/api/docs', requireAuthOrHtmlUnauthorized);
-  app.use('/api/documents', requireAuthOrHtmlUnauthorized);
+// ✅ Protect all user-specific data APIs with cookie/Bearer auth
+if (requireAuth) {
+  app.use('/api/user', requireAuth);
+  app.use('/api/events', requireAuth);
+  app.use('/api/summary', requireAuth);
+  app.use('/api/billing', requireAuth);
+
+  // documents endpoints sometimes serve files/HTML — keep HTML-aware guard
+  if (requireAuthOrHtmlUnauthorized) {
+    app.use('/api/docs', requireAuthOrHtmlUnauthorized);
+    app.use('/api/documents', requireAuthOrHtmlUnauthorized);
+  } else {
+    app.use('/api/docs', requireAuth);
+    app.use('/api/documents', requireAuth);
+  }
 }
+
+mount('/api/user', userRouter, 'user');
 mount('/api/docs', docsRouter, 'documents');
 mount('/api/documents', docsRouter, 'documents (alias)');
-
 mount('/api/events', eventsRouter, 'events');
 mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
