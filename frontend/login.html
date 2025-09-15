@@ -1,32 +1,307 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- add to <head> of login.html/signup.html/home.html/profile.html -->
-  <script>window.__API_BASE='http://localhost:3000';</script>
+  <meta charset="utf-8" />
+  <title>Login — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Theme + libs (same includes as index) -->
+  <script>window.__API_BASE = window.__API_BASE || 'http://localhost:3000';</script>
   <script src="/js/head-include.js"></script>
+
+  <style>
+    :root{
+      --auth-maxw: 980px;
+      --card-w: 440px;
+    }
+
+    body{ background: var(--bg-body); color: var(--fg) }
+
+    /* Top mini-nav */
+    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter:saturate(1.2) blur(8px) }
+    .landing-nav .btn{ padding:.5rem .9rem }
+    .brand-mark{ display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg) }
+    .brand-dot{ width:12px; height:12px; border-radius:50%; background: radial-gradient(circle at 30% 30%, var(--brand), var(--brand-hover)); box-shadow:0 0 24px color-mix(in oklab, var(--brand) 45%, transparent) }
+
+    /* Auth shell */
+    .auth{ min-height: calc(100vh - 56px); display:grid; place-items:center; position:relative; overflow:hidden }
+    .auth-inner{ width:100%; max-width: var(--auth-maxw); padding: clamp(2rem, 4vw, 3rem) 1.25rem; position:relative; z-index:2 }
+    .auth-grid{ display:grid; grid-template-columns: 1.1fr .9fr; gap: clamp(1.25rem, 3vw, 2rem) }
+    @media (max-width: 992px){ .auth-grid{ grid-template-columns: 1fr } }
+
+    /* Left: hero copy */
+    .copy{ padding: clamp(1rem, 2vw, 1.25rem) }
+    .eyebrow{ color:var(--fg-3); font-weight:600; text-transform:uppercase; letter-spacing:.12em }
+    h1{ font-size: clamp(1.6rem, 3.6vw, 2.2rem); line-height:1.2; margin:.5rem 0 0.75rem;
+        background: linear-gradient(120deg, var(--fg), color-mix(in oklab, var(--brand) 35%, var(--fg)));
+        -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .sub{ color:var(--fg-2); max-width: 60ch }
+
+    /* Right: login card */
+    .auth-card{
+      width:100%; max-width: var(--card-w);
+      background: var(--bg-surface);
+      border: 1px solid var(--bd-hairline);
+      border-radius: 1.25rem;
+      box-shadow: var(--shadow);
+      padding: 1.25rem;
+      margin-inline: auto;
+      transform: translateY(8px);
+      transition: transform .35s ease, box-shadow .35s ease;
+    }
+    .auth-card:hover{ transform: translateY(-2px); box-shadow: var(--shadow-2) }
+
+    .btn-outline{
+      --bs-btn-bg: transparent; --bs-btn-border-color: var(--bd-hairline); --bs-btn-color: var(--fg);
+      --bs-btn-hover-bg: var(--bg-surface-2); --bs-btn-hover-border-color: var(--bd); box-shadow:none;
+    }
+
+    /* OAuth buttons */
+    .btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.5rem; width:100% }
+    .btn-google{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
+    .btn-google:hover{ background: var(--bg-surface-2) }
+    .btn-apple{ background: #000; color:#fff; border:1px solid #000 }
+    .btn-apple:hover{ filter:brightness(1.08) }
+
+    .oauth-icon{ width:18px; height:18px; display:inline-block }
+
+    .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
+    .divider::before, .divider::after{ content:""; height:1px; background: var(--bd-hairline); flex:1 }
+
+    .form-floating>.form-control{ background: var(--bg-surface-2); border-color: var(--bd-hairline) }
+    .form-floating>.form-control:focus{ border-color: color-mix(in oklab, var(--brand) 40%, var(--bd)); box-shadow:none }
+    .form-text a{ text-decoration: none }
+
+    .chip{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--bd-hairline); padding:.35rem .6rem; border-radius:999px; background:var(--bg-surface); font-size:.9rem }
+
+    /* Backdrop flair */
+    .mesh{
+      position:absolute; inset:-10% -10% auto -10%; height: 70%;
+      background:
+        radial-gradient(1200px 600px at 15% 35%, color-mix(in oklab,var(--brand) 18%,transparent), transparent),
+        radial-gradient(1200px 600px at 80% 20%, color-mix(in oklab,var(--brand-hover) 18%,transparent), transparent),
+        radial-gradient(1200px 600px at 50% 90%, color-mix(in oklab,#7FDCCB 20%,transparent), transparent);
+      mask-image: radial-gradient(1200px 600px at 50% 40%, #000, transparent 70%);
+      opacity:.6;
+    }
+    .grid{ position:absolute; inset:0;
+      background-image:
+        linear-gradient(to right, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px),
+        linear-gradient(to bottom, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px);
+      background-size: 52px 52px; opacity:.14;
+      mask-image: linear-gradient(to bottom, #000, transparent 75%)
+    }
+
+    .reveal{ opacity:0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease }
+    .reveal.in{ opacity:1; transform:none }
+
+    @media (prefers-reduced-motion: reduce){
+      .reveal{ transition:none }
+    }
+  </style>
 </head>
-<body class="bg-light">
-  <main class="container py-5" style="max-width:480px">
-    <h1 class="h4 mb-3" data-page-title>Sign in</h1>
-    <form id="login-form" class="card p-3 shadow-sm">
-      <div class="mb-3">
-        <label class="form-label">Email or Username</label>
-        <input id="identifier" class="form-control" autocomplete="username" required>
+<body>
+
+  <!-- Mini top nav -->
+  <nav class="landing-nav navbar navbar-expand-lg py-2 border-bottom bg-body-tertiary">
+    <div class="container">
+      <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
+      <div class="ms-auto d-flex align-items-center gap-2">
+        <a class="btn btn-outline" href="/">Home</a>
+        <a class="btn btn-primary" href="/signup.html">Create account</a>
       </div>
-      <div class="mb-3">
-        <label class="form-label">Password</label>
-        <input id="password" type="password" class="form-control" autocomplete="current-password" required>
+    </div>
+  </nav>
+
+  <!-- Auth shell -->
+  <main class="auth">
+    <div class="mesh" aria-hidden="true"></div>
+    <div class="grid" aria-hidden="true"></div>
+
+    <div class="auth-inner">
+      <div class="auth-grid">
+
+        <!-- Copy side -->
+        <section class="copy reveal">
+          <div class="eyebrow">Welcome back</div>
+          <h1>Log in and pick up where you left off.</h1>
+          <p class="sub">
+            Your dashboard, reconciliations, and AI Advisor are ready. Secure by design with
+            read-only bank connections, encryption, and export-anytime controls.
+          </p>
+
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <span class="chip"><i class="bi bi-shield-lock"></i> Encrypted</span>
+            <span class="chip"><i class="bi bi-bank"></i> Open Banking</span>
+            <span class="chip"><i class="bi bi-check2-circle"></i> HMRC-ready</span>
+          </div>
+        </section>
+
+        <!-- Card side -->
+        <section class="reveal">
+          <div class="auth-card">
+            <h2 class="h5 mb-2 text-center">Sign in</h2>
+
+            <!-- OAuth -->
+            <div class="d-grid gap-2">
+              <a id="googleBtn" class="btn btn-oauth btn-google" href="#">
+                <!-- Minimal Google "G" -->
+                <svg class="oauth-icon" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#EA4335" d="M24 9.5c3.5 0 6 1.5 7.4 2.7l5-4.9C33.3 4 28.9 2.5 24 2.5 14.9 2.5 7.2 8.1 4.1 15.8l6.7 5.2C12.1 15.3 17.4 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46 24.5c0-1.6-.1-2.7-.4-3.9H24v7.4h12.7c-.3 2-1.8 5-5 7.1l7.7 6c4.5-4.1 6.6-10.2 6.6-16.6z"/>
+                  <path fill="#FBBC05" d="M10.8 21l-6.7-5.2C2.8 18.2 2 21 2 24s.8 5.8 2.1 8.2l6.7-5.2C10.3 25.7 10 24.9 10 24s.3-1.7.8-3z"/>
+                  <path fill="#34A853" d="M24 46.5c6.5 0 12-2.1 16-5.8l-7.7-6c-2.1 1.5-4.9 2.6-8.3 2.6-6.6 0-11.9-5.8-13.2-13.5l-6.7 5.2C7.2 39 14.9 46.5 24 46.5z"/>
+                </svg>
+                Continue with Google
+              </a>
+              <a id="appleBtn" class="btn btn-oauth btn-apple" href="#">
+                <i class="bi bi-apple"></i> Sign in with Apple
+              </a>
+            </div>
+
+            <div class="divider small text-muted text-center"><span>or</span></div>
+
+            <!-- Email / Password -->
+            <form id="loginForm" class="needs-validation" novalidate>
+              <div class="form-floating mb-2">
+                <input type="email" class="form-control" id="email" name="email" placeholder="name@domain.com" required />
+                <label for="email">Email</label>
+                <div class="invalid-feedback">Enter a valid email.</div>
+              </div>
+
+              <div class="form-floating mb-2 position-relative">
+                <input type="password" class="form-control" id="password" name="password" placeholder="••••••••" minlength="6" required />
+                <label for="password">Password</label>
+                <button type="button" class="btn btn-sm btn-outline position-absolute end-0 top-50 translate-middle-y me-2" id="togglePw" aria-label="Show password">
+                  <i class="bi bi-eye"></i>
+                </button>
+                <div class="invalid-feedback">Password is required.</div>
+              </div>
+
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="remember" />
+                  <label class="form-check-label" for="remember">Remember me</label>
+                </div>
+                <a class="small" href="/forgot.html">Forgot password?</a>
+              </div>
+
+              <button id="loginBtn" class="btn btn-primary w-100" type="submit">
+                <span class="btn-label">Sign in</span>
+                <span class="spinner-border spinner-border-sm ms-2 d-none" role="status" aria-hidden="true"></span>
+              </button>
+
+              <p class="small text-center mt-2 text-secondary">
+                By continuing you agree to our
+                <a href="/legal.html#terms">Terms</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
+              </p>
+
+              <div id="formAlert" class="alert alert-danger mt-2 d-none" role="alert"></div>
+            </form>
+
+            <div class="text-center mt-2">
+              <span class="text-secondary small">New here?</span>
+              <a class="small ms-1" href="/signup.html">Create an account</a>
+            </div>
+          </div>
+        </section>
+
       </div>
-      <div class="form-check mb-3">
-        <input id="remember" class="form-check-input" type="checkbox">
-        <label class="form-check-label" for="remember">Remember me</label>
-      </div>
-      <div id="login-error" class="text-danger small d-none"></div>
-      <button id="login-btn" class="btn btn-primary w-100" type="submit">Sign in</button>
-    </form>
-    <p class="mt-3 text-center">No account? <a href="./signup.html">Sign up</a></p>
+    </div>
   </main>
-  <script src="./js/auth.js"></script>
-  <script>Auth.enforce({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: true });</script>
-  <script src="./js/login.js"></script>
-</body></html>
+
+  <!-- Footer (light) -->
+  <footer class="site-footer py-4">
+    <div class="container d-flex flex-wrap gap-3 align-items-center justify-content-between">
+      <div class="small">&copy; <span id="y"></span> AI Accountant. All rights reserved.</div>
+      <div class="d-flex gap-3 small">
+        <a class="link-secondary" href="/">Home</a>
+        <a class="link-secondary" href="/signup.html">Sign up</a>
+        <a class="link-secondary" href="/legal.html">Legal</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // --- Config (adjust endpoints if your backend differs)
+    const LOGIN_ENDPOINT  = (window.__API_BASE || '') + '/auth/login';
+    const GOOGLE_OAUTH    = (window.__API_BASE || '') + '/auth/google';
+    const APPLE_OAUTH     = (window.__API_BASE || '') + '/auth/apple';
+    const AFTER_LOGIN_URL = '/home.html';
+
+    // --- Enhance: reveal on view
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold: 0.14 });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+    // Year
+    document.getElementById('y').textContent = new Date().getFullYear();
+
+    // OAuth buttons
+    document.getElementById('googleBtn')?.addEventListener('click', (e) => {
+      e.preventDefault(); window.location.href = GOOGLE_OAUTH;
+    });
+    document.getElementById('appleBtn')?.addEventListener('click', (e) => {
+      e.preventDefault(); window.location.href = APPLE_OAUTH;
+    });
+
+    // Show/hide password
+    const pw = document.getElementById('password');
+    const toggle = document.getElementById('togglePw');
+    toggle?.addEventListener('click', () => {
+      const show = pw.type === 'password';
+      pw.type = show ? 'text' : 'password';
+      toggle.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
+      toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    });
+
+    // Form submit (progressive enhancement)
+    const form = document.getElementById('loginForm');
+    const btn  = document.getElementById('loginBtn');
+    const spn  = btn?.querySelector('.spinner-border');
+    const lbl  = btn?.querySelector('.btn-label');
+    const alertBox = document.getElementById('formAlert');
+
+    // If you prefer your existing login.js, you can remove everything below and keep the markup.
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // HTML5 validation
+      if(!form.checkValidity()){
+        form.classList.add('was-validated');
+        return;
+      }
+
+      try {
+        btn.disabled = true; spn.classList.remove('d-none'); lbl.textContent = 'Signing in…';
+        alertBox.classList.add('d-none'); alertBox.textContent = '';
+
+        const payload = {
+          email: form.email.value.trim(),
+          password: form.password.value
+        };
+
+        const res = await fetch(LOGIN_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',            // keep sessions/cookies if your backend uses them
+          body: JSON.stringify(payload)
+        });
+
+        if(res.ok){
+          window.location.href = AFTER_LOGIN_URL;
+        } else {
+          const data = await res.json().catch(()=>({message:'Login failed'}));
+          throw new Error(data.message || 'Login failed');
+        }
+      } catch (err){
+        alertBox.textContent = err.message || 'Unable to sign in right now.';
+        alertBox.classList.remove('d-none');
+      } finally {
+        btn.disabled = false; spn.classList.add('d-none'); lbl.textContent = 'Sign in';
+      }
+    });
+  </script>
+</body>
+</html>
