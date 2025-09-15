@@ -1,4 +1,4 @@
-// frontend/js/http-shim.js
+// /frontend/js/http-shim.js
 (function(){
     const _fetch = window.fetch;
     window.fetch = function(input, init = {}) {

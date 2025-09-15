@@ -5,7 +5,6 @@ const SESSION_COOKIE = process.env.SESSION_COOKIE || 'sid';
 let jwt;
 try { jwt = require('jsonwebtoken'); } catch { jwt = null; }
 
-// Tiny cookie parser fallback (works even without cookie-parser)
 function getCookie(req, name) {
   if (req.cookies && Object.prototype.hasOwnProperty.call(req.cookies, name)) {
     return req.cookies[name];
@@ -28,7 +27,7 @@ function extractToken(req) {
 
 function attachAuth(req, _res, next) {
   const token = extractToken(req);
-  if (!token || !jwt) { req.auth = null; return next(); }
+  if (!token || !jwt) { req.auth = null; req.userId = undefined; return next(); }
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     req.auth = {
@@ -37,7 +36,7 @@ function attachAuth(req, _res, next) {
       name: payload.name || undefined,
       token
     };
-    req.userId = req.auth.userId; // compatibility
+    req.userId = req.auth.userId;
   } catch {
     req.auth = null;
     req.userId = undefined;
@@ -52,14 +51,11 @@ function wantsHtml(req) {
 
 function requireAuth(req, res, next) {
   attachAuth(req, res, () => {
-    if (!req.auth || !req.auth.userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!req.auth || !req.auth.userId) return res.status(401).json({ error: 'Unauthorized' });
     next();
   });
 }
 
-// Used where your routes might return HTML; otherwise use requireAuth.
 function requireAuthOrHtmlUnauthorized(req, res, next) {
   attachAuth(req, res, () => {
     if (!req.auth || !req.auth.userId) {
