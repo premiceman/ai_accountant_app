@@ -5,22 +5,16 @@ const router = express.Router();
 const SESSION_COOKIE = process.env.SESSION_COOKIE || 'sid';
 const JWT_SECRET = process.env.JWT_SECRET; // if set, we verify JWT
 
-// manual cookie parse (when cookie-parser isn't installed)
+// manual cookie parse (works even if cookie-parser isn't installed)
 function getCookie(req, name) {
-  // if cookie-parser is present:
   if (req.cookies && Object.prototype.hasOwnProperty.call(req.cookies, name)) {
     return req.cookies[name];
   }
-  // fallback: parse header
   const raw = req.headers.cookie || '';
-  const parts = raw.split(';').map(s => s.trim());
-  for (const p of parts) {
+  for (const part of raw.split(';')) {
+    const p = part.trim();
     const i = p.indexOf('=');
-    if (i > -1) {
-      const k = p.slice(0, i);
-      const v = decodeURIComponent(p.slice(i + 1));
-      if (k === name) return v;
-    }
+    if (i > -1 && p.slice(0, i) === name) return decodeURIComponent(p.slice(i + 1));
   }
   return undefined;
 }
@@ -35,14 +29,13 @@ if (JWT_SECRET) {
 router.get('/check', (req, res) => {
   const cookieToken = getCookie(req, SESSION_COOKIE);
 
-  // Optional Bearer fallback
+  // Optional: allow Authorization: Bearer <token> too
   const auth = req.headers.authorization || '';
   const bearerToken = auth.startsWith('Bearer ') ? auth.slice(7) : null;
 
   const token = cookieToken || bearerToken;
   if (!token) return res.status(401).json({ ok: false });
 
-  // If we have a secret & jsonwebtoken, verify; otherwise accept presence
   if (JWT_SECRET && jwt) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
@@ -59,7 +52,7 @@ router.get('/check', (req, res) => {
     }
   }
 
-  // Compatibility mode: cookie presence = authenticated
+  // Compatibility mode: treat cookie presence as authenticated
   return res.json({ ok: true, user: null });
 });
 

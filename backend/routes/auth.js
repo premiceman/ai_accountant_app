@@ -6,11 +6,35 @@ const User = require('../models/User');
 
 const router = express.Router();
 
-const TOKEN_TTL  = process.env.JWT_EXPIRES_IN || '2h';
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
-const LEGAL_VERSION = process.env.LEGAL_VERSION || '2025-09-15';
+// ---- Config ----
+const TOKEN_TTL      = process.env.JWT_EXPIRES_IN || '7d';              // match cookie lifetime
+const JWT_SECRET     = process.env.JWT_SECRET || 'change-me';           // SET in Render
+const LEGAL_VERSION  = process.env.LEGAL_VERSION || '2025-09-15';
+const SESSION_COOKIE = process.env.SESSION_COOKIE || 'sid';
+const CROSS_SITE     = String(process.env.CROSS_SITE || '').toLowerCase() === 'true'; // true ONLY if FE & API are different domains
 
-const issueToken = (userId) => jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+// Cookie options (Render = HTTPS)
+const cookieOpts = {
+  httpOnly: true,
+  secure: true,
+  sameSite: CROSS_SITE ? 'none' : 'lax',
+  path: '/',
+  maxAge: 1000 * 60 * 60 * 24 * 7 // 7 days
+};
+
+// Helper: sign JWT with common fields
+function issueToken(user) {
+  return jwt.sign(
+    {
+      sub: String(user._id),
+      id:  String(user._id),
+      email: user.email,
+      name: [user.firstName, user.lastName].filter(Boolean).join(' ')
+    },
+    JWT_SECRET,
+    { expiresIn: TOKEN_TTL }
+  );
+}
 
 function publicUser(u) {
   if (!u) return null;
@@ -29,33 +53,75 @@ function publicUser(u) {
     updatedAt: u.updatedAt,
   };
 }
+const normEmail = (x) => String(x || '').trim().toLowerCase();
+const normUsername = (x) => String(x || '').trim();
+const isValidEmail = (x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || ''));
 
-function normEmail(x) { return String(x || '').trim().toLowerCase(); }
-function normUsername(x) { return String(x || '').trim(); }
-function isValidEmail(x) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || ''));
+// Fallback cookie parser (works even if cookie-parser middleware is missing)
+function getCookie(req, name) {
+  if (req.cookies && Object.prototype.hasOwnProperty.call(req.cookies, name)) {
+    return req.cookies[name];
+  }
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const p = part.trim();
+    const i = p.indexOf('=');
+    if (i > -1 && p.slice(0, i) === name) return decodeURIComponent(p.slice(i + 1));
+  }
+  return undefined;
 }
 
-// GET /api/auth/check?email=&username=
+/**
+ * GET /api/auth/check
+ * Dual purpose:
+ *  1) If ?email and/or ?username are provided -> availability check (existing behavior).
+ *  2) If no query -> session check via cookie or Bearer token.
+ */
 router.get('/check', async (req, res) => {
   try {
-    const email    = req.query.email ? normEmail(req.query.email) : null;
-    const username = req.query.username ? normUsername(req.query.username) : null;
+    const hasAvailabilityParams = ('email' in req.query) || ('username' in req.query);
 
-    const out = {};
-    if (email) {
-      const exists = await User.exists({ email });
-      out.emailAvailable = !exists;
+    if (hasAvailabilityParams) {
+      const email    = req.query.email ? normEmail(req.query.email) : null;
+      const username = req.query.username ? normUsername(req.query.username) : null;
+
+      const out = {};
+      if (email) {
+        const exists = await User.exists({ email });
+        out.emailAvailable = !exists;
+      }
+      if (username) {
+        const exists = await User.exists({ username });
+        out.usernameAvailable = !exists;
+      }
+      if (!email && !username) return res.status(400).json({ error: 'email or username required' });
+      return res.json(out);
     }
-    if (username) {
-      const exists = await User.exists({ username });
-      out.usernameAvailable = !exists;
+
+    // ---- Session check (no availability params) ----
+    const cookieToken = getCookie(req, SESSION_COOKIE);
+    const auth = req.headers.authorization || '';
+    const bearerToken = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    const token = cookieToken || bearerToken;
+
+    if (!token) return res.status(401).json({ ok: false });
+
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      return res.json({
+        ok: true,
+        user: {
+          id: payload.sub || payload.id,
+          email: payload.email,
+          name:  payload.name
+        }
+      });
+    } catch {
+      return res.status(401).json({ ok: false });
     }
-    if (!email && !username) return res.status(400).json({ error: 'email or username required' });
-    res.json(out);
   } catch (e) {
     console.error('GET /auth/check error:', e);
-    res.status(500).json({ error: 'Server error' });
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -66,11 +132,10 @@ router.post('/signup', async (req, res) => {
       firstName, lastName, username, email,
       password, passwordConfirm,
       dateOfBirth,
-      agreeLegal,         // boolean
-      legalVersion        // optional override from client; we still set server-side
+      agreeLegal,
+      legalVersion
     } = req.body || {};
 
-    // Required checks
     if (!firstName || !lastName || !email || !password || !passwordConfirm || !dateOfBirth) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -82,28 +147,22 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
-    // DOB validation
     const dob = new Date(String(dateOfBirth));
     if (isNaN(dob.getTime())) return res.status(400).json({ error: 'Invalid date of birth' });
     if (dob >= new Date()) return res.status(400).json({ error: 'Date of birth must be in the past' });
 
-    // Legal acceptance (REQUIRED)
-    if (!agreeLegal) {
-      return res.status(400).json({ error: 'You must agree to the Terms to create an account' });
-    }
+    if (!agreeLegal) return res.status(400).json({ error: 'You must agree to the Terms to create an account' });
 
     const emailN = normEmail(email);
     const userN  = normUsername(username);
 
-    // Availability
     const [emailExists, usernameExists] = await Promise.all([
       User.exists({ email: emailN }),
       userN ? User.exists({ username: userN }) : Promise.resolve(null),
     ]);
-    if (emailExists) return res.status(409).json({ error: 'Email already registered' });
+    if (emailExists)    return res.status(409).json({ error: 'Email already registered' });
     if (usernameExists) return res.status(409).json({ error: 'Username already in use' });
 
-    // Create
     const hash = await bcrypt.hash(String(password), 10);
     const user = new User({
       firstName: String(firstName).trim(),
@@ -114,12 +173,12 @@ router.post('/signup', async (req, res) => {
       dateOfBirth: dob,
       eulaAcceptedAt: new Date(),
       eulaVersion: String(legalVersion || LEGAL_VERSION),
-      // uid auto-generates via schema default
     });
     await user.save();
 
-    const token = issueToken(user._id);
-    res.status(201).json({ token, user: publicUser(user) });
+    const token = issueToken(user);
+    res.cookie(SESSION_COOKIE, token, cookieOpts);
+    return res.status(201).json({ ok: true, token, user: publicUser(user) });
   } catch (e) {
     console.error('Signup error:', e);
     if (e?.code === 11000) {
@@ -127,7 +186,7 @@ router.post('/signup', async (req, res) => {
       if (e.keyPattern?.username) return res.status(409).json({ error: 'Username already in use' });
       if (e.keyPattern?.uid)      return res.status(500).json({ error: 'Failed to allocate user id; please retry' });
     }
-    res.status(500).json({ error: 'Server error' });
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -146,12 +205,23 @@ router.post('/login', async (req, res) => {
     const ok = await bcrypt.compare(String(password), user.password);
     if (!ok) return res.status(400).json({ error: 'Invalid credentials' });
 
-    const token = issueToken(user._id);
-    res.json({ token, user: publicUser(user) });
+    const token = issueToken(user);
+
+    // Set secure httpOnly cookie (dashboard guard relies on this)
+    res.cookie(SESSION_COOKIE, token, cookieOpts);
+
+    // Also return token+user (backward compatible)
+    return res.json({ ok: true, token, user: publicUser(user) });
   } catch (e) {
     console.error('Login error:', e);
-    res.status(500).json({ error: 'Server error' });
+    return res.status(500).json({ error: 'Server error' });
   }
+});
+
+// POST /api/auth/logout — clear cookie
+router.post('/logout', (req, res) => {
+  res.clearCookie(SESSION_COOKIE, { ...cookieOpts, maxAge: 0 });
+  res.json({ ok: true });
 });
 
 module.exports = router;

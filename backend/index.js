@@ -11,7 +11,7 @@ const mongoose = require('mongoose');
 function safeRequire(modPath) { try { return require(modPath); } catch { return null; } }
 
 // ---- Optional middlewares ----
-const cookieParser = safeRequire('cookie-parser'); // <- may be null if not installed
+const cookieParser = safeRequire('cookie-parser'); // may be null if not installed
 
 // ---- Routers (mount only if found) ----
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
@@ -27,14 +27,12 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-// ✅ NEW: additive auth check router (provides GET /api/auth/check)
-const authCheckRouter = safeRequire('./routes/authCheck');
-
-// ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.set('trust proxy', 1); // Render proxy -> required for secure cookies
 
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const UPLOADS_DIR  = path.join(__dirname, '../uploads');
@@ -43,22 +41,20 @@ const DATA_DIR     = path.join(__dirname, '../data');
 // ---- Middleware ----
 app.use(morgan('combined'));
 
-// If frontend & API are same origin on Render, CORS isn't needed for same-origin requests.
-// Keeping it here for local dev; adjust origins if you need cross-origin access.
+// CORS mainly for local dev; same-origin on Render won’t need it
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 
 app.use(express.json({ limit: '10mb' }));
-
 if (cookieParser) {
   app.use(cookieParser());
 } else {
-  console.warn('⚠️ cookie-parser not installed. /api/auth/check will use manual cookie parsing fallback.');
+  console.warn('⚠️ cookie-parser not installed. Cookies will be parsed manually in routes where needed.');
 }
 
 // ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/data', express.static(DATA_DIR)); // optional
-app.use(express.static(FRONTEND_DIR));      // serves your HTML/JS/CSS
+app.use(express.static(FRONTEND_DIR));      // serves HTML/JS/CSS
 
 // ---- Mount helper ----
 function mount(prefix, router, name) {
@@ -75,8 +71,7 @@ app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // ---- API mounts ----
-mount('/api/auth', authRouter, 'auth');
-mount('/api/auth', authCheckRouter, 'auth-check'); // adds GET /api/auth/check
+mount('/api/auth', authRouter, 'auth'); // includes availability + session check + login/signup
 mount('/api/user', userRouter, 'user');
 
 // Protect docs endpoints with Unauthorized page/JSON
@@ -91,7 +86,7 @@ mount('/api/events', eventsRouter, 'events');
 mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 
-// ---- Frontend landing (keep explicit root) ----
+// ---- Frontend landing ----
 app.get('/', (_req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
 
 // ---- API 404s (JSON) AFTER all API routes ----
@@ -99,13 +94,11 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // ---- Pretty 404 for non-API requests (HTML) ----
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api')) return next(); // already handled above
+  if (req.path.startsWith('/api')) return next();
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-
   const accept = (req.headers.accept || '').toLowerCase();
   const wantsHtml = accept.includes('text/html') || accept === '*/*' || accept === '';
   if (!wantsHtml) return res.status(404).type('text/plain').send('Not Found');
-
   res.status(404).sendFile(path.join(FRONTEND_DIR, '404.html'));
 });
 
