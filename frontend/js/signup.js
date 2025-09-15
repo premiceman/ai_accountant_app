@@ -149,3 +149,14 @@
 
         const params = new URLSearchParams(location.search);
         const next = params.get('next');
+        location.replace(next && next.startsWith('/') ? next : './home.html');
+      } catch (err) {
+        console.error('Signup POST error:', err);
+        setErr('email','Network error — please try again');
+      } finally {
+        if (btn) btn.textContent = original || 'Create account';
+        btn?.removeAttribute('disabled');
+      }
+    });
+  });
+})();
