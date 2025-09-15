@@ -139,15 +139,24 @@ router.delete('/:id', async (req, res) => {
  * GET /api/documents/:id/stream
  * Streams ONLY if file belongs to the caller.
  */
+// ...existing imports and setup above...
+
 router.get('/:id/stream', async (req, res) => {
   try {
     const userId = String(req.user.id);
     const { id } = req.params;
 
-    // Validate ownership first; returns file doc incl. contentType
+    // Validate ownership; returns the GridFS files doc (has contentType, filename, metadata)
     const fileDoc = await assertUserOwnsFile(id, userId);
-    if (fileDoc?.contentType) res.setHeader('Content-Type', fileDoc.contentType);
+
+    // Content type & inline disposition for PDFs (and images)
+    const ct = fileDoc?.contentType || 'application/octet-stream';
+    res.setHeader('Content-Type', ct);
     res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+    if (ct.startsWith('application/pdf')) {
+      const fname = (fileDoc?.filename || 'document.pdf').replace(/"/g, '');
+      res.setHeader('Content-Disposition', `inline; filename="${fname}"`);
+    }
 
     const stream = streamFileById(id);
     stream.on('error', () => res.sendStatus(404));
@@ -158,5 +167,6 @@ router.get('/:id/stream', async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 module.exports = router;
