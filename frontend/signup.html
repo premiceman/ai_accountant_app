@@ -1,128 +1,85 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8"/>
-    <title>Sign up</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<head>
+  <!-- match login head includes -->
+  <script>window.__API_BASE='http://localhost:3000';</script>
+  <script src="/js/head-include.js"></script>
+</head>
+<body class="bg-light">
+  <main class="container py-5" style="max-width:480px">
+    <h1 class="h4 mb-3" data-page-title>Sign up</h1>
 
-    <link href="./css/bootstrap.min.css" rel="stylesheet"/>
-    <link href="./css/styles.css" rel="stylesheet"/>
-
-    <!-- On-theme tweaks (use your design tokens, never raw hex) -->
-    <style>
-      label.req::after { content:" *"; color: var(--danger); margin-left: 2px; }
-      .form-text.error { color: var(--danger); min-height: 0.9em; }
-      .form-control.is-invalid {
-        border-color: var(--danger) !important;
-        box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 28%, transparent);
-      }
-      .form-control.is-valid {
-        border-color: var(--success) !important;
-        box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 28%, transparent);
-      }
-      .auth-card { background: var(--bg-surface); border: 1px solid var(--bd-hairline); box-shadow: var(--shadow); border-radius: var(--radius); }
-      .auth-title { letter-spacing: .2px; }
-      .auth-subtle { color: var(--fg-2); }
-      /* checkboxes on-theme */
-      .form-check-input:focus { box-shadow: 0 0 0 3px var(--focus); border-color: var(--brand); }
-      .form-check-input:checked { background-color: var(--brand); border-color: var(--brand); }
-    </style>
-  </head>
-  <body>
-    <script src="./js/config.js"></script>
-    <script src="./js/auth.js"></script>
-    <script>
-      // Bounce to app if already logged in
-      document.addEventListener('DOMContentLoaded', () => {
-        Auth.enforce({
-          allowAnonymous:['index.html','login.html','signup.html','404.html','unauthorized.html'],
-          bounceIfAuthed:true
-        });
-      });
-    </script>
-
-    <div class="container py-5">
-      <div class="row justify-content-center">
-        <div class="col-12 col-md-8 col-lg-6">
-          <div class="card auth-card">
-            <div class="card-body p-4 p-lg-5">
-              <h1 class="h4 auth-title mb-1">Create your account</h1>
-              <p class="auth-subtle mb-4">Welcome to AI Accountant. It takes less than a minute.</p>
-
-              <form id="signupForm" novalidate>
-                <div class="row g-3">
-                  <div class="col-md-6">
-                    <label class="form-label req" for="firstName">First name</label>
-                    <input id="firstName" name="firstName" class="form-control" autocomplete="given-name" required/>
-                    <div class="form-text error" data-error-for="firstName"></div>
-                  </div>
-
-                  <div class="col-md-6">
-                    <label class="form-label req" for="lastName">Last name</label>
-                    <input id="lastName" name="lastName" class="form-control" autocomplete="family-name" required/>
-                    <div class="form-text error" data-error-for="lastName"></div>
-                  </div>
-
-                  <div class="col-md-6">
-                    <label class="form-label" for="username">Username (optional)</label>
-                    <input id="username" name="username" class="form-control" autocomplete="username"/>
-                    <div class="form-text" id="usernameHelp">Pick a handle; must be unique if set.</div>
-                    <div class="form-text error" data-error-for="username"></div>
-                  </div>
-
-                  <div class="col-md-6">
-                    <label class="form-label req" for="email">Email</label>
-                    <input id="email" name="email" type="email" class="form-control" autocomplete="email" required/>
-                    <div class="form-text error" data-error-for="email"></div>
-                  </div>
-
-                  <div class="col-md-6">
-                    <label class="form-label req" for="dateOfBirth">Date of birth</label>
-                    <input id="dateOfBirth" name="dateOfBirth" type="date" class="form-control" required/>
-                    <div class="form-text error" data-error-for="dateOfBirth"></div>
-                  </div>
-
-                  <div class="col-md-6"></div>
-
-                  <div class="col-md-6">
-                    <label class="form-label req" for="password">Password</label>
-                    <input id="password" name="password" type="password" class="form-control" autocomplete="new-password" minlength="8" required/>
-                    <div class="form-text">At least 8 characters.</div>
-                    <div class="form-text error" data-error-for="password"></div>
-                  </div>
-
-                  <div class="col-md-6">
-                    <label class="form-label req" for="passwordConfirm">Confirm password</label>
-                    <input id="passwordConfirm" name="passwordConfirm" type="password" class="form-control" autocomplete="new-password" required/>
-                    <div class="form-text error" data-error-for="passwordConfirm"></div>
-                  </div>
-
-                  <!-- Required legal acceptance -->
-                  <div class="col-12">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="agreeLegal" required>
-                      <label class="form-check-label req" for="agreeLegal">
-                        I agree to the <a href="./legal.html" target="_blank" rel="noopener">Terms, EULA, Privacy & policies</a>.
-                      </label>
-                    </div>
-                    <div class="form-text error" data-error-for="agreeLegal"></div>
-                  </div>
-
-                  <div class="col-12">
-                    <button class="btn btn-primary w-100" type="submit" id="signupBtn">Create account</button>
-                  </div>
-                </div>
-              </form>
-
-              <div class="mt-3 text-center">
-                <a href="./login.html">Already have an account? Sign in →</a>
-              </div>
-            </div>
-          </div>
-        </div>
+    <!-- same card/padding/shadow as login -->
+    <form id="signupForm" class="card p-3 shadow-sm" novalidate>
+      <div class="mb-3">
+        <label class="form-label">First name</label>
+        <input id="firstName" name="firstName" class="form-control" autocomplete="given-name" required>
+        <div class="form-text error text-danger small" data-error-for="firstName"></div>
       </div>
-    </div>
 
-    <script src="./js/signup.js"></script>
-  </body>
+      <div class="mb-3">
+        <label class="form-label">Last name</label>
+        <input id="lastName" name="lastName" class="form-control" autocomplete="family-name" required>
+        <div class="form-text error text-danger small" data-error-for="lastName"></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Username (optional)</label>
+        <input id="username" name="username" class="form-control" autocomplete="username">
+        <div class="form-text" id="usernameHelp">Pick a handle; must be unique if set.</div>
+        <div class="form-text error text-danger small" data-error-for="username"></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Email</label>
+        <input id="email" name="email" type="email" class="form-control" autocomplete="email" required>
+        <div class="form-text error text-danger small" data-error-for="email"></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Date of birth</label>
+        <input id="dateOfBirth" name="dateOfBirth" type="date" class="form-control" required>
+        <div class="form-text error text-danger small" data-error-for="dateOfBirth"></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Password</label>
+        <input id="password" name="password" type="password" class="form-control" autocomplete="new-password" minlength="8" required>
+        <div class="form-text">At least 8 characters.</div>
+        <div class="form-text error text-danger small" data-error-for="password"></div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Confirm password</label>
+        <input id="passwordConfirm" name="passwordConfirm" type="password" class="form-control" autocomplete="new-password" required>
+        <div class="form-text error text-danger small" data-error-for="passwordConfirm"></div>
+      </div>
+
+      <div class="col-12">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="agreeLegal" required>
+          <label class="form-check-label" for="agreeLegal">
+            I agree to the <a href="./legal.html" target="_blank">Terms, EULA, Privacy & policies</a>.
+          </label>
+        </div>
+        <div class="form-text error" data-error-for="agreeLegal"></div>
+      </div>
+      
+
+      <!-- general error (optional, kept for parity with login) -->
+      <div id="signup-error" class="text-danger small d-none"></div>
+
+      <button id="signupBtn" class="btn btn-primary w-100" type="submit">Create account</button>
+    </form>
+
+    <p class="mt-3 text-center">Already have an account? <a href="./login.html">Sign in</a></p>
+  </main>
+
+  <!-- same script setup as login -->
+  <script src="./js/auth.js"></script>
+  <script>
+    Auth.enforce({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: true });
+  </script>
+  <script src="./js/signup.js"></script>
+</body>
 </html>
