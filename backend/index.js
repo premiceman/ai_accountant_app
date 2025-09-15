@@ -6,6 +6,7 @@ const express = require('express');
 const cors = require('cors');
 let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,next)=>next(); }
 const mongoose = require('mongoose');
+const cookieParser = require('cookie-parser'); // ✅ NEW
 
 // Helper to require modules without crashing if missing
 function safeRequire(modPath) { try { return require(modPath); } catch { return null; } }
@@ -24,7 +25,9 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 
-// ---- AUTH GATE ----
+// ✅ NEW: additive auth check router (provides GET /api/auth/check)
+const authCheckRouter = safeRequire('./routes/authCheck');
+
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
 
 const app = express();
@@ -38,6 +41,7 @@ const DATA_DIR     = path.join(__dirname, '../data');
 app.use(morgan('combined'));
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser()); // ✅ NEW (so req.cookies works)
 
 // ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -60,6 +64,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // ---- API mounts ----
 mount('/api/auth', authRouter, 'auth');
+mount('/api/auth', authCheckRouter, 'auth-check'); // ✅ NEW: adds GET /api/auth/check
 mount('/api/user', userRouter, 'user');
 
 // Protect docs endpoints with Unauthorized page/JSON
@@ -103,7 +108,7 @@ const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accoun
 mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+    app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server running on port ${PORT}`)); // Render-safe bind
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err);

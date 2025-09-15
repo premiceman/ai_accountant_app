@@ -3,6 +3,12 @@
 <head>
   <script src="/js/head-include.js"></script>
   <title>Dashboard — AI Accountant</title>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      Auth.enforce(true);    // blocks unauthenticated access
+    });
+  </script>
+  
 </head>
 <body>
   <div id="topbar-container"></div>
