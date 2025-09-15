@@ -8,38 +8,60 @@
     <link href="./css/bootstrap.min.css" rel="stylesheet"/>
     <link href="./css/styles.css" rel="stylesheet"/>
 
+    <!-- On-theme tweaks (use your design tokens, never raw hex) -->
     <style>
-      label.req::after { content:" *"; color:#d32f2f; margin-left:2px; }
-      .form-text.error { color:#d32f2f; }
+      /* Required asterisk + error text on-theme */
+      label.req::after { content:" *"; color: var(--danger); margin-left: 2px; }
+      .form-text.error { color: var(--danger); min-height: 0.9em; }
+
+      /* Make Bootstrap's validity states use your palette + focus ring */
+      .form-control.is-invalid {
+        border-color: var(--danger) !important;
+        box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 28%, transparent);
+      }
+      .form-control.is-valid {
+        border-color: var(--success) !important;
+        box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 28%, transparent);
+      }
+
+      /* Card spacing/feel consistent with the rest of the app */
+      .auth-card { background: var(--bg-surface); border: 1px solid var(--bd-hairline); box-shadow: var(--shadow); border-radius: var(--radius); }
+      .auth-title { letter-spacing: .2px; }
+      .auth-subtle { color: var(--fg-2); }
     </style>
   </head>
-  <body class="bg-light">
+  <body>
     <script src="./js/config.js"></script>
     <script src="./js/auth.js"></script>
     <script>
-      // Bounce to app if already logged in
+      // Bounce to app if already logged in (keeps your existing behavior)
       document.addEventListener('DOMContentLoaded', () => {
-        Auth.enforce({ allowAnonymous:['index.html','login.html','signup.html','404.html','unauthorized.html'], bounceIfAuthed:true });
+        Auth.enforce({
+          allowAnonymous:['index.html','login.html','signup.html','404.html','unauthorized.html'],
+          bounceIfAuthed:true
+        });
       });
     </script>
 
     <div class="container py-5">
       <div class="row justify-content-center">
         <div class="col-12 col-md-8 col-lg-6">
-          <div class="card shadow-sm">
-            <div class="card-body p-4">
-              <h1 class="h4 mb-3">Create your account</h1>
+          <div class="card auth-card">
+            <div class="card-body p-4 p-lg-5">
+              <h1 class="h4 auth-title mb-1">Create your account</h1>
+              <p class="auth-subtle mb-4">Welcome to AI Accountant. It takes less than a minute.</p>
 
               <form id="signupForm" novalidate>
                 <div class="row g-3">
                   <div class="col-md-6">
                     <label class="form-label req" for="firstName">First name</label>
-                    <input id="firstName" name="firstName" class="form-control" required/>
+                    <input id="firstName" name="firstName" class="form-control" autocomplete="given-name" required/>
                     <div class="form-text error" data-error-for="firstName"></div>
                   </div>
+
                   <div class="col-md-6">
                     <label class="form-label req" for="lastName">Last name</label>
-                    <input id="lastName" name="lastName" class="form-control" required/>
+                    <input id="lastName" name="lastName" class="form-control" autocomplete="family-name" required/>
                     <div class="form-text error" data-error-for="lastName"></div>
                   </div>
 
