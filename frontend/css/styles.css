@@ -667,68 +667,6 @@ body{ padding-top: var(--topbar-h); padding-left: var(--sidebar-collapsed); }
   .billing-toggle__knob { transition: none !important; }
 }
 
-/* =========================
-   Landing nav: scrolled state
-   ========================= */
-   .landing-nav{
-    background: color-mix(in oklab, var(--bg-surface) 92%, white);
-    border-bottom: 1px solid var(--bd-hairline);
-    transition:
-      background .18s ease,
-      border-color .18s ease,
-      box-shadow .18s ease,
-      backdrop-filter .18s ease;
-  }
-  
-  /* When the page is scrolled a bit (toggled by landing.js) */
-  .landing-nav.scrolled{
-    background: color-mix(in oklab, var(--bg-surface) 86%, white);
-    border-bottom-color: color-mix(in oklab, var(--bd-hairline) 80%, #0000);
-    box-shadow: var(--shadow);
-    backdrop-filter: saturate(1.15) blur(8px);
-  }
-  
-  /* Buttons in the landing nav (keeps outline style subtle) */
-  .landing-nav .btn{
-    border-color: var(--bd-hairline);
-  }
-  .landing-nav .btn:hover{
-    background: var(--bg-surface-2);
-  }
-  
-  /* Active section highlight (set by landing.js on the matching anchor) */
-  .landing-nav .btn.active{
-    color: #0E151A !important;
-    background: color-mix(in oklab, var(--brand) 14%, var(--bg-surface));
-    border-color: var(--brand);
-    box-shadow: 0 6px 16px color-mix(in oklab, var(--brand) 22%, transparent);
-  }
-
-  /* === OAuth buttons (append to styles.css) === */
-.btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.5rem; width:100% }
-.btn-google{ background: var(--bg-surface); border:1px solid var(--bd-hairline); color: var(--fg) }
-.btn-google:hover{ background: var(--bg-surface-2) }
-
-.btn-apple{
-  background:#000; border:1px solid #000; color:#fff;  /* white text on black */
-}
-.btn-apple i, .btn-apple svg { color:#fff; fill:#fff }  /* icon stays white */
-.btn-apple:hover{ filter: brightness(1.08) }
-.btn-apple:focus-visible{ outline: 2px solid color-mix(in oklab, var(--brand) 60%, #000); outline-offset: 2px }
-
-  
-/* OAuth buttons (global) */
-.btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.5rem; width:100% }
-.btn-google{ background: var(--bg-surface); border:1px solid var(--bd-hairline); color: var(--fg) }
-.btn-google:hover{ background: var(--bg-surface-2) }
-
-.btn-apple{
-  background:#000; border:1px solid #000; color:#fff;      /* white text on black */
-}
-.btn-apple i, .btn-apple svg { color:#fff; fill:#fff }      /* icon stays white */
-.btn-apple:hover{ filter:brightness(1.08) }
-
-
 
   
   

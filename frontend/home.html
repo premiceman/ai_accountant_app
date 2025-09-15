@@ -1,33 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Your common libs (Bootstrap, Icons, styles) -->
   <script src="/js/head-include.js"></script>
-
-  <!-- ALWAYS send cookies on /api/* fetches -->
-  <script defer src="/js/http-shim.js?v=2025-09-15a"></script>
-
-  <!-- Auth shim (superset with setBannerTitle, requireAuth aliases, safe no-ops) -->
-  <script defer src="/js/auth.js?v=2025-09-15a"></script>
-
-  <!-- Enforce auth BEFORE any page code runs -->
-  <script defer>
-    window.addEventListener('DOMContentLoaded', () => {
-      if (window.Auth && typeof Auth.enforce === 'function') {
-        Auth.enforce(true);
-      }
-    });
-  </script>
-
-  <!-- App config (ok to come after auth) -->
-  <script defer src="/js/config.js?v=2025-09-15a"></script>
-
-  <!-- UI chrome may read Auth state; load after auth -->
-  <script defer src="/js/nav.js?v=2025-09-15a"></script>
-
-  <!-- Page logic LAST (it may call Auth.setBannerTitle, etc.) -->
-  <script defer src="/js/dashboard.js?v=2025-09-15a"></script>
-</head>
+  <title>Dashboard — AI Accountant</title>
 </head>
 <body>
   <div id="topbar-container"></div>
@@ -270,6 +245,12 @@
       </div>
     </section>
   </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>Auth.enforce();</script>
+  <script src="/js/dashboard.js"></script>
 </body>
 </html>
 </html>
