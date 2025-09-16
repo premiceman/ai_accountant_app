@@ -19,9 +19,11 @@
   
     const dropzone = $('#dropzone');
     const fileInput= $('#file-input');
+    const btnBrowse= $('#btn-browse');
   
     let collections = [];
     let currentCol = null;
+    let currentPreviewUrl = null; // blob: url to revoke
   
     function fmtBytes(n) {
       n = Number(n || 0);
@@ -38,7 +40,7 @@
       if (!r.ok) return;
       const s = await r.json();
       mFiles.textContent   = s.totalFiles ?? 0;
-      mStorage.textContent = s.totalGB != null && s.totalGB > 0 ? `${s.totalGB} GB` : fmtBytes(s.totalBytes || 0);
+      mStorage.textContent = (s.totalGB != null && s.totalGB > 0) ? `${s.totalGB} GB` : fmtBytes(s.totalBytes || 0);
       mUpdated.textContent = niceDate(s.lastUpdated);
     }
   
@@ -55,12 +57,14 @@
       colEmpty.style.display = collections.length ? 'none' : '';
       for (const c of collections) {
         const card = document.createElement('div');
-        card.className = 'col-card';
+        card.className = 'col-card card-hover';
+        const icon = '<span class="col-icon"><i class="bi bi-folder2"></i></span>';
         card.innerHTML = `
           <div class="hd">
-            <div class="name">${c.name}</div>
+            <div class="name">${icon} ${escapeHtml(c.name)}</div>
             <div class="meta">${c.fileCount || 0} files · ${fmtBytes(c.bytes || 0)}</div>
           </div>
+          <div class="hint">Open →</div>
         `;
         card.addEventListener('click', () => openCollection(c));
         colWrap.appendChild(card);
@@ -72,7 +76,7 @@
       if (!name) return;
       const r = await Auth.fetch('/api/vault/collections', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name: name.trim() })
       });
       if (!r.ok) { const t = await r.text(); alert(t || 'Create failed'); return; }
       await loadCollections();
@@ -90,7 +94,7 @@
       currentCol = null;
       panel.classList.remove('show');
       $('#collections-section').style.display = '';
-      preview.src = 'about:blank';
+      setPreviewSrc('about:blank');
     }
   
     async function loadFiles() {
@@ -106,33 +110,50 @@
         row.className = 'file-item';
         row.innerHTML = `
           <div>
-            <div class="fw-semibold">${f.name}</div>
+            <div class="fw-semibold">${escapeHtml(f.name)}</div>
             <div class="meta">${fmtBytes(f.size)} · ${niceDate(f.uploadedAt)}</div>
           </div>
           <div class="btn-group">
-            <a class="btn btn-sm btn-outline-primary" href="${f.downloadUrl}" title="Download">Download</a>
             <button class="btn btn-sm btn-outline-secondary" data-view>Preview</button>
+            <button class="btn btn-sm btn-outline-primary" data-dl>Download</button>
             <button class="btn btn-sm btn-outline-danger" data-del>Delete</button>
           </div>
         `;
-        row.querySelector('[data-view]').addEventListener('click', () => {
-          preview.src = f.viewUrl;
-          preview.focus();
+        // Preview via Auth.fetch -> blob -> iframe (so auth headers are included)
+        row.querySelector('[data-view]').addEventListener('click', async () => {
+          $$ ('.file-item').forEach(x => x.classList.remove('active'));
+          row.classList.add('active');
+          await previewFile(f.viewUrl, f.name);
+        });
+        // Download via Auth.fetch -> blob -> temporary <a download>
+        row.querySelector('[data-dl]').addEventListener('click', async () => {
+          await downloadFile(f.downloadUrl, f.name);
         });
         row.querySelector('[data-del]').addEventListener('click', async () => {
           if (!confirm('Delete this file?')) return;
           const r = await Auth.fetch(`/api/vault/files/${f.id}`, { method: 'DELETE' });
           if (!r.ok) { const t = await r.text(); alert(t || 'Delete failed'); return; }
-          await loadFiles();
-          await loadStats();
-          await loadCollections();
+          await loadFiles(); await loadStats(); await loadCollections();
         });
         fileList.appendChild(row);
       }
     }
   
-    // Upload handling
+    // -------- Upload handling (fixed: no double dialog) ----------
     function setDzActive(on) { dropzone.classList.toggle('drag', !!on); }
+  
+    // Only the explicit button opens the dialog (prevents double prompts)
+    btnBrowse.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.click();
+    });
+  
+    fileInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+      await doUpload(files);
+      fileInput.value = '';
+    });
   
     dropzone.addEventListener('dragover', (e) => { e.preventDefault(); setDzActive(true); });
     dropzone.addEventListener('dragleave', () => setDzActive(false));
@@ -143,24 +164,57 @@
       await doUpload(files);
     });
   
-    dropzone.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
-      await doUpload(files);
-      fileInput.value = '';
-    });
-  
     async function doUpload(files) {
       if (!currentCol) return;
       const fd = new FormData();
       for (const f of files.slice(0, 20)) fd.append('files', f, f.name);
       const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, { method: 'POST', body: fd });
       if (!r.ok) { const t = await r.text(); alert(t || 'Upload failed'); return; }
-      await loadFiles();
-      await loadStats();
-      await loadCollections();
+      await loadFiles(); await loadStats(); await loadCollections();
     }
+  
+    // -------- Preview / Download (auth-friendly) ----------
+    function setPreviewSrc(url) {
+      try { if (currentPreviewUrl && currentPreviewUrl.startsWith('blob:')) URL.revokeObjectURL(currentPreviewUrl); } catch {}
+      currentPreviewUrl = url;
+      preview.src = url;
+    }
+  
+    async function previewFile(viewUrl, name) {
+      try {
+        const r = await Auth.fetch(viewUrl);
+        if (!r.ok) { const t = await r.text().catch(()=>''); alert(t || 'Preview failed'); return; }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        setPreviewSrc(url);
+        preview.title = name || 'PDF preview';
+      } catch (e) {
+        console.error(e);
+        alert('Preview failed.');
+      }
+    }
+  
+    async function downloadFile(dlUrl, name) {
+      try {
+        const r = await Auth.fetch(dlUrl);
+        if (!r.ok) { const t = await r.text().catch(()=>''); alert(t || 'Download failed'); return; }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = (name || 'document.pdf').replace(/[\\/:*?"<>|]+/g, '_');
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (e) {
+        console.error(e);
+        alert('Download failed.');
+      }
+    }
+  
+    // -------- Utilities ----------
+    function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
   
     // wiring
     btnNewCol.addEventListener('click', createCollectionFlow);

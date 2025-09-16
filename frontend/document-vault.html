@@ -9,17 +9,22 @@
 
   <style>
     :root{
+      /* Shared look & feel (matches landing/billing/profile) */
       --tile-gap: 14px;
       --tile-radius: 16px;
       --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
+      --tile-shadow-hover: 0 14px 34px rgba(0,0,0,.10), 0 4px 12px rgba(0,0,0,.06);
       --muted: #6b7280;
       --brand: var(--bs-primary, #6f42c1);
       --chip-bg: rgba(111,66,193,.08);
       --chip-fg: var(--brand);
       --accent: #10a37f;
+      --border: rgba(0,0,0,.08);
+      --border-subtle: rgba(0,0,0,.06);
     }
     body{ background: var(--bg-body, #0b0c10) }
 
+    /* HERO + metric tiles -------------------------------------------- */
     .hero{ padding: 18px 0 6px; }
     .hero .eyebrow{ font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase }
 
@@ -27,49 +32,71 @@
     @media (max-width:1199.98px){ .tile-grid{ grid-template-columns: repeat(8, 1fr); } }
     @media (max-width:767.98px){ .tile-grid{ grid-template-columns: repeat(4, 1fr); } }
 
-    .tile{ grid-column: span 4; background:#fff; border:1px solid rgba(0,0,0,.06); border-radius: var(--tile-radius);
-           box-shadow: var(--tile-shadow); padding:16px; }
+    .tile{
+      grid-column: span 4; background:#fff; border:1px solid var(--border-subtle);
+      border-radius: var(--tile-radius); box-shadow: var(--tile-shadow);
+      padding:16px; transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .tile:hover{ transform: translateY(-3px); box-shadow: var(--tile-shadow-hover); }
     .tile .k{ font-size:.78rem; color:var(--muted) }
     .tile .v{ font-size:1.55rem; font-weight:700 }
 
-    .card-elev{ border-radius: 18px; border:1px solid rgba(0,0,0,.06); box-shadow: var(--tile-shadow); overflow: clip; background:#fff; }
-
+    /* Collections grid ------------------------------------------------ */
     .collection-grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
     @media (max-width:1199.98px){ .collection-grid{ grid-template-columns: repeat(8, 1fr); } }
     @media (max-width:767.98px){ .collection-grid{ grid-template-columns: repeat(4, 1fr); } }
 
-    .col-card{ grid-column: span 4; background:#fff; border:1px solid rgba(0,0,0,.06); border-radius:16px; padding:14px;
-               box-shadow: var(--tile-shadow); transition: transform .15s ease, box-shadow .15s ease; cursor:pointer; }
-    .col-card:hover{ transform: translateY(-2px); box-shadow: 0 14px 34px rgba(0,0,0,.10), 0 4px 12px rgba(0,0,0,.06); }
+    .col-card{
+      grid-column: span 4; background:#fff; border:1px solid var(--border-subtle);
+      border-radius:16px; padding:14px; box-shadow: var(--tile-shadow);
+      transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+      cursor:pointer; position:relative; overflow:hidden;
+    }
+    .col-card:hover{ transform: translateY(-3px); box-shadow: var(--tile-shadow-hover); border-color: var(--border); }
     .col-card .hd{ display:flex; justify-content:space-between; align-items:center; }
-    .col-card .name{ font-weight:600 }
+    .col-card .name{ font-weight:600; display:flex; align-items:center; gap:.5rem }
     .col-card .meta{ font-size:.8rem; color:var(--muted) }
+    .col-card .hint{ position:absolute; right:10px; bottom:10px; font-size:.75rem; color:var(--muted) }
 
-    .btn-new{ border-radius: 999px; }
+    .col-icon{
+      width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;
+      background: var(--chip-bg); color: var(--chip-fg);
+    }
 
-    /* Panel when a collection is open */
+    /* Panel (open collection) ---------------------------------------- */
+    .card-elev{ border-radius: 18px; border:1px solid var(--border-subtle); box-shadow: var(--tile-shadow); background:#fff; overflow:clip; }
+    .subtle-hr{ border:0; height:1px; background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.02), rgba(0,0,0,.06)); margin:.75rem 0; }
+
     .panel{ display:none; }
     .panel.show{ display:block; }
 
-    .vault-layout{ display:grid; grid-template-columns: 340px 1fr; gap:14px; }
+    .vault-layout{ display:grid; grid-template-columns: 360px 1fr; gap:14px; }
     @media (max-width:991.98px){ .vault-layout{ grid-template-columns: 1fr; } }
 
-    .file-list{ max-height: 60vh; overflow:auto; }
-    .file-item{ border:1px dashed rgba(0,0,0,.12); border-radius:12px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; background:#fff; margin-bottom:8px; }
-    .file-item .meta{ font-size:.88rem; color:var(--muted) }
-
+    /* Dropzone + list */
     .dropzone{
-      border:2px dashed rgba(0,0,0,.15); border-radius:16px; padding:18px; text-align:center; background:#fafafa;
+      border:2px dashed rgba(0,0,0,.12); border-radius:16px; padding:18px; text-align:center; background:#fafafa;
       transition: background .15s ease, border-color .15s ease;
     }
     .dropzone.drag{ background:#f1fff9; border-color: var(--accent); }
-    .dropzone input{ display:none; }
     .dz-actions{ display:flex; justify-content:center; gap:8px; }
+    .dz-note{ font-size:.85rem; color:var(--muted) }
 
-    .preview{ height: 70vh; border:1px solid rgba(0,0,0,.08); border-radius:16px; overflow:hidden; background:#f8f9fa; }
+    .file-list{ max-height: 58vh; overflow:auto; }
+    .file-item{
+      border:1px dashed rgba(0,0,0,.12); border-radius:12px; padding:10px 12px;
+      display:flex; justify-content:space-between; align-items:center; background:#fff; margin-bottom:8px;
+      transition: background .12s ease, border-color .12s ease;
+    }
+    .file-item:hover{ background:#f7faff; border-color: rgba(0,0,0,.18); }
+    .file-item.active{ background:#eef6ff; border-color:#b6d4fe; }
+    .file-item .meta{ font-size:.88rem; color:var(--muted) }
+
+    /* Preview */
+    .preview{ height: 72vh; border:1px solid var(--border-subtle); border-radius:16px; overflow:hidden; background:#f8f9fa; }
     .preview iframe{ width:100%; height:100%; border:0; background:#fff; }
 
-    .subtle-hr{ border:0; height:1px; background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.02), rgba(0,0,0,.06)); margin:.75rem 0; }
+    .btn-new{ border-radius: 999px; }
   </style>
 </head>
 <body>
@@ -119,12 +146,10 @@
             <div>
               <div class="dropzone" id="dropzone">
                 <div class="mb-2"><strong>Upload PDFs</strong></div>
-                <div class="text-muted small mb-2">Drag & drop here or click to browse</div>
+                <div class="dz-note mb-2">Drag & drop here or click “Browse files”</div>
                 <div class="dz-actions">
-                  <label class="btn btn-sm btn-primary">
-                    Choose files
-                    <input id="file-input" type="file" accept="application/pdf" multiple />
-                  </label>
+                  <button id="btn-browse" class="btn btn-primary btn-sm" type="button">Browse files</button>
+                  <input id="file-input" type="file" accept="application/pdf" multiple style="display:none" />
                 </div>
               </div>
 
