@@ -13,6 +13,8 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 // ---- Routers (mount only if found) ----
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
+const aiRouter     = safeRequire('./routes/ai')                   || safeRequire('./src/routes/ai');
+
 
 const docsRouter =
   safeRequire('./src/routes/documents.routes')  ||
@@ -73,6 +75,8 @@ mount('/api/documents', docsRouter, 'documents (alias)');
 mount('/api/events', eventsRouter, 'events');
 mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
+mount('/api/ai', aiRouter, 'ai');
+
 
 // ---- Frontend landing (keep explicit root) ----
 app.get('/', (_req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));

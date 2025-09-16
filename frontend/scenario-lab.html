@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Scenario Lab — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <script src="/js/head-include.js"></script>
+
+  <style>
+    :root{
+      --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
+      --card-radius: 18px;
+      --muted: #6b7280;
+      --assistant-bg: #f8fafc;
+      --user-bg: #eef2ff;
+    }
+
+    .lab-hero{
+      padding: 16px 0 6px;
+    }
+    .lab-hero .eyebrow{
+      font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase
+    }
+
+    .chat-wrap{
+      display:grid;
+      grid-template-columns: 1fr 380px;
+      gap: 16px;
+    }
+    @media (max-width: 1199.98px){ .chat-wrap{ grid-template-columns: 1fr; } }
+
+    .chat-card{
+      border: 1px solid rgba(0,0,0,.06);
+      border-radius: var(--card-radius);
+      box-shadow: var(--tile-shadow);
+      overflow: clip;
+      background: #fff;
+      display:flex; flex-direction:column; min-height: 60vh;
+    }
+    .chat-body{
+      padding: 14px;
+      overflow: auto;
+      max-height: 65vh;
+    }
+    .chat-input{
+      border-top: 1px solid rgba(0,0,0,.06);
+      padding: 12px;
+      background: #fff;
+    }
+
+    .msg{
+      display: flex; gap: 10px; margin-bottom: 12px;
+    }
+    .msg .bubble{
+      padding: 10px 12px; border-radius: 14px; max-width: 920px; white-space: pre-wrap; word-wrap: break-word;
+      border: 1px solid rgba(0,0,0,.06);
+    }
+    .msg.assistant .bubble{ background: var(--assistant-bg); }
+    .msg.user .bubble{ background: var(--user-bg); margin-left: auto; }
+
+    .toolbar{
+      display:flex; align-items:center; gap: 8px;
+    }
+    .chip{
+      font-size: .78rem; padding: .25rem .55rem; border-radius: 999px;
+      background: rgba(111,66,193,.08); color: var(--bs-primary, #6f42c1);
+      border: 1px solid rgba(111,66,193,.15);
+    }
+    .side-card{
+      border: 1px solid rgba(0,0,0,.06);
+      border-radius: var(--card-radius);
+      box-shadow: var(--tile-shadow);
+      background: #fff;
+    }
+    .side-card .card-body{ padding: 14px; }
+    .example-btn{
+      display:block; width:100%; text-align:left;
+      border: 1px dashed rgba(0,0,0,.12);
+      padding: 10px 12px; border-radius: 12px; background:#fff;
+    }
+
+    .skeleton{
+      position: relative; overflow:hidden; background:#f5f5f5; border-radius:8px;
+      height: 14px; margin: 6px 0;
+    }
+    .skeleton::after{
+      content:""; position:absolute; inset:0; transform:translateX(-100%);
+      background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.6), rgba(255,255,255,0));
+      animation: shimmer 1.2s infinite;
+    }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+
+    .disclaimer { color: var(--muted); font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
+  <main class="container py-4">
+    <section class="lab-hero">
+      <div class="eyebrow">Labs</div>
+      <h1 class="page-title" data-page-title>Scenario Lab</h1>
+      <div class="toolbar mt-1">
+        <span class="chip">OpenAI</span>
+        <span class="disclaimer">Responses are generated. No chat memory is kept after you leave this page.</span>
+      </div>
+    </section>
+
+    <section class="chat-wrap mt-3">
+      <!-- Chat -->
+      <div class="chat-card">
+        <div id="chat-body" class="chat-body">
+          <!-- messages render here -->
+        </div>
+        <div class="chat-input">
+          <form id="chat-form">
+            <div class="input-group">
+              <textarea id="chat-text" class="form-control" rows="1" placeholder="Ask anything…" required></textarea>
+              <button id="btn-send" class="btn btn-primary" type="submit">Send</button>
+              <button id="btn-stop" class="btn btn-outline-secondary" type="button" disabled>Stop</button>
+              <button id="btn-new" class="btn btn-outline-danger" type="button">New Chat</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Side panel -->
+      <div class="side-card">
+        <div class="card-body">
+          <h6 class="mb-2">Examples</h6>
+          <button class="example-btn mb-2" data-example="What tax implications should I consider when selling vested RSUs in the UK?">Tax implications for RSUs (UK)</button>
+          <button class="example-btn mb-2" data-example="Help me explore scenarios to reduce my capital gains tax if I rebalance my portfolio this year.">CGT scenario planning</button>
+          <button class="example-btn mb-2" data-example="Explain how to categorize transactions from multiple bank accounts for budgeting and analytics.">Transaction categorisation</button>
+          <hr class="my-3" />
+          <div class="small text-muted">Tip: Hold <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>Auth.enforce();</script>
+  <script src="/js/scenario-lab.js"></script>
+</body>
+</html>
