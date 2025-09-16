@@ -5,11 +5,14 @@
   <title>Document Vault — AI Accountant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+  <!-- Shared theme, Bootstrap, Bootstrap Icons, helpers -->
+  <script>window.__API_BASE = window.__API_BASE || 'https://ai-accountant-app.onrender.com';</script>
   <script src="/js/head-include.js"></script>
+  <script src="/js/http-shim.js"></script>
 
   <style>
     :root{
-      /* Shared look & feel (matches landing/billing/profile) */
+      /* Match landing look & feel */
       --tile-gap: 14px;
       --tile-radius: 16px;
       --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
@@ -18,165 +21,274 @@
       --brand: var(--bs-primary, #6f42c1);
       --chip-bg: rgba(111,66,193,.08);
       --chip-fg: var(--brand);
-      --accent: #10a37f;
-      --border: rgba(0,0,0,.08);
-      --border-subtle: rgba(0,0,0,.06);
-    }
-    body{ background: var(--bg-body, #0b0c10) }
-
-    /* HERO + metric tiles -------------------------------------------- */
-    .hero{ padding: 18px 0 6px; }
-    .hero .eyebrow{ font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase }
-
-    .tile-grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: var(--tile-gap); margin-top: 14px; }
-    @media (max-width:1199.98px){ .tile-grid{ grid-template-columns: repeat(8, 1fr); } }
-    @media (max-width:767.98px){ .tile-grid{ grid-template-columns: repeat(4, 1fr); } }
-
-    .tile{
-      grid-column: span 4; background:#fff; border:1px solid var(--border-subtle);
-      border-radius: var(--tile-radius); box-shadow: var(--tile-shadow);
-      padding:16px; transition: transform .15s ease, box-shadow .15s ease;
-    }
-    .tile:hover{ transform: translateY(-3px); box-shadow: var(--tile-shadow-hover); }
-    .tile .k{ font-size:.78rem; color:var(--muted) }
-    .tile .v{ font-size:1.55rem; font-weight:700 }
-
-    /* Collections grid ------------------------------------------------ */
-    .collection-grid{ display:grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
-    @media (max-width:1199.98px){ .collection-grid{ grid-template-columns: repeat(8, 1fr); } }
-    @media (max-width:767.98px){ .collection-grid{ grid-template-columns: repeat(4, 1fr); } }
-
-    .col-card{
-      grid-column: span 4; background:#fff; border:1px solid var(--border-subtle);
-      border-radius:16px; padding:14px; box-shadow: var(--tile-shadow);
-      transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
-      cursor:pointer; position:relative; overflow:hidden;
-    }
-    .col-card:hover{ transform: translateY(-3px); box-shadow: var(--tile-shadow-hover); border-color: var(--border); }
-    .col-card .hd{ display:flex; justify-content:space-between; align-items:center; }
-    .col-card .name{ font-weight:600; display:flex; align-items:center; gap:.5rem }
-    .col-card .meta{ font-size:.8rem; color:var(--muted) }
-    .col-card .hint{ position:absolute; right:10px; bottom:10px; font-size:.75rem; color:var(--muted) }
-
-    .col-icon{
-      width:28px; height:28px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;
-      background: var(--chip-bg); color: var(--chip-fg);
+      --bg-soft: var(--bs-light-bg-subtle, #f8f9fa);
     }
 
-    /* Panel (open collection) ---------------------------------------- */
-    .card-elev{ border-radius: 18px; border:1px solid var(--border-subtle); box-shadow: var(--tile-shadow); background:#fff; overflow:clip; }
-    .subtle-hr{ border:0; height:1px; background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.02), rgba(0,0,0,.06)); margin:.75rem 0; }
+    body{ background: var(--bg-body); color: var(--fg); }
 
-    .panel{ display:none; }
-    .panel.show{ display:block; }
+    /* Page header */
+    .page-header{ position:relative; border-radius: 20px; padding: 18px 18px; background: linear-gradient(180deg, rgba(111,66,193,.10), rgba(111,66,193,.02)); border:1px solid var(--bs-border-color); box-shadow: var(--tile-shadow); }
+    .breadcrumbs a{ text-decoration:none }
 
-    .vault-layout{ display:grid; grid-template-columns: 360px 1fr; gap:14px; }
-    @media (max-width:991.98px){ .vault-layout{ grid-template-columns: 1fr; } }
+    /* Stat tiles */
+    .stat-card{ border-radius: var(--tile-radius); box-shadow: var(--tile-shadow); border:1px solid var(--bs-border-color); transition: .2s ease; background: var(--bs-body-bg) }
+    .stat-card:hover{ box-shadow: var(--tile-shadow-hover); transform: translateY(-1px) }
+    .stat-k{ font-weight:700; font-size: 1.3rem; }
+    .stat-sub{ color: var(--muted); font-size: .9rem }
 
-    /* Dropzone + list */
-    .dropzone{
-      border:2px dashed rgba(0,0,0,.12); border-radius:16px; padding:18px; text-align:center; background:#fafafa;
-      transition: background .15s ease, border-color .15s ease;
+    /* Layout */
+    .vault-grid{ display:grid; grid-template-columns: 1fr 1.1fr; gap: var(--tile-gap) }
+    @media (max-width: 992px){
+      .vault-grid{ grid-template-columns: 1fr }
     }
-    .dropzone.drag{ background:#f1fff9; border-color: var(--accent); }
-    .dz-actions{ display:flex; justify-content:center; gap:8px; }
-    .dz-note{ font-size:.85rem; color:var(--muted) }
 
-    .file-list{ max-height: 58vh; overflow:auto; }
-    .file-item{
-      border:1px dashed rgba(0,0,0,.12); border-radius:12px; padding:10px 12px;
-      display:flex; justify-content:space-between; align-items:center; background:#fff; margin-bottom:8px;
-      transition: background .12s ease, border-color .12s ease;
-    }
-    .file-item:hover{ background:#f7faff; border-color: rgba(0,0,0,.18); }
-    .file-item.active{ background:#eef6ff; border-color:#b6d4fe; }
-    .file-item .meta{ font-size:.88rem; color:var(--muted) }
+    /* Left column (collections + documents) */
+    .panel{ border-radius: var(--tile-radius); border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
+    .panel-header{ padding: 14px 16px; border-bottom: 1px solid var(--bs-border-color); display:flex; align-items:center; justify-content:space-between; gap:10px }
+    .panel-body{ padding: 10px }
 
-    /* Preview */
-    .preview{ height: 72vh; border:1px solid var(--border-subtle); border-radius:16px; overflow:hidden; background:#f8f9fa; }
-    .preview iframe{ width:100%; height:100%; border:0; background:#fff; }
+    /* Collections list */
+    .collection-item{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 12px; cursor:pointer; user-select:none; border:1px solid transparent; }
+    .collection-item:hover{ background: var(--bg-soft); border-color: var(--bs-border-color); }
+    .collection-item.active{ background: rgba(111,66,193,.08); border-color: rgba(111,66,193,.25) }
+    .collection-name{ font-weight:600 }
+    .collection-meta{ color: var(--muted); font-size:.88rem }
 
-    .btn-new{ border-radius: 999px; }
+    /* Document list */
+    .doc-row{ display:grid; grid-template-columns: 1fr auto; gap:10px; padding: 12px 14px; border-radius: 14px; align-items:center; border:1px solid transparent; }
+    .doc-row:hover{ background: var(--bg-soft); border-color: var(--bs-border-color) }
+    .doc-main{ display:flex; align-items:center; gap:12px; min-width:0 }
+    .doc-title{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    .doc-sub{ color: var(--muted); font-size:.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    .doc-actions{ display:flex; align-items:center; gap:10px; opacity:.85 }
+    .doc-actions .btn-icon{ border:none; background:transparent; padding:6px; border-radius:10px }
+    .doc-actions .btn-icon:hover{ background: rgba(0,0,0,.06) }
+
+    /* Right column (dropzone + preview) */
+    .dropzone-card{ border-radius: var(--tile-radius); border: 1px dashed rgba(111,66,193,.35); background: linear-gradient(180deg, rgba(111,66,193,.06), rgba(111,66,193,.02)); box-shadow: var(--tile-shadow); padding: 18px }
+    .dropzone-card .hint{ color: var(--muted) }
+    #dropzone{ border: 2px dashed rgba(111,66,193,.45); border-radius: 16px; padding: 28px; background: rgba(111,66,193,.04); display:flex; align-items:center; justify-content:center; text-align:center }
+
+    .preview-card{ border-radius: var(--tile-radius); border: 1px solid var(--bs-border-color); box-shadow: var(--tile-shadow); overflow:hidden; }
+    .preview-header{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom: 1px solid var(--bs-border-color) }
+    .preview-body{ background: #fff; height: 420px; }
+    .preview-body iframe{ width:100%; height:100%; border:0 }
+
+    .search-input{ background: var(--bs-body-bg) }
+
+    /* Keep counters readable */
+    .kpi{ display:flex; align-items:center; gap:8px }
+    .kpi i{ font-size: 1.15rem }
+
+    /* Subtle scrollbar for lists */
+    .scroll-area{ max-height: 48vh; overflow:auto; padding-right: 4px }
+
+    /* Utility */
+    .muted{ color: var(--muted) }
+    .chip{ font-size:.78rem; padding:.1rem .5rem; background: var(--chip-bg); color: var(--chip-fg); border-radius: 999px }
   </style>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Lock down
+      if (window.Auth && typeof Auth.enforce === 'function') Auth.enforce(true);
+
+      // Enable Bootstrap tooltips (purely aesthetic)
+      if (window.bootstrap) {
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
+      }
+
+      // Optional: lightweight preview handler (non-invasive)
+      const list = document.getElementById('document-list');
+      const frame = document.getElementById('preview-frame');
+      const empty = document.getElementById('preview-empty');
+      if (list && frame) {
+        list.addEventListener('click', (e) => {
+          const row = e.target.closest('[data-preview-url]');
+          if (!row) return;
+          const url = row.getAttribute('data-preview-url');
+          if (url) {
+            frame.src = url;
+            empty.classList.add('d-none');
+            frame.classList.remove('d-none');
+          }
+        });
+      }
+    });
+  </script>
 </head>
 <body>
   <div id="topbar-container"></div>
   <div id="sidebar-container"></div>
 
-  <main class="container py-4">
-    <!-- HERO -->
-    <section class="hero">
-      <div class="eyebrow">Vault</div>
-      <h1 class="page-title" data-page-title>Document Vault</h1>
-      <div class="tile-grid" id="metrics">
-        <div class="tile"><div class="k">Files</div><div class="v" id="m-files">—</div></div>
-        <div class="tile"><div class="k">Storage used</div><div class="v" id="m-storage">—</div></div>
-        <div class="tile"><div class="k">Last updated</div><div class="v" id="m-updated">—</div></div>
-      </div>
-    </section>
+  <main class="container-xxl py-4">
 
-    <!-- Collections -->
-    <section class="mt-3" id="collections-section">
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <h5 class="mb-0">Collections</h5>
-        <button class="btn btn-outline-primary btn-new" id="btn-new-col">New Collection</button>
-      </div>
-      <div id="collections" class="collection-grid"></div>
-      <div id="collections-empty" class="text-muted small" style="display:none">No collections yet.</div>
-    </section>
-
-    <!-- Panel: open collection -->
-    <section class="panel mt-3" id="panel">
-      <div class="card-elev">
-        <div class="card-body">
-          <div class="d-flex align-items-center justify-content-between">
-            <div>
-              <h5 class="mb-0"><span id="panel-name">Collection</span></h5>
-              <div class="text-muted small">Manage PDFs in this collection</div>
-            </div>
-            <div>
-              <button class="btn btn-outline-secondary btn-sm" id="btn-back">Back to collections</button>
-            </div>
+    <!-- Header / Breadcrumbs -->
+    <div class="page-header mb-3">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <div>
+          <h1 class="h3 mb-1">Document Vault</h1>
+          <div class="breadcrumbs small">
+            <a href="#" class="text-body" id="crumb-home"><i class="bi bi-house-door"></i> Home</a>
+            <span class="mx-1">/</span>
+            <span class="text-body" id="crumb-vault">Vault</span>
+            <span class="mx-1">/</span>
+            <span class="text-muted" id="current-collection-name">All documents</span>
           </div>
-
-          <hr class="subtle-hr" />
-
-          <div class="vault-layout">
-            <!-- Left: upload + list -->
-            <div>
-              <div class="dropzone" id="dropzone">
-                <div class="mb-2"><strong>Upload PDFs</strong></div>
-                <div class="dz-note mb-2">Drag & drop here or click “Browse files”</div>
-                <div class="dz-actions">
-                  <button id="btn-browse" class="btn btn-primary btn-sm" type="button">Browse files</button>
-                  <input id="file-input" type="file" accept="application/pdf" multiple style="display:none" />
-                </div>
-              </div>
-
-              <div class="mt-3">
-                <h6 class="mb-2">Files</h6>
-                <div id="file-list" class="file-list"></div>
-              </div>
-            </div>
-
-            <!-- Right: preview -->
-            <div>
-              <div class="preview">
-                <iframe id="preview-frame" title="PDF preview"></iframe>
-              </div>
-            </div>
-          </div>
-
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="chip" id="active-tax-year">Tax year: <span id="tax-year-label">2025/26</span></span>
         </div>
       </div>
-    </section>
+    </div>
 
+    <!-- KPIs -->
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-md-4">
+        <div class="stat-card p-3 d-flex align-items-center justify-content-between">
+          <div>
+            <div class="stat-k" id="file-count">0</div>
+            <div class="stat-sub">Files</div>
+          </div>
+          <div class="kpi text-primary"><i class="bi bi-files"></i></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div class="stat-card p-3 d-flex align-items-center justify-content-between">
+          <div>
+            <div class="stat-k" id="total-gb">0 GB</div>
+            <div class="stat-sub">Total storage used</div>
+          </div>
+          <div class="kpi text-primary"><i class="bi bi-hdd"></i></div>
+        </div>
+      </div>
+      <div class="col-12 col-md-4">
+        <div class="stat-card p-3 d-flex align-items-center justify-content-between">
+          <div>
+            <div class="stat-k" id="collection-count">0</div>
+            <div class="stat-sub">Collections</div>
+          </div>
+          <div class="kpi text-primary"><i class="bi bi-folder2"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main grid: Left (lists) | Right (dropzone + preview) -->
+    <div class="vault-grid">
+
+      <!-- LEFT: Collections + Documents -->
+      <section class="panel">
+        <div class="panel-header">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-collection text-primary"></i>
+            <strong>Collections</strong>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="input-group input-group-sm">
+              <span class="input-group-text bg-transparent border-end-0"><i class="bi bi-search"></i></span>
+              <input id="collection-search" class="form-control border-start-0 search-input" placeholder="Search collections…" />
+            </div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <!-- Collections list (keeps id for backend to hook into) -->
+          <div id="collections" class="mb-3">
+            <div id="collection-list" class="scroll-area">
+              <!-- Backend will populate .collection-item elements here -->
+            </div>
+          </div>
+
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-journals text-primary"></i>
+              <strong>Documents</strong>
+            </div>
+            <a href="#" id="back-to-collections" class="small text-decoration-none"><i class="bi bi-arrow-left"></i> Back to all collections</a>
+          </div>
+
+          <!-- Documents list (id preserved for backend) -->
+          <div id="document-list" class="scroll-area">
+            <!-- Backend should render .doc-row items. Example skeleton below for reference: -->
+            <!--
+            <div class="doc-row" data-doc-id="123" data-preview-url="/file/url.pdf">
+              <div class="doc-main">
+                <i class="bi bi-file-earmark-text text-primary"></i>
+                <div class="min-w-0">
+                  <div class="doc-title">January Payslip.pdf</div>
+                  <div class="doc-sub">PDF · 214 KB · Uploaded 12 Sep 2025</div>
+                </div>
+              </div>
+              <div class="doc-actions">
+                <button class="btn-icon" data-action="preview" data-bs-toggle="tooltip" data-bs-title="Preview"><i class="bi bi-eye"></i></button>
+                <button class="btn-icon" data-action="download" data-bs-toggle="tooltip" data-bs-title="Download"><i class="bi bi-download"></i></button>
+                <button class="btn-icon text-danger" data-action="delete" data-bs-toggle="tooltip" data-bs-title="Delete"><i class="bi bi-trash"></i></button>
+              </div>
+            </div>
+            -->
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Dropzone + Preview (preview under dropzone) -->
+      <section class="d-flex flex-column gap-3">
+        <!-- Upload / Dropzone (keep id for backend wiring) -->
+        <div class="dropzone-card">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-upload text-primary"></i>
+              <strong>Upload files</strong>
+            </div>
+            <div class="hint small">Drag and drop files, or click to browse</div>
+          </div>
+          <div id="dropzone" class="bg-white"></div>
+        </div>
+
+        <!-- Preview card (sits directly under the dropzone) -->
+        <div class="preview-card">
+          <div class="preview-header">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-eye text-primary"></i>
+              <strong>Preview</strong>
+            </div>
+            <div class="small text-muted" id="preview-filename">—</div>
+          </div>
+          <div class="preview-body">
+            <div class="h-100 d-flex align-items-center justify-content-center text-muted" id="preview-empty">Select a document to preview</div>
+            <iframe id="preview-frame" class="d-none" title="Preview"></iframe>
+          </div>
+        </div>
+      </section>
+
+    </div>
   </main>
 
-  <script src="/js/nav.js"></script>
-  <script src="/js/config.js"></script>
-  <script src="/js/auth.js"></script>
-  <script>Auth.enforce();</script>
-  <script src="/js/document-vault.js"></script>
+  <script>
+    // OPTIONAL helpers: If your backend sets data attributes, these will enhance UX without changing logic.
+    (function(){
+      const list = document.getElementById('document-list');
+      const nameLabel = document.getElementById('preview-filename');
+      const frame = document.getElementById('preview-frame');
+      const empty = document.getElementById('preview-empty');
+
+      if (!list) return;
+      list.addEventListener('click', (e) => {
+        const row = e.target.closest('.doc-row');
+        if (!row) return;
+        const url = row.getAttribute('data-preview-url');
+        const name = row.getAttribute('data-filename') || row.querySelector('.doc-title')?.textContent || 'Preview';
+        if (url) {
+          nameLabel.textContent = name;
+          frame.src = url;
+          empty.classList.add('d-none');
+          frame.classList.remove('d-none');
+        }
+      });
+
+      // Action icon tooltips
+      if (window.bootstrap) {
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
+      }
+    })();
+  </script>
 </body>
 </html>
