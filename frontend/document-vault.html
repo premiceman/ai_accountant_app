@@ -142,29 +142,30 @@
           <hr class="subtle-hr" />
 
           <div class="vault-layout">
-            <!-- Left: files list -->
-            <div class="left-col">
-              <h6 class="section-title">Files</h6>
-              <div id="file-list" class="file-list"></div>
-            </div>
-          
-            <!-- Right: upload ABOVE preview -->
-            <div class="right-col">
+            <!-- Left: upload + list -->
+            <div>
               <div class="dropzone" id="dropzone">
-                <div class="dz-title">Upload PDFs</div>
-                <div class="dz-note">Drag & drop here, or click “Browse files”</div>
+                <div class="mb-2"><strong>Upload PDFs</strong></div>
+                <div class="dz-note mb-2">Drag & drop here or click “Browse files”</div>
                 <div class="dz-actions">
                   <button id="btn-browse" class="btn btn-primary btn-sm" type="button">Browse files</button>
                   <input id="file-input" type="file" accept="application/pdf" multiple style="display:none" />
                 </div>
               </div>
-          
-              <div class="preview card-elev">
+
+              <div class="mt-3">
+                <h6 class="mb-2">Files</h6>
+                <div id="file-list" class="file-list"></div>
+              </div>
+            </div>
+
+            <!-- Right: preview -->
+            <div>
+              <div class="preview">
                 <iframe id="preview-frame" title="PDF preview"></iframe>
               </div>
             </div>
           </div>
-          
 
         </div>
       </div>
