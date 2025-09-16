@@ -25,6 +25,7 @@ const docsRouter =
 const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequire('./routes/events.routes');
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
+const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -35,6 +36,7 @@ const PORT = process.env.PORT || 3000;
 const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const UPLOADS_DIR  = path.join(__dirname, '../uploads');
 const DATA_DIR     = path.join(__dirname, '../data');
+
 
 // ---- Middleware ----
 app.use(morgan('combined'));
@@ -76,6 +78,9 @@ mount('/api/events', eventsRouter, 'events');
 mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
+mount('/api/vault', vaultRouter, 'vault');
+
+
 
 
 // ---- Frontend landing (keep explicit root) ----
