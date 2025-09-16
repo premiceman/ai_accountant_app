@@ -15,6 +15,7 @@ function publicUser(u) {
     lastName: u.lastName || '',
     username: u.username || '',
     email: u.email || '',
+    dateOfBirth: u.dateOfBirth || null,
     licenseTier: u.licenseTier || 'free',
     eulaAcceptedAt: u.eulaAcceptedAt || null,
     eulaVersion: u.eulaVersion || null,
