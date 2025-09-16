@@ -10,7 +10,9 @@
     const btnStop  = $('#btn-stop');
     const btnNew   = $('#btn-new');
   
-    let messages = [];     // in-memory only
+    const composer = chatForm; // semantic alias
+  
+    let messages = [];     // in-memory only (no persistence)
     let aborter  = null;   // AbortController for a streaming request
   
     function scrollToBottom() {
@@ -29,7 +31,6 @@
       return bubble;
     }
   
-    // Renders a loading skeleton (for assistant while waiting)
     function addSkeleton() {
       const wrap = document.createElement('div');
       wrap.className = 'msg assistant';
@@ -47,23 +48,45 @@
       return { wrap, bubble };
     }
   
-    function setBusy(v) {
-      btnSend.disabled = !!v;
-      btnStop.disabled = !v;
-      chatText.disabled = !!v;
+    // Auto-expand textarea (ChatGPT-like)
+    function autosize() {
+      chatText.style.height = 'auto';
+      const max = 180; // px (matches CSS max-height)
+      const next = Math.min(chatText.scrollHeight, max);
+      chatText.style.height = next + 'px';
+    }
+  
+    // UI state helpers (purely aesthetic)
+    function setComposerEmpty(isEmpty) {
+      composer.classList.toggle('composer--empty', !!isEmpty);
+      composer.classList.toggle('composer--ready', !isEmpty);
+      btnSend.disabled = !!isEmpty;
+    }
+  
+    function setStreaming(on) {
+      composer.classList.toggle('composer--streaming', !!on);
+      btnStop.disabled = !on;
+      // keep send disabled while streaming; textarea read-only feel
+      btnSend.disabled = true;
+      chatText.disabled = !!on;
     }
   
     function resetChat() {
       messages = [];
       chatBody.innerHTML = '';
       chatText.value = '';
+      autosize();
+      setComposerEmpty(true);
+      setStreaming(false);
       chatText.focus();
     }
   
-    // Handle example clicks
+    // Example buttons paste text (no backend change)
     $$('.example-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         chatText.value = btn.getAttribute('data-example') || '';
+        autosize();
+        setComposerEmpty(!chatText.value.trim());
         chatText.focus();
       });
     });
@@ -74,6 +97,12 @@
         e.preventDefault();
         chatForm.requestSubmit();
       }
+    });
+  
+    // Input dynamics: mint arrow when has text; grey otherwise; auto-expand
+    chatText.addEventListener('input', () => {
+      autosize();
+      setComposerEmpty(!chatText.value.trim());
     });
   
     btnNew.addEventListener('click', resetChat);
@@ -87,18 +116,20 @@
       const text = (chatText.value || '').trim();
       if (!text) return;
   
-      // push user msg in UI + memory
+      // Push user msg
       addMessage('user', text);
       messages.push({ role: 'user', content: text });
       chatText.value = '';
+      autosize();
+      setComposerEmpty(true);
   
-      // assistant placeholder bubble (we'll stream into this)
+      // Assistant placeholder we stream into
       const aMsg = addMessage('assistant', '');
-      const aBubble = aMsg; // already bubble
+      const aBubble = aMsg;
   
-      // stream from /api/ai/chat
-      setBusy(true);
+      // Stream from /api/ai/chat (unchanged)
       aborter = new AbortController();
+      setStreaming(true);
       let hadChunk = false;
   
       try {
@@ -112,7 +143,7 @@
         if (!resp.ok || !resp.body) {
           const t = await resp.text().catch(() => '');
           aBubble.textContent = t || 'Sorry — something went wrong.';
-          setBusy(false);
+          setStreaming(false);
           return;
         }
   
@@ -125,16 +156,13 @@
           if (done) break;
           buf += decoder.decode(value, { stream: true });
   
-          // split SSE chunks on double newline
           const parts = buf.split('\n\n');
-          buf = parts.pop(); // keep last partial
+          buf = parts.pop();
           for (const chunk of parts) {
             const line = chunk.trim();
             if (!line.startsWith('data:')) continue;
             const jsonStr = line.slice(5).trim();
             if (!jsonStr) continue;
-  
-            // handle events
             if (jsonStr === '[DONE]') continue;
             try {
               const ev = JSON.parse(jsonStr);
@@ -147,18 +175,14 @@
                 hadChunk = true;
               }
               if (ev.done) {
-                // finalise assistant message into memory
                 messages.push({ role: 'assistant', content: aBubble.textContent });
               }
-            } catch {
-              // ignore parse noise
-            }
+            } catch {}
           }
           scrollToBottom();
         }
   
         if (!hadChunk) {
-          // Non-stream fallback (if server returned one-shot)
           messages.push({ role: 'assistant', content: aBubble.textContent || 'Done.' });
         }
       } catch (e) {
@@ -169,7 +193,7 @@
           aBubble.textContent = 'Network error.';
         }
       } finally {
-        setBusy(false);
+        setStreaming(false);
         aborter = null;
       }
     });
@@ -179,6 +203,8 @@
       try {
         await Auth.requireAuth();
         Auth.setBannerTitle('Scenario Lab');
+        autosize();
+        setComposerEmpty(true);
         chatText.focus();
       } catch (e) {
         console.error(e);

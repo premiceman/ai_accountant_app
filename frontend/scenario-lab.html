@@ -14,14 +14,15 @@
       --muted: #6b7280;
       --assistant-bg: #f8fafc;
       --user-bg: #eef2ff;
+      --mint: #10a37f;              /* ChatGPT mint */
+      --mint-ghost: rgba(16,163,127,.12);
+      --input-bg: #ffffff;
+      --input-brd: rgba(0,0,0,.08);
+      --input-brd-focus: rgba(16,163,127,.45);
     }
 
-    .lab-hero{
-      padding: 16px 0 6px;
-    }
-    .lab-hero .eyebrow{
-      font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase
-    }
+    .lab-hero{ padding: 16px 0 6px; }
+    .lab-hero .eyebrow{ font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase }
 
     .chat-wrap{
       display:grid;
@@ -34,24 +35,78 @@
       border: 1px solid rgba(0,0,0,.06);
       border-radius: var(--card-radius);
       box-shadow: var(--tile-shadow);
-      overflow: clip;
       background: #fff;
-      display:flex; flex-direction:column; min-height: 60vh;
-    }
-    .chat-body{
-      padding: 14px;
-      overflow: auto;
-      max-height: 65vh;
-    }
-    .chat-input{
-      border-top: 1px solid rgba(0,0,0,.06);
-      padding: 12px;
-      background: #fff;
+      display:flex; flex-direction:column;
+      min-height: 70vh; max-height: calc(100vh - 200px);
+      overflow:hidden;
+      position: relative;
     }
 
-    .msg{
-      display: flex; gap: 10px; margin-bottom: 12px;
+    .chat-body{
+      padding: 14px 14px 100px;   /* bottom space for the composer */
+      overflow: auto;
+      flex: 1 1 auto;
+      scroll-behavior: smooth;
     }
+
+    /* Sticky composer (not floating) at bottom of the panel */
+    .chat-composer{
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 12px 14px 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0), #fff 35%);
+      border-top: 1px solid rgba(0,0,0,.05);
+    }
+
+    .composer-inner{
+      display:flex; align-items:flex-end; gap: 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--input-brd);
+      border-radius: 22px;
+      padding: 8px 8px 8px 12px;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .composer-inner:focus-within{
+      border-color: var(--input-brd-focus);
+      box-shadow: 0 0 0 4px rgba(16,163,127,.08);
+    }
+
+    .composer-text{
+      flex: 1 1 auto;
+      min-height: 28px; max-height: 180px;
+      resize: none; overflow-y: auto;
+      border: 0; outline: 0; background: transparent;
+      padding: 6px 0 4px;
+    }
+    .composer-text::placeholder{ color: #9aa3af; }
+
+    .btn-icon{
+      display:inline-flex; align-items:center; justify-content:center;
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 1px solid rgba(0,0,0,.08); background: #fff; cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease;
+    }
+    .btn-icon[disabled]{ opacity:.5; cursor:not-allowed; }
+    .btn-icon:hover{ transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,.08) }
+
+    /* Dynamic states for send button */
+    .btn-send{ border-color: rgba(0,0,0,.08); }
+    .btn-send svg{ width:18px; height:18px; display:block; }
+    .composer--empty .btn-send{ opacity:.55; }
+    .composer--ready .btn-send{ border-color: var(--mint); background: var(--mint-ghost); }
+    .composer--ready .btn-send svg{ color: var(--mint); }
+    .composer--streaming .btn-send{ opacity:.35; }
+
+    /* Stop button: black pill-like icon */
+    .btn-stop{
+      border-color: #000; background:#000; color:#fff; width: 36px; height: 36px;
+    }
+    .btn-stop svg{ width:14px; height:14px; display:block; }
+
+    /* New Chat small */
+    .btn-new{ border-radius: 999px; }
+
+    .msg{ display: flex; gap: 10px; margin-bottom: 12px; }
     .msg .bubble{
       padding: 10px 12px; border-radius: 14px; max-width: 920px; white-space: pre-wrap; word-wrap: break-word;
       border: 1px solid rgba(0,0,0,.06);
@@ -59,14 +114,6 @@
     .msg.assistant .bubble{ background: var(--assistant-bg); }
     .msg.user .bubble{ background: var(--user-bg); margin-left: auto; }
 
-    .toolbar{
-      display:flex; align-items:center; gap: 8px;
-    }
-    .chip{
-      font-size: .78rem; padding: .25rem .55rem; border-radius: 999px;
-      background: rgba(111,66,193,.08); color: var(--bs-primary, #6f42c1);
-      border: 1px solid rgba(111,66,193,.15);
-    }
     .side-card{
       border: 1px solid rgba(0,0,0,.06);
       border-radius: var(--card-radius);
@@ -80,18 +127,14 @@
       padding: 10px 12px; border-radius: 12px; background:#fff;
     }
 
-    .skeleton{
-      position: relative; overflow:hidden; background:#f5f5f5; border-radius:8px;
-      height: 14px; margin: 6px 0;
-    }
-    .skeleton::after{
-      content:""; position:absolute; inset:0; transform:translateX(-100%);
-      background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.6), rgba(255,255,255,0));
-      animation: shimmer 1.2s infinite;
-    }
-    @keyframes shimmer { 100% { transform: translateX(100%); } }
-
     .disclaimer { color: var(--muted); font-size: .8rem; }
+
+    /* skeleton for first tokens */
+    .skeleton{ position: relative; overflow:hidden; background:#f5f5f5; border-radius:8px; height: 14px; margin: 6px 0; }
+    .skeleton::after{ content:""; position:absolute; inset:0; transform:translateX(-100%);
+      background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.6), rgba(255,255,255,0));
+      animation: shimmer 1.2s infinite; }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
   </style>
 </head>
 <body>
@@ -102,26 +145,38 @@
     <section class="lab-hero">
       <div class="eyebrow">Labs</div>
       <h1 class="page-title" data-page-title>Scenario Lab</h1>
-      <div class="toolbar mt-1">
-        <span class="chip">OpenAI</span>
-        <span class="disclaimer">Responses are generated. No chat memory is kept after you leave this page.</span>
+      <div class="mt-1">
+        <span class="badge text-bg-light border">OpenAI</span>
+        <span class="disclaimer ms-2">Responses are generated. No chat memory is kept after you leave this page.</span>
       </div>
     </section>
 
     <section class="chat-wrap mt-3">
       <!-- Chat -->
       <div class="chat-card">
-        <div id="chat-body" class="chat-body">
-          <!-- messages render here -->
-        </div>
-        <div class="chat-input">
-          <form id="chat-form">
-            <div class="input-group">
-              <textarea id="chat-text" class="form-control" rows="1" placeholder="Ask anything…" required></textarea>
-              <button id="btn-send" class="btn btn-primary" type="submit">Send</button>
-              <button id="btn-stop" class="btn btn-outline-secondary" type="button" disabled>Stop</button>
-              <button id="btn-new" class="btn btn-outline-danger" type="button">New Chat</button>
-            </div>
+        <div id="chat-body" class="chat-body"></div>
+
+        <!-- Composer (sticky, curved, dynamic) -->
+        <div class="chat-composer">
+          <form id="chat-form" class="composer-inner composer--empty" autocomplete="off">
+            <textarea id="chat-text" class="composer-text" rows="1" placeholder="Send a message…" required></textarea>
+
+            <!-- Send (dynamic: grey -> mint arrow) -->
+            <button id="btn-send" class="btn-icon btn-send" type="submit" disabled title="Send">
+              <!-- Arrow (mint via CSS when ready) -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14"></path>
+                <path d="M12 5l7 7-7 7"></path>
+              </svg>
+            </button>
+
+            <!-- Stop (black) -->
+            <button id="btn-stop" class="btn-icon btn-stop ms-1" type="button" title="Stop" disabled>
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+
+            <!-- New chat (small) -->
+            <button id="btn-new" class="btn btn-outline-secondary btn-sm ms-1" type="button">New chat</button>
           </form>
         </div>
       </div>
