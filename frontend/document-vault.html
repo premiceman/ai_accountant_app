@@ -10,6 +10,9 @@
   <script src="/js/head-include.js"></script>
   <script src="/js/http-shim.js"></script>
 
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
   <style>
     :root{
       /* Match landing look & feel */
@@ -48,7 +51,7 @@
     .panel-body{ padding: 10px }
 
     /* Collections list */
-    .collection-item{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 12px; cursor:pointer; user-select:none; border:1px solid transparent; }
+    .collection-item{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 12px; cursor:pointer; user-select:none; border:1px solid transparent; text-decoration:none; color:inherit }
     .collection-item:hover{ background: var(--bg-soft); border-color: var(--bs-border-color); }
     .collection-item.active{ background: rgba(111,66,193,.08); border-color: rgba(111,66,193,.25) }
     .collection-name{ font-weight:600 }
@@ -173,9 +176,7 @@
         <div class="panel-body">
           <!-- Collections containers (compat: provide multiple expected IDs) -->
           <div id="collections" class="mb-3">
-            <div id="collections-list" class="scroll-area">
-              <!-- Backend will populate .collection-item elements here -->
-            </div>
+            <div id="collections-list" class="scroll-area"></div>
             <!-- Some builds used #collection-list -->
             <div id="collection-list" class="scroll-area d-none"></div>
           </div>
@@ -272,7 +273,6 @@
       if (docsList && docList) { docList.replaceWith(docsList); docsList.id = 'document-list'; }
 
       // NOTE: deliberately no JS that calls fileInput.click() — Option B
-      // The <label for="file-input"> handles the picker; drag/drop handled by JS.
     })();
   </script>
 
