@@ -1,6 +1,6 @@
 // frontend/js/document-vault.js
-// Wires up the "Document Vault" page to the /api/vault backend without changing aesthetics.
-// Compatible with the current document-vault.html IDs and gracefully falls back to older ones.
+// Document Vault wiring with robust payload normalization for stats/collections,
+// and Option B upload (no programmatic .click()) to avoid double-open dialogs.
 
 (function () {
     // ---------------- DOM helpers ----------------
@@ -12,7 +12,7 @@
     // KPIs
     const elFileCount = $('#file-count') || $('#m-files');
     const elTotalGB   = $('#total-gb')   || $('#m-storage');
-    const elUpdated   = $('#m-updated'); // optional (not present in new HTML)
+    const elUpdated   = $('#m-updated'); // optional
   
     // Collections
     const elCollectionsList =
@@ -29,10 +29,9 @@
     const elBackToCollections = $('#back-to-collections') || $('#btn-back');
     const elCurrentCollectionName = $('#current-collection-name') || $('#panel-name');
   
-    // Upload / Dropzone
+    // Upload / Dropzone (Option B — label/input handles picker)
     const elDropzone  = $('#dropzone');
     const elFileInput = $('#file-input');
-    const elBrowseBtn = $('#btn-browse'); // legacy (not present in new HTML)
   
     // Preview area
     const elPreviewFrame = $('#preview-frame');
@@ -47,6 +46,29 @@
     let currentCol = null;
   
     // ---------------- Utilities ----------------
+    function toNumber(x) {
+      if (x == null) return 0;
+      if (typeof x === 'number' && isFinite(x)) return x;
+      if (typeof x === 'string') {
+        const n = Number(x.replace?.(/[, ]+/g, '') ?? x);
+        return isFinite(n) ? n : 0;
+      }
+      return 0;
+    }
+    function pickNumber(...cands) {
+      for (const c of cands) {
+        const n = toNumber(c);
+        if (n) return n;
+        if (c === 0) return 0;
+      }
+      return 0;
+    }
+    function pickString(...cands) {
+      for (const c of cands) {
+        if (typeof c === 'string' && c.trim()) return c;
+      }
+      return '';
+    }
     function escapeHtml(s) {
       return String(s ?? '')
         .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -55,11 +77,48 @@
     function fmtBytes(bytes) {
       const b = Number(bytes || 0);
       if (b <= 0) return '0 B';
-      const u = ['B','KB','MB','GB','TB'];
+      const u = ['B','KB','MB','GB','TB','PB'];
       const i = Math.floor(Math.log(b) / Math.log(1024));
       return `${(b / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${u[i]}`;
     }
     function niceDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
+  
+    // Normalize server payloads with many possible shapes
+    function normalizeStats(s) {
+      if (!s || typeof s !== 'object') return { totalFiles: 0, totalBytes: 0, totalGB: 0 };
+      // common variants seen across APIs
+      const totalFiles = pickNumber(
+        s.totalFiles, s.files, s.count, s.fileCount, s.filesCount, s.stats?.files
+      );
+      const totalBytes = pickNumber(
+        s.totalBytes, s.bytes, s.sizeBytes, s.storageBytes, s.usedBytes, s.usage?.bytes, s.storage?.bytes
+      );
+      const totalGB = pickNumber(s.totalGB, s.gb, s.storageGB); // optional
+      const lastUpdated = pickString(s.lastUpdated, s.updatedAt, s.lastModified, s.stats?.updatedAt);
+  
+      return { totalFiles, totalBytes, totalGB, lastUpdated };
+    }
+  
+    function normalizeCollection(c) {
+      if (!c || typeof c !== 'object') return null;
+      const id   = pickString(c.id, c._id, c.collectionId, c.uuid, String(c.id ?? ''));
+      const name = pickString(c.name, c.title, c.label, `Collection ${id || ''}`) || 'Untitled';
+      const fileCount = pickNumber(c.fileCount, c.files, c.count, c.stats?.files, c.totalFiles);
+      const bytes = pickNumber(c.bytes, c.totalBytes, c.sizeBytes, c.storageBytes, c.usage?.bytes, c.size);
+      return { id, name, fileCount, bytes, _raw: c };
+    }
+  
+    function normalizeFilesPayload(j) {
+      const list = Array.isArray(j) ? j : (j?.files || j?.items || j?.data || []);
+      return list.map(f => ({
+        id: pickString(f.id, f._id, f.fileId, String(f.id ?? '')),
+        name: pickString(f.name, f.filename, f.title, 'document'),
+        size: pickNumber(f.size, f.bytes, f.length, f.fileSize),
+        uploadedAt: pickString(f.uploadedAt, f.createdAt, f.timeCreated, f.timestamp),
+        viewUrl: pickString(f.viewUrl, f.previewUrl, f.url, f.href),
+        downloadUrl: pickString(f.downloadUrl, f.url, f.href)
+      }));
+    }
   
     // Load auth helper if page forgot to include it
     async function ensureAuthHelper() {
@@ -73,16 +132,19 @@
       });
     }
   
-    function updateKPIsFromStats(stats) {
-      if (elFileCount) elFileCount.textContent = stats?.totalFiles ?? 0;
+    function updateKPIsFromStats(statsRaw) {
+      const stats = normalizeStats(statsRaw);
+      if (elFileCount) elFileCount.textContent = stats.totalFiles ?? 0;
+  
       if (elTotalGB) {
-        if (typeof stats?.totalGB === 'number' && stats.totalGB >= 0) {
+        // Prefer explicit totalGB if returned, otherwise format bytes nicely
+        if (stats.totalGB) {
           elTotalGB.textContent = `${stats.totalGB} GB`;
         } else {
-          elTotalGB.textContent = fmtBytes(stats?.totalBytes || 0);
+          elTotalGB.textContent = fmtBytes(stats.totalBytes || 0);
         }
       }
-      if (elUpdated) elUpdated.textContent = niceDate(stats?.lastUpdated);
+      if (elUpdated) elUpdated.textContent = niceDate(stats.lastUpdated);
     }
   
     function setPreviewSrc(url, filename) {
@@ -136,7 +198,7 @@
     async function loadStats() {
       const r = await Auth.fetch('/api/vault/stats');
       if (!r.ok) return;
-      const s = await r.json();
+      const s = await r.json().catch(()=> ({}));
       updateKPIsFromStats(s);
     }
   
@@ -146,8 +208,12 @@
         if (elCollectionsList) elCollectionsList.innerHTML = '<div class="text-muted small">Failed to load collections.</div>';
         return;
       }
-      const j = await r.json();
-      collections = j.collections || [];
+      const j = await r.json().catch(()=> ({}));
+  
+      // Accept arrays or various container keys
+      const rawList = Array.isArray(j) ? j : (j.collections || j.items || j.data || []);
+      collections = (rawList || []).map(normalizeCollection).filter(Boolean);
+  
       renderCollections();
       if (elCollectionCount) elCollectionCount.textContent = String(collections.length);
     }
@@ -155,7 +221,7 @@
     function renderCollections(filterText = '') {
       if (!elCollectionsList) return;
       elCollectionsList.innerHTML = '';
-      const q = filterText.trim().toLowerCase();
+      const q = (filterText || '').trim().toLowerCase();
   
       const filtered = q
         ? collections.filter(c => c.name.toLowerCase().includes(q))
@@ -209,8 +275,8 @@
   
       const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`);
       if (!r.ok) { elDocumentsList.innerHTML = '<div class="text-muted small p-2">Failed to load files.</div>'; return; }
-      const j = await r.json();
-      const files = j.files || [];
+      const j = await r.json().catch(()=> ([]));
+      const files = normalizeFilesPayload(j);
   
       elDocumentsList.innerHTML = '';
       if (!files.length) {
@@ -238,15 +304,21 @@
           </div>
         `;
   
-        on(row.querySelector('[data-action="preview"]'), 'click', () => previewFile(f.viewUrl, f.name));
-        on(row.querySelector('[data-action="download"]'), 'click', () => downloadFile(f.downloadUrl, f.name));
+        on(row.querySelector('[data-action="preview"]'), 'click', () => {
+          const url = f.viewUrl || f.downloadUrl; // fall back if no viewUrl
+          if (!url) return alert('No preview URL available.');
+          previewFile(url, f.name);
+        });
+        on(row.querySelector('[data-action="download"]'), 'click', () => {
+          const url = f.downloadUrl || f.viewUrl;
+          if (!url) return alert('No download URL available.');
+          downloadFile(url, f.name);
+        });
         on(row.querySelector('[data-action="delete"]'), 'click', async () => {
           if (!confirm('Delete this file?')) return;
           const del = await Auth.fetch(`/api/vault/files/${f.id}`, { method: 'DELETE' });
           if (!del.ok) { const t = await del.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
-          // Refresh files + stats + collection list
           await Promise.all([loadFiles(), loadStats(), loadCollections()]);
-          // Clear preview if it was open for this file
           setPreviewSrc('about:blank');
         });
   
@@ -265,7 +337,8 @@
         throw new Error(t || 'Failed to create collection');
       }
       const j = await r.json();
-      return j.collection;
+      // Return normalized object
+      return normalizeCollection(j.collection || j);
     }
   
     async function uploadFilesToCurrent(files) {
@@ -276,7 +349,6 @@
       if (!files || !files.length) return;
   
       const fd = new FormData();
-      // Support multi-file uploads: append same field name "files"
       for (const file of files) fd.append('files', file);
   
       const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, {
@@ -307,11 +379,9 @@
       if (!name) return;
       try {
         const c = await createCollection(name);
-        // Close modal
         if (elNewCollectionModal && window.bootstrap) {
           bootstrap.Modal.getOrCreateInstance(elNewCollectionModal).hide();
         }
-        // Refresh and open the new collection
         await loadCollections();
         const created = collections.find(x => String(x.id) === String(c.id)) || c;
         await openCollection(created);
@@ -320,27 +390,17 @@
       }
     });
   
-    // Back link
+    // Back link (legacy)
     on(elBackToCollections, 'click', (e) => { e.preventDefault(); exitCollectionView(); });
   
-    // File input change → upload (Option B: NO programmatic clicks anywhere)
+    // File input change → upload (Option B: NO programmatic .click())
     on(elFileInput, 'change', async (e) => {
       const files = e.target.files;
       await uploadFilesToCurrent(files);
-      // Clear file input so same name can be uploaded again
-      e.target.value = '';
+      e.target.value = ''; // allow re-upload of same-named file
     });
   
-    // ❌ Removed: Legacy browse button programmatic click (avoids double-open)
-    // on(elBrowseBtn, 'click', () => elFileInput && elFileInput.click());
-  
-    // ❌ Removed: Dropzone click → fileInput.click() (avoids double-open)
-    // on(elDropzone, 'click', (e) => {
-    //   const clickable = e.target.closest('.dz-clickable-area') || e.target === elDropzone;
-    //   if (clickable && elFileInput) elFileInput.click();
-    // });
-  
-    // Drag & drop uploads still supported
+    // Drag & drop uploads supported
     if (elDropzone) {
       on(elDropzone, 'dragover', (e) => { e.preventDefault(); elDropzone.classList.add('dragging'); });
       on(elDropzone, 'dragleave', () => elDropzone.classList.remove('dragging'));
@@ -359,12 +419,11 @@
         await Auth.requireAuth();
         Auth.setBannerTitle && Auth.setBannerTitle('Document Vault');
         await Promise.all([loadStats(), loadCollections()]);
-        // Hide back link initially
         if (elBackToCollections) elBackToCollections.classList.add('d-none');
-        // Ensure preview starts empty
         setPreviewSrc('about:blank');
       } catch (e) {
         console.error('[document-vault] init error', e);
       }
     });
   })();
+  
