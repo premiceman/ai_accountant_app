@@ -112,13 +112,6 @@
       <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
         <div>
           <h1 class="h3 mb-1">Document Vault</h1>
-          <div class="breadcrumbs small">
-            <a href="#" class="text-body" id="crumb-home"><i class="bi bi-house-door"></i> Home</a>
-            <span class="mx-1">/</span>
-            <span class="text-body" id="crumb-vault">Vault</span>
-            <span class="mx-1">/</span>
-            <span class="text-muted" id="current-collection-name">All documents</span>
-          </div>
         </div>
         <div class="d-flex align-items-center gap-2">
           <span class="chip" id="active-tax-year">Tax year: <span id="tax-year-label">2025/26</span></span>
@@ -205,7 +198,6 @@
 
       <!-- RIGHT: Dropzone + Preview (preview under dropzone) -->
       <section class="d-flex flex-column gap-3">
-        <!-- Upload / Dropzone (keep id for backend wiring; use <form> for Dropzone.js compatibility) -->
         <div class="dropzone-card">
           <div class="d-flex align-items-center justify-content-between mb-2">
             <div class="d-flex align-items-center gap-2">
@@ -215,20 +207,17 @@
             <div class="hint small">Drag and drop files, or click to browse</div>
           </div>
 
+          <!-- Option B: native label/input — no JS .click() anywhere -->
           <form id="dropzone" class="dropzone bg-white" action="#" method="post" enctype="multipart/form-data">
-            <!-- Compat clickable area for custom uploaders if Dropzone isn't used -->
-            <div class="dz-clickable-area">
+            <label for="file-input" class="dz-clickable-area">
               <i class="bi bi-cloud-arrow-up me-2"></i>
               <span class="small text-muted">Drop files here or click to upload</span>
-            </div>
-            <input id="file-input" name="file" type="file" multiple class="d-none" />
+            </label>
+            <input id="file-input" name="files" type="file" multiple class="visually-hidden" />
           </form>
-
-          <!-- Legacy alias container some builds used -->
-          <div id="upload-dropzone" class="d-none"></div>
         </div>
 
-        <!-- Preview card (sits directly under the dropzone) -->
+        <!-- Preview card -->
         <div class="preview-card">
           <div class="preview-header">
             <div class="d-flex align-items-center gap-2">
@@ -247,7 +236,7 @@
     </div>
   </main>
 
-  <!-- New Collection Modal (IDs only; backend can hook listeners; aesthetic only) -->
+  <!-- New Collection Modal -->
   <div class="modal fade" id="new-collection-modal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
@@ -269,60 +258,25 @@
     </div>
   </div>
 
+  <!-- Minimal, compatibility helpers (no programmatic .click()) -->
   <script>
-    // Compatibility helpers that DON'T replace your backend logic.
     (function(){
-      // 1) If your code expects #collection-list (old id), mirror #collections-list into it.
+      // Mirror collections-list to collection-list if some code expects the old id
       const colList = document.getElementById('collections-list');
       const colListOld = document.getElementById('collection-list');
       if (colList && colListOld) { colListOld.replaceWith(colList); colList.id = 'collection-list'; }
 
-      // 2) If your code expects #documents-list or #document-list, ensure at least one exists with content
+      // Prefer one documents list id
       const docsList = document.getElementById('documents-list');
       const docList = document.getElementById('document-list');
       if (docsList && docList) { docList.replaceWith(docsList); docsList.id = 'document-list'; }
 
-      // 3) Wire simple click-to-file if your uploader doesn't auto-bind
-      const dz = document.getElementById('dropzone');
-      const fi = document.getElementById('file-input');
-      if (dz && fi) {
-        dz.addEventListener('click', (e) => {
-          const isClickable = e.target.closest('.dz-clickable-area') || e.target === dz;
-          if (isClickable) fi.click();
-        });
-      }
-
-      // 4) Lightweight preview for rows with data-preview-url (aesthetic only)
-      const list = document.getElementById('document-list');
-      const nameLabel = document.getElementById('preview-filename');
-      const frame = document.getElementById('preview-frame');
-      const empty = document.getElementById('preview-empty');
-      if (list && frame && nameLabel && empty) {
-        list.addEventListener('click', (e) => {
-          const row = e.target.closest('.doc-row,[data-preview-url]');
-          if (!row) return;
-          const url = row.getAttribute('data-preview-url');
-          const name = row.getAttribute('data-filename') || row.querySelector('.doc-title')?.textContent || 'Preview';
-          if (url) {
-            nameLabel.textContent = name;
-            frame.src = url;
-            empty.classList.add('d-none');
-            frame.classList.remove('d-none');
-          }
-        });
-      }
-
-      // 5) If your app opens a modal to create collections, show ours when the button is clicked (non-invasive)
-      const newBtn = document.getElementById('new-collection-btn');
-      const modalEl = document.getElementById('new-collection-modal');
-      if (newBtn && modalEl && window.bootstrap) {
-        const m = new bootstrap.Modal(modalEl);
-        newBtn.addEventListener('click', () => m.show());
-      }
+      // NOTE: deliberately no JS that calls fileInput.click() — Option B
+      // The <label for="file-input"> handles the picker; drag/drop handled by JS.
     })();
   </script>
 
-  <!-- IMPORTANT: include possible page scripts so original logic runs -->
+  <!-- Page logic -->
   <script src="/js/document-vault.js"></script>
   <script src="/js/vault.js"></script>
 </body>

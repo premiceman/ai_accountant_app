@@ -323,7 +323,7 @@
     // Back link
     on(elBackToCollections, 'click', (e) => { e.preventDefault(); exitCollectionView(); });
   
-    // File input
+    // File input change → upload (Option B: NO programmatic clicks anywhere)
     on(elFileInput, 'change', async (e) => {
       const files = e.target.files;
       await uploadFilesToCurrent(files);
@@ -331,16 +331,16 @@
       e.target.value = '';
     });
   
-    // Legacy browse button (if present)
-    on(elBrowseBtn, 'click', () => elFileInput && elFileInput.click());
+    // ❌ Removed: Legacy browse button programmatic click (avoids double-open)
+    // on(elBrowseBtn, 'click', () => elFileInput && elFileInput.click());
   
-    // Click dropzone to open file chooser when inside the clickable area
-    on(elDropzone, 'click', (e) => {
-      const clickable = e.target.closest('.dz-clickable-area') || e.target === elDropzone;
-      if (clickable && elFileInput) elFileInput.click();
-    });
+    // ❌ Removed: Dropzone click → fileInput.click() (avoids double-open)
+    // on(elDropzone, 'click', (e) => {
+    //   const clickable = e.target.closest('.dz-clickable-area') || e.target === elDropzone;
+    //   if (clickable && elFileInput) elFileInput.click();
+    // });
   
-    // Drag & drop uploads
+    // Drag & drop uploads still supported
     if (elDropzone) {
       on(elDropzone, 'dragover', (e) => { e.preventDefault(); elDropzone.classList.add('dragging'); });
       on(elDropzone, 'dragleave', () => elDropzone.classList.remove('dragging'));
@@ -368,4 +368,3 @@
       }
     });
   })();
-  
