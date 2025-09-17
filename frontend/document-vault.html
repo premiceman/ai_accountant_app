@@ -67,7 +67,8 @@
     /* Right column (dropzone + preview) */
     .dropzone-card{ border-radius: var(--tile-radius); border: 1px dashed rgba(111,66,193,.35); background: linear-gradient(180deg, rgba(111,66,193,.06), rgba(111,66,193,.02)); box-shadow: var(--tile-shadow); padding: 18px }
     .dropzone-card .hint{ color: var(--muted) }
-    #dropzone{ border: 2px dashed rgba(111,66,193,.45); border-radius: 16px; padding: 28px; background: rgba(111,66,193,.04); display:flex; align-items:center; justify-content:center; text-align:center }
+    #dropzone{ border: 2px dashed rgba(111,66,193,.45); border-radius: 16px; padding: 0; background: rgba(111,66,193,.04); overflow:hidden }
+    #dropzone .dz-clickable-area{ padding: 28px; display:flex; align-items:center; justify-content:center; text-align:center; min-height: 96px; }
 
     .preview-card{ border-radius: var(--tile-radius); border: 1px solid var(--bs-border-color); box-shadow: var(--tile-shadow); overflow:hidden; }
     .preview-header{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom: 1px solid var(--bs-border-color) }
@@ -90,29 +91,12 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // Lock down
+      // Enforce auth if present
       if (window.Auth && typeof Auth.enforce === 'function') Auth.enforce(true);
 
       // Enable Bootstrap tooltips (purely aesthetic)
       if (window.bootstrap) {
         document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
-      }
-
-      // Optional: lightweight preview handler (non-invasive)
-      const list = document.getElementById('document-list');
-      const frame = document.getElementById('preview-frame');
-      const empty = document.getElementById('preview-empty');
-      if (list && frame) {
-        list.addEventListener('click', (e) => {
-          const row = e.target.closest('[data-preview-url]');
-          if (!row) return;
-          const url = row.getAttribute('data-preview-url');
-          if (url) {
-            frame.src = url;
-            empty.classList.add('d-none');
-            frame.classList.remove('d-none');
-          }
-        });
       }
     });
   </script>
@@ -188,14 +172,19 @@
               <span class="input-group-text bg-transparent border-end-0"><i class="bi bi-search"></i></span>
               <input id="collection-search" class="form-control border-start-0 search-input" placeholder="Search collections…" />
             </div>
+            <button id="new-collection-btn" type="button" class="btn btn-sm btn-primary">
+              <i class="bi bi-folder-plus"></i> New
+            </button>
           </div>
         </div>
         <div class="panel-body">
-          <!-- Collections list (keeps id for backend to hook into) -->
+          <!-- Collections containers (compat: provide multiple expected IDs) -->
           <div id="collections" class="mb-3">
-            <div id="collection-list" class="scroll-area">
+            <div id="collections-list" class="scroll-area">
               <!-- Backend will populate .collection-item elements here -->
             </div>
+            <!-- Some builds used #collection-list -->
+            <div id="collection-list" class="scroll-area d-none"></div>
           </div>
 
           <div class="d-flex align-items-center justify-content-between mb-2">
@@ -206,32 +195,17 @@
             <a href="#" id="back-to-collections" class="small text-decoration-none"><i class="bi bi-arrow-left"></i> Back to all collections</a>
           </div>
 
-          <!-- Documents list (id preserved for backend) -->
-          <div id="document-list" class="scroll-area">
-            <!-- Backend should render .doc-row items. Example skeleton below for reference: -->
-            <!--
-            <div class="doc-row" data-doc-id="123" data-preview-url="/file/url.pdf">
-              <div class="doc-main">
-                <i class="bi bi-file-earmark-text text-primary"></i>
-                <div class="min-w-0">
-                  <div class="doc-title">January Payslip.pdf</div>
-                  <div class="doc-sub">PDF · 214 KB · Uploaded 12 Sep 2025</div>
-                </div>
-              </div>
-              <div class="doc-actions">
-                <button class="btn-icon" data-action="preview" data-bs-toggle="tooltip" data-bs-title="Preview"><i class="bi bi-eye"></i></button>
-                <button class="btn-icon" data-action="download" data-bs-toggle="tooltip" data-bs-title="Download"><i class="bi bi-download"></i></button>
-                <button class="btn-icon text-danger" data-action="delete" data-bs-toggle="tooltip" data-bs-title="Delete"><i class="bi bi-trash"></i></button>
-              </div>
-            </div>
-            -->
+          <!-- Documents containers (compat: several IDs) -->
+          <div id="documents">
+            <div id="documents-list" class="scroll-area"></div>
+            <div id="document-list" class="scroll-area"></div>
           </div>
         </div>
       </section>
 
       <!-- RIGHT: Dropzone + Preview (preview under dropzone) -->
       <section class="d-flex flex-column gap-3">
-        <!-- Upload / Dropzone (keep id for backend wiring) -->
+        <!-- Upload / Dropzone (keep id for backend wiring; use <form> for Dropzone.js compatibility) -->
         <div class="dropzone-card">
           <div class="d-flex align-items-center justify-content-between mb-2">
             <div class="d-flex align-items-center gap-2">
@@ -240,7 +214,18 @@
             </div>
             <div class="hint small">Drag and drop files, or click to browse</div>
           </div>
-          <div id="dropzone" class="bg-white"></div>
+
+          <form id="dropzone" class="dropzone bg-white" action="#" method="post" enctype="multipart/form-data">
+            <!-- Compat clickable area for custom uploaders if Dropzone isn't used -->
+            <div class="dz-clickable-area">
+              <i class="bi bi-cloud-arrow-up me-2"></i>
+              <span class="small text-muted">Drop files here or click to upload</span>
+            </div>
+            <input id="file-input" name="file" type="file" multiple class="d-none" />
+          </form>
+
+          <!-- Legacy alias container some builds used -->
+          <div id="upload-dropzone" class="d-none"></div>
         </div>
 
         <!-- Preview card (sits directly under the dropzone) -->
@@ -262,33 +247,83 @@
     </div>
   </main>
 
+  <!-- New Collection Modal (IDs only; backend can hook listeners; aesthetic only) -->
+  <div class="modal fade" id="new-collection-modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-folder-plus me-2"></i>Create collection</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="new-collection-form">
+          <div class="modal-body">
+            <label for="new-collection-name" class="form-label">Name</label>
+            <input id="new-collection-name" class="form-control" placeholder="e.g., Payslips, Invoices" required />
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <script>
-    // OPTIONAL helpers: If your backend sets data attributes, these will enhance UX without changing logic.
+    // Compatibility helpers that DON'T replace your backend logic.
     (function(){
+      // 1) If your code expects #collection-list (old id), mirror #collections-list into it.
+      const colList = document.getElementById('collections-list');
+      const colListOld = document.getElementById('collection-list');
+      if (colList && colListOld) { colListOld.replaceWith(colList); colList.id = 'collection-list'; }
+
+      // 2) If your code expects #documents-list or #document-list, ensure at least one exists with content
+      const docsList = document.getElementById('documents-list');
+      const docList = document.getElementById('document-list');
+      if (docsList && docList) { docList.replaceWith(docsList); docsList.id = 'document-list'; }
+
+      // 3) Wire simple click-to-file if your uploader doesn't auto-bind
+      const dz = document.getElementById('dropzone');
+      const fi = document.getElementById('file-input');
+      if (dz && fi) {
+        dz.addEventListener('click', (e) => {
+          const isClickable = e.target.closest('.dz-clickable-area') || e.target === dz;
+          if (isClickable) fi.click();
+        });
+      }
+
+      // 4) Lightweight preview for rows with data-preview-url (aesthetic only)
       const list = document.getElementById('document-list');
       const nameLabel = document.getElementById('preview-filename');
       const frame = document.getElementById('preview-frame');
       const empty = document.getElementById('preview-empty');
+      if (list && frame && nameLabel && empty) {
+        list.addEventListener('click', (e) => {
+          const row = e.target.closest('.doc-row,[data-preview-url]');
+          if (!row) return;
+          const url = row.getAttribute('data-preview-url');
+          const name = row.getAttribute('data-filename') || row.querySelector('.doc-title')?.textContent || 'Preview';
+          if (url) {
+            nameLabel.textContent = name;
+            frame.src = url;
+            empty.classList.add('d-none');
+            frame.classList.remove('d-none');
+          }
+        });
+      }
 
-      if (!list) return;
-      list.addEventListener('click', (e) => {
-        const row = e.target.closest('.doc-row');
-        if (!row) return;
-        const url = row.getAttribute('data-preview-url');
-        const name = row.getAttribute('data-filename') || row.querySelector('.doc-title')?.textContent || 'Preview';
-        if (url) {
-          nameLabel.textContent = name;
-          frame.src = url;
-          empty.classList.add('d-none');
-          frame.classList.remove('d-none');
-        }
-      });
-
-      // Action icon tooltips
-      if (window.bootstrap) {
-        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
+      // 5) If your app opens a modal to create collections, show ours when the button is clicked (non-invasive)
+      const newBtn = document.getElementById('new-collection-btn');
+      const modalEl = document.getElementById('new-collection-modal');
+      if (newBtn && modalEl && window.bootstrap) {
+        const m = new bootstrap.Modal(modalEl);
+        newBtn.addEventListener('click', () => m.show());
       }
     })();
   </script>
+
+  <!-- IMPORTANT: include possible page scripts so original logic runs -->
+  <script src="/js/document-vault.js"></script>
+  <script src="/js/vault.js"></script>
 </body>
 </html>
