@@ -354,7 +354,6 @@
       const fd = new FormData();
       for (const file of files) {
         fd.append('files', file); // modern plural
-        fd.append('file', file);  // legacy singular — harmless if server ignores
       }
   
       const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, {

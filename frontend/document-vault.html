@@ -8,10 +8,6 @@
   <!-- Shared theme, Bootstrap, Bootstrap Icons, helpers -->
   <script>window.__API_BASE = window.__API_BASE || 'https://ai-accountant-app.onrender.com';</script>
   <script src="/js/head-include.js"></script>
-  <script src="/js/http-shim.js"></script>
-
-  <div id="topbar-container"></div>
-  <div id="sidebar-container"></div>
 
   <style>
     :root{
@@ -21,7 +17,7 @@
       --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
       --tile-shadow-hover: 0 14px 34px rgba(0,0,0,.10), 0 4px 12px rgba(0,0,0,.06);
       --muted: #6b7280;
-      --brand: var(--bs-primary, #6f42c1);
+      --brand: var(--bs-primary, #7fdccb);
       --chip-bg: rgba(111,66,193,.08);
       --chip-fg: var(--brand);
       --bg-soft: var(--bs-light-bg-subtle, #f8f9fa);
@@ -105,6 +101,7 @@
   </script>
 </head>
 <body>
+    
   <div id="topbar-container"></div>
   <div id="sidebar-container"></div>
 
@@ -277,7 +274,7 @@
   </script>
 
   <!-- Page logic -->
+  <script src="/js/nav.js"></script>
   <script src="/js/document-vault.js"></script>
-  <script src="/js/vault.js"></script>
 </body>
 </html>
