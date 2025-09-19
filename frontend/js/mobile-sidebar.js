@@ -1,123 +1,184 @@
 // /js/mobile-sidebar.js
-// Makes the existing desktop sidebar work as an off-canvas drawer on mobile
+// Mobile off-canvas that mirrors the desktop sidebar once it's actually populated.
+// Also injects a correctly placed, properly sized navbar toggler button.
+
 (function () {
     const OFFCANVAS_ID = "appSidebar";
     const OFFCANVAS_BODY_ID = "appSidebarBody";
   
-    function ready(fn) {
-      if (document.readyState !== "loading") fn();
-      else document.addEventListener("DOMContentLoaded", fn);
+    // ---------- tiny utils ----------
+    const ready = (fn) =>
+      (document.readyState === "loading"
+        ? document.addEventListener("DOMContentLoaded", fn)
+        : fn());
+  
+    function q(sel, root = document) { return root.querySelector(sel); }
+    function qa(sel, root = document) { return Array.from(root.querySelectorAll(sel)); }
+  
+    // Poll + observe until a predicate is true
+    function waitFor(predicate, { timeout = 15000, interval = 120 } = {}) {
+      return new Promise((resolve, reject) => {
+        const start = performance.now();
+        (function tick() {
+          if (predicate()) return resolve(true);
+          if (performance.now() - start > timeout) return reject(new Error("timeout"));
+          setTimeout(tick, interval);
+        })();
+      });
     }
   
-    function whenAvailable(selector, cb, timeout = 10000) {
-      const start = performance.now();
-      (function poll() {
-        const el = document.querySelector(selector);
-        if (el) return cb(el);
-        if (performance.now() - start > timeout) return;
-        requestAnimationFrame(poll);
-      })();
-    }
-  
+    // ---------- offcanvas shell ----------
     function ensureOffcanvas() {
       if (document.getElementById(OFFCANVAS_ID)) return;
   
-      const oc = document.createElement("div");
-      oc.className = "offcanvas offcanvas-start d-lg-none";
-      oc.id = OFFCANVAS_ID;
-      oc.tabIndex = -1;
-      oc.setAttribute("aria-labelledby", "appSidebarLabel");
+      const el = document.createElement("div");
+      el.className = "offcanvas offcanvas-start d-lg-none";
+      el.id = OFFCANVAS_ID;
+      el.tabIndex = -1;
+      el.setAttribute("aria-labelledby", "appSidebarLabel");
+      el.setAttribute("data-bs-scroll", "true");
   
-      oc.innerHTML = `
+      el.innerHTML = `
         <div class="offcanvas-header">
-          <h5 class="offcanvas-title" id="appSidebarLabel">Menu</h5>
-          <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+          <h5 class="offcanvas-title m-0" id="appSidebarLabel">Menu</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
         </div>
-        <div class="offcanvas-body p-0" id="${OFFCANVAS_BODY_ID}">
-          <!-- cloned sidebar goes here -->
-        </div>
+        <div class="offcanvas-body p-0" id="${OFFCANVAS_BODY_ID}"></div>
       `;
   
-      document.body.appendChild(oc);
+      document.body.appendChild(el);
   
-      // Width control via CSS variable (fallback 280px)
+      // Minimal CSS to size the drawer + button + hide desktop sidebar on mobile
       const style = document.createElement("style");
       style.textContent = `
         :root { --sidebar-w: 280px; }
         #${OFFCANVAS_ID} { width: var(--sidebar-w); }
-        /* Hide desktop sidebar on small screens */
         @media (max-width: 991.98px) {
           #sidebar-container { display: none !important; }
         }
-        /* Desktop remains exactly as you already have it */
+        /* Big, tappable hamburger */
+        .mobile-menu-btn {
+          width: 44px; height: 44px;
+          display: inline-flex; align-items: center; justify-content: center;
+          border: 1px solid var(--bs-border-color, rgba(0,0,0,.15));
+          border-radius: .5rem; background: transparent;
+        }
+        .mobile-menu-btn svg { width: 24px; height: 24px; }
+        .navbar .mobile-menu-btn { margin-right: .5rem; }
       `;
       document.head.appendChild(style);
-    }
   
-    function cloneSidebarIntoOffcanvas() {
-      const desktop = document.querySelector("#sidebar-container");
-      const body = document.getElementById(OFFCANVAS_BODY_ID);
-      if (!desktop || !body) return;
-  
-      // Mirror the current desktop sidebar markup into the mobile drawer
-      body.innerHTML = desktop.innerHTML;
-  
-      // Close drawer when a nav link is clicked
-      const links = body.querySelectorAll("a, [data-dismiss-offcanvas]");
-      links.forEach((a) => {
-        a.addEventListener("click", () => {
-          const el = document.getElementById(OFFCANVAS_ID);
-          if (!el) return;
-          const oc = bootstrap.Offcanvas.getInstance(el) || new bootstrap.Offcanvas(el);
-          oc.hide();
-        });
+      // Delegate: close drawer when any link inside is clicked
+      el.addEventListener("click", (evt) => {
+        const a = evt.target.closest("a,[data-dismiss-offcanvas]");
+        if (!a) return;
+        const inst = window.bootstrap?.Offcanvas.getInstance(el) || new window.bootstrap?.Offcanvas(el);
+        inst?.hide();
       });
     }
   
-    function keepInSync() {
-      const desktop = document.querySelector("#sidebar-container");
-      if (!desktop) return;
-      const obs = new MutationObserver(() => cloneSidebarIntoOffcanvas());
-      obs.observe(desktop, { childList: true, subtree: true });
+    // Prefer a nested nav/aside if present (avoids copying unrelated wrappers)
+    function findSidebarRoot(host) {
+      return (
+        q('[data-role="sidebar"]', host) ||
+        q("nav", host) ||
+        q("aside", host) ||
+        q(".sidebar", host) ||
+        host
+      );
     }
   
-    function injectHamburger() {
-      const target = document.querySelector("#topbar-container");
-      if (!target) return;
+    // Keep mobile drawer in sync with desktop sidebar
+    function syncSidebar() {
+      const desktopHost = q("#sidebar-container");
+      const mobileBody = document.getElementById(OFFCANVAS_BODY_ID);
+      if (!desktopHost || !mobileBody) return;
   
-      // Try to place inside the actual navbar container if present
+      const src = findSidebarRoot(desktopHost);
+  
+      // Only copy once there's meaningful content
+      const meaningful =
+        src && (src.children.length > 0 || (src.textContent || "").trim().length > 10);
+      if (!meaningful) return;
+  
+      mobileBody.innerHTML = src.innerHTML;
+    }
+  
+    function observeSidebarChanges() {
+      const desktopHost = q("#sidebar-container");
+      if (!desktopHost) return;
+  
+      // Re-sync on any subtree change (sidebar is often injected/replaced dynamically)
+      const mo = new MutationObserver(() => syncSidebar());
+      mo.observe(desktopHost, { childList: true, subtree: true, attributes: true });
+    }
+  
+    // ---------- navbar hamburger ----------
+    function injectHamburger() {
+      const topbar = q("#topbar-container");
+      if (!topbar) return;
+  
+      // Find the best insertion point: inside .navbar > .container|.container-fluid
+      const navbar = q(".navbar", topbar) || topbar;
       const host =
-        target.querySelector(".navbar .container, .navbar .container-fluid") || target;
+        q(".navbar .container, .navbar .container-fluid", topbar) ||
+        navbar;
   
       // Avoid duplicates
-      if (host.querySelector('[data-bs-target="#' + OFFCANVAS_ID + '"]')) return;
+      if (host.querySelector(`[data-bs-target="#${OFFCANVAS_ID}"]`)) return;
   
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "btn btn-outline-secondary d-lg-none me-2";
+      btn.className = "mobile-menu-btn d-lg-none";
       btn.setAttribute("data-bs-toggle", "offcanvas");
-      btn.setAttribute("data-bs-target", "#" + OFFCANVAS_ID);
+      btn.setAttribute("data-bs-target", `#${OFFCANVAS_ID}`);
       btn.setAttribute("aria-controls", OFFCANVAS_ID);
-      btn.innerHTML = '<i class="bi bi-list" aria-hidden="true"></i><span class="visually-hidden">Open menu</span>';
+      btn.setAttribute("aria-label", "Open menu");
+      // Inline SVG burger (so you don't depend on Bootstrap Icons)
+      btn.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M3 6h18M3 12h18M3 18h18" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      `;
   
-      host.prepend(btn);
+      // Place after brand if present, else at the very start
+      const brand = q(".navbar-brand", host);
+      if (brand?.nextSibling) brand.after(btn);
+      else if (brand) brand.insertAdjacentElement("afterend", btn);
+      else host.prepend(btn);
     }
   
-    ready(() => {
-      // 1) Build the offcanvas shell
+    // ---------- bootstrap guard ----------
+    function ensureBootstrapReady() {
+      // If bootstrap isn't loaded yet, we still set up DOM; Offcanvas instance will be created on first open.
+      if (!("bootstrap" in window)) {
+        console.warn("[mobile-sidebar] Bootstrap not found yet. Ensure bootstrap.bundle.js is loaded.");
+      }
+    }
+  
+    // ---------- init ----------
+    ready(async () => {
       ensureOffcanvas();
+      ensureBootstrapReady();
   
-      // 2) Wait for your existing topbar/sidebar to be injected, then wire things up
-      whenAvailable("#sidebar-container", () => {
-        // Mark desktop sidebar as visible only on lg+
-        document.querySelector("#sidebar-container")?.classList.add("d-none", "d-lg-block");
-        cloneSidebarIntoOffcanvas();
-        keepInSync();
-      });
+      // Wait until your app has actually injected the sidebar markup
+      try {
+        await waitFor(() => {
+          const host = q("#sidebar-container");
+          if (!host) return false;
+          const src = findSidebarRoot(host);
+          return !!src && (src.children.length > 0 || (src.textContent || "").trim().length > 10);
+        }, { timeout: 20000, interval: 150 });
+      } catch (e) {
+        // We still proceed; syncSidebar() + MutationObserver will handle late loads.
+      }
   
-      whenAvailable("#topbar-container", () => {
-        injectHamburger();
-      });
+      // First sync + keep in sync
+      syncSidebar();
+      observeSidebarChanges();
+  
+      // Only then inject the button (so placement uses the final navbar DOM)
+      injectHamburger();
     });
   })();
   
