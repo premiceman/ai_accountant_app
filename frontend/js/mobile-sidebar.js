@@ -15,7 +15,7 @@
     function q(sel, root = document) { return root.querySelector(sel); }
     function qa(sel, root = document) { return Array.from(root.querySelectorAll(sel)); }
   
-    // Poll + observe until a predicate is true
+    // Poll + observe until predicate is true
     function waitFor(predicate, { timeout = 15000, interval = 120 } = {}) {
       return new Promise((resolve, reject) => {
         const start = performance.now();
@@ -72,8 +72,13 @@
       el.addEventListener("click", (evt) => {
         const a = evt.target.closest("a,[data-dismiss-offcanvas]");
         if (!a) return;
-        const inst = window.bootstrap?.Offcanvas.getInstance(el) || new window.bootstrap?.Offcanvas(el);
-        inst?.hide();
+  
+        const bs = window.bootstrap;
+        const OffcanvasCtor = bs && bs.Offcanvas ? bs.Offcanvas : null;
+        if (!OffcanvasCtor) return;
+  
+        const inst = OffcanvasCtor.getInstance(el) || new OffcanvasCtor(el);
+        inst.hide();
       });
     }
   
@@ -102,6 +107,11 @@
       if (!meaningful) return;
   
       mobileBody.innerHTML = src.innerHTML;
+  
+      // Optional hook: if your sidebar needs JS re-binding on the cloned DOM
+      if (typeof window.rehydrateSidebar === "function") {
+        try { window.rehydrateSidebar(mobileBody); } catch (e) { /* no-op */ }
+      }
     }
   
     function observeSidebarChanges() {
@@ -134,7 +144,7 @@
       btn.setAttribute("data-bs-target", `#${OFFCANVAS_ID}`);
       btn.setAttribute("aria-controls", OFFCANVAS_ID);
       btn.setAttribute("aria-label", "Open menu");
-      // Inline SVG burger (so you don't depend on Bootstrap Icons)
+      // Inline SVG burger (no dependency on Bootstrap Icons)
       btn.innerHTML = `
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M3 6h18M3 12h18M3 18h18" stroke-width="2" stroke-linecap="round"/>
@@ -150,9 +160,9 @@
   
     // ---------- bootstrap guard ----------
     function ensureBootstrapReady() {
-      // If bootstrap isn't loaded yet, we still set up DOM; Offcanvas instance will be created on first open.
+      // If bootstrap isn't loaded yet, we still set up DOM; Offcanvas instance is created on first open.
       if (!("bootstrap" in window)) {
-        console.warn("[mobile-sidebar] Bootstrap not found yet. Ensure bootstrap.bundle.js is loaded.");
+        console.warn("[mobile-sidebar] Bootstrap not found yet. Ensure bootstrap.bundle.js is loaded before this file.");
       }
     }
   
@@ -170,7 +180,7 @@
           return !!src && (src.children.length > 0 || (src.textContent || "").trim().length > 10);
         }, { timeout: 20000, interval: 150 });
       } catch (e) {
-        // We still proceed; syncSidebar() + MutationObserver will handle late loads.
+        // Still proceed; syncSidebar() + MutationObserver will handle late loads.
       }
   
       // First sync + keep in sync
