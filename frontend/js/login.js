@@ -7,31 +7,55 @@
   const btn = document.getElementById('login-btn');
   const err = document.getElementById('login-error');
   const next = new URLSearchParams(location.search).get('next') || './home.html';
-  const setLoading = (v)=>{ if(!btn) return; btn.disabled=v; btn.dataset.originalText = btn.dataset.originalText||btn.textContent; btn.textContent = v?'Signing in…':btn.dataset.originalText; };
-  const showError = (m)=>{ if(!err){ alert(m); return; } err.textContent=m; err.classList.remove('d-none'); };
-  const clearError = ()=>{ if(err){ err.textContent=''; err.classList.add('d-none'); } };
+
+  function setLoading(v) {
+    if (!btn) return;
+    btn.dataset.originalText = btn.dataset.originalText || btn.textContent;
+    btn.disabled = v;
+    btn.textContent = v ? 'Signing in…' : btn.dataset.originalText;
+  }
+  function showError(m){
+    if (!err) { alert(m); return; }
+    err.textContent = m;
+    err.classList.remove('d-none');
+  }
+  function clearError(){
+    if (err) { err.textContent = ''; err.classList.add('d-none'); }
+  }
+
   form?.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const identifier = (idInput?.value||'').trim();
     const password = pwInput?.value || '';
-    if(!identifier || !password) return showError('Please enter your email/username and password.');
-    const body = identifier.includes('@') ? { email:identifier, password } : { username:identifier, password };
+    if (!identifier || !password) return showError('Please enter your email/username and password.');
+    const body = identifier.includes('@') ? { email: identifier, password } : { username: identifier, password };
     setLoading(true); clearError();
     try {
-      const res = await fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      if (res.status === 400) { let msg='Invalid credentials. Please check your details.'; try{ const j=await res.json(); if(j?.error) msg=j.error; }catch{} return showError(msg); }
-      if (res.status === 401) return showError('Unauthorized. Please sign in again.');
-      if (res.status === 429) return showError('Too many attempts. Try again later.');
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      });
+      if (res.status === 400 || res.status === 401) {
+        let msg = 'Invalid credentials. Please try again.';
+        try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
+        return showError(msg);
+      }
       if (res.status >= 500) return showError('Server error. Please try again shortly.');
       if (!res.ok) return showError(`Login failed (status ${res.status}).`);
       const data = await res.json();
-      const token = data.token; if(!token) return showError('No token returned from server.');
-      const store = (remember && remember.checked) ? localStorage : sessionStorage;
-      store.setItem('token', token);
-      if (data.user) try { store.setItem('me', JSON.stringify(data.user)); } catch {}
+      const token = data.token;
+      if (!token) return showError('No token returned from server.');
+      // remember → localStorage; else session
+      if (remember && remember.checked) localStorage.setItem('token', token);
+      else sessionStorage.setItem('token', token);
+      if (data.user) try { (remember && remember.checked ? localStorage : sessionStorage).setItem('me', JSON.stringify(data.user)); } catch {}
       location.href = next;
     } catch (e) {
       console.error(e); showError('Network error. Is the server running?');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   });
 })();

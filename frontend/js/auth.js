@@ -1,10 +1,8 @@
 // frontend/js/auth.js
 (function () {
-  // Keep compatibility with legacy token keys already in your app.
   const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
   const USER_CACHE_KEY = 'me';
 
-  // ---------- Token helpers ----------
   function getToken() {
     for (const k of STORAGE_KEYS) {
       const v = localStorage.getItem(k) || sessionStorage.getItem(k);
@@ -14,7 +12,8 @@
   }
   function setToken(token, { session = false } = {}) {
     clearTokens();
-    (session ? sessionStorage : localStorage).setItem('token', token || '');
+    if (session) sessionStorage.setItem('token', token);
+    else localStorage.setItem('token', token);
   }
   function clearTokens() {
     for (const k of STORAGE_KEYS) {
@@ -25,7 +24,6 @@
     try { sessionStorage.removeItem(USER_CACHE_KEY); } catch {}
   }
 
-  // ---------- JWT decode & basic expiry check ----------
   function decodeJWT(t) {
     try {
       const b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -33,140 +31,53 @@
         return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
       }).join(''));
       return JSON.parse(json);
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
   function isExpired(token) {
-    const payload = decodeJWT(token);
-    if (!payload || !payload.exp) return false; // if no exp, don't assume expired
-    const nowSec = Math.floor(Date.now() / 1000);
-    // Add a tiny skew to avoid edge flicker
-    return payload.exp <= (nowSec + 5);
+    const p = decodeJWT(token);
+    if (!p || !p.exp) return false;
+    const now = Math.floor(Date.now()/1000);
+    return p.exp <= now + 5;
   }
 
-  // ---------- Fetch wrapper that adds Authorization when possible ----------
   async function fetchWithAuth(url, options = {}) {
     const token = getToken();
     const headers = new Headers(options.headers || {});
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    return fetch(window.API ? window.API.url(url) : url, { ...options, headers });
+    return fetch(url, { ...options, headers });
   }
 
-  // ---------- Tolerant user load (keeps your current behaviour) ----------
-  // Used by dashboard etc. We don't hard-fail UI here.
   async function requireAuth() {
     const t = getToken();
+    if (!t || isExpired(t)) {
+      clearTokens();
+      location.replace('/login.html?next=' + encodeURIComponent(location.pathname + location.search));
+      throw new Error('Not authenticated');
+    }
+    // Load me (tolerant)
     try {
-      const res = await fetch((window.API ? window.API.url('/api/user/me') : '/api/user/me'), {
-        headers: t ? { Authorization: `Bearer ${t}` } : {},
-        cache: 'no-store'
-      });
-      const me = res.ok ? await res.json() : { firstName: 'Guest' };
+      const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
+      if (!res.ok) throw new Error('me failed');
+      const me = await res.json();
       window.__ME__ = me;
       const g = document.getElementById('greeting-name');
       if (g && me?.firstName) g.textContent = me.firstName;
       return { me, token: t };
     } catch {
-      const me = { firstName: 'Guest' };
-      window.__ME__ = me;
-      return { me, token: t };
+      // if server failed, still pass token (page might handle)
+      return { me: null, token: t };
     }
   }
 
-  // ---------- Strict gate for protected pages ----------
-  // Pages already call:
-  //   Auth.enforce();                                 // protected pages
-  //   Auth.enforce({ allowAnonymous:[...], bounceIfAuthed:true }); // login/signup
-  async function enforce(opts = {}) {
-    const defaults = {
-      allowAnonymous: ['index.html', 'login.html', 'signup.html', '404.html', 'unauthorized.html'],
-      bounceIfAuthed: false,   // on login/signup: if already authed, go to next/home
-      validateWithServer: true // actually hit /api/user/me when a token exists
-    };
-    const cfg = { ...defaults, ...opts };
-
-    // Current page filename, e.g. "home.html"
-    const page = (() => {
-      const p = (location.pathname || '/').split('/').pop();
-      return p && p.includes('.') ? p : 'index.html';
-    })();
-
-    const hasToken = !!getToken();
-    const token = getToken();
-    const looksValid = hasToken && !isExpired(token);
-
-    // Helper: redirect to login with ?next=<current>
-    function toLogin() {
-      const next = encodeURIComponent(location.pathname + location.search);
-      location.replace(`./login.html?next=${next}`);
-    }
-    // Helper: redirect to app home or provided next
-    function toAppHomeFromLogin() {
-      const params = new URLSearchParams(location.search);
-      const next = params.get('next');
-      location.replace(next && next.startsWith('/') ? next : './home.html');
-    }
-
-    // Anonymous pages (login/signup/index/etc.)
-    if (cfg.allowAnonymous.includes(page)) {
-      if (!cfg.bounceIfAuthed) return;
-      // If we're on login/signup and already authenticated, bounce to app.
-      if (!hasToken) return;                      // clearly not authed
-      if (!looksValid && !cfg.validateWithServer) return; // unsure, let them log in
-
-      if (cfg.validateWithServer) {
-        try {
-          const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
-          if (res.ok) return toAppHomeFromLogin(); // definitely authed
-        } catch { /* ignore and let page load */ }
-        return; // couldn't confirm; allow login page
-      } else {
-        return toAppHomeFromLogin();
-      }
-    }
-
-    // Protected pages (everything else)
-    if (!hasToken) return toLogin();
-    if (isExpired(token)) { clearTokens(); return toLogin(); }
-
-    if (cfg.validateWithServer) {
-      try {
-        const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
-        if (!res.ok) { clearTokens(); return toLogin(); }
-        // Cache user for the page (and keep existing tolerant flow intact)
-        try {
-          const me = await res.json();
-          window.__ME__ = me;
-          try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
-        } catch { /* ignore parse errors; tolerant */ }
-      } catch {
-        // Network error => safest is to require re-auth
-        return toLogin();
-      }
-    }
-
-    // Keep your current pattern: pages often call requireAuth() after this
-    return;
-  }
-
-  // ---------- Optional nicety used by your pages ----------
-  function setBannerTitle(suffix) {
-    const name = (window.__ME__?.firstName || '').trim();
-    const title = name ? `${name} — ${suffix}` : suffix;
-    document.title = title;
-    const h = document.querySelector('h1.page-title, h1');
+  function setBannerTitle(title) {
+    const h = document.getElementById('banner-title');
     if (h && !h.dataset.lockTitle) h.textContent = title;
-    const g = document.getElementById('greeting-name');
-    if (g && name) g.textContent = name;
   }
 
-  // Public API (names preserved)
   window.Auth = {
     getToken, setToken, clearTokens,
     requireAuth,
     fetch: fetchWithAuth,
-    enforce,
     setBannerTitle
   };
 })();
