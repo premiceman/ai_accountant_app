@@ -1,8 +1,10 @@
 /**
  * backend/index.js
  * Adds:
- *  - CSP middleware (allows jsDelivr + inline for now, fonts via data:)
- *  - Everything else unchanged (safeRequire, mounts, poller boot, etc.)
+ *  - CSP header (allows jsDelivr + inline for now; fonts via data:)
+ *  - HTML sanitizer for CSP <meta> tags (so header policy wins)
+ * Keeps:
+ *  - Your existing routers, poller, static hosting, Mongo connect
  */
 
 require('dotenv').config();
@@ -11,6 +13,7 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = safeRequire('cookie-parser') || (() => (req, res, next) => next());
 const path = require('path');
+const fs = require('fs');
 const mongoose = require('mongoose');
 
 // Optional middlewares (only if installed)
@@ -20,10 +23,10 @@ const helmet = safeRequire('helmet');
 const app = express();
 app.set('trust proxy', 1);
 
-/* -------------------- CSP (FIX) --------------------
-   Your pages load Bootstrap/Icons/Chart.js from jsDelivr and use some inline scripts.
-   Previous CSP blocked CDN CSS & fonts, so the page looked unstyled.
-   This policy ALLOWS those until you self-host vendor assets.
+/* -------------------- CSP HEADER --------------------
+   Your pages load Bootstrap/Icons/Chart.js from jsDelivr and some inline scripts.
+   Previous *meta* CSP inside HTML overrode our header and blocked CDN/inline.
+   This header allows your current setup. Later, we can tighten CSP if you self-host.
 ---------------------------------------------------- */
 app.use((req, res, next) => {
   res.setHeader(
@@ -49,7 +52,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Optional security/perf if available
+// Optional security/perf if available (helmet here won’t override our CSP unless you enabled its CSP explicitly)
 if (helmet) app.use(helmet());
 if (compression) app.use(compression());
 
@@ -99,21 +102,34 @@ mount('/api/truelayer',  truelayerRouter, 'truelayer');
 mount('/api/internal',   internalRouter,  'internal');
 
 // ----------------------------------------------------------------------------
-// Static hosting (non-invasive)
+// HTML sanitizer before static: strip any <meta http-equiv="Content-Security-Policy"> in HTML
 const FRONTEND_DIRS = [
   path.join(__dirname, '../frontend'),
   path.join(__dirname, '../public')
 ];
-FRONTEND_DIRS.forEach(d => {
-  app.use(express.static(d, { index: false }));
+const HTML_ROUTES = ['/', '/index.html', '/home.html', '/login.html', '/document-vault.html', '/profile.html', '/billing.html'];
+
+app.get(HTML_ROUTES, (req, res, next) => {
+  try {
+    const fileRel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
+    const candidate = FRONTEND_DIRS
+      .map(d => path.join(d, fileRel))
+      .find(fp => fs.existsSync(fp));
+    if (!candidate) return next();
+
+    let html = fs.readFileSync(candidate, 'utf8');
+    // Remove any meta CSP from the HTML so our header policy is the only one applied
+    html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
+    res.type('html').send(html);
+  } catch (e) {
+    return next(e);
+  }
 });
 
-app.get(['/','/home.html','/login.html','/document-vault.html','/profile.html','/billing.html'], (req, res, next) => {
-  const candidate = FRONTEND_DIRS
-    .map(d => path.join(d, req.path === '/' ? 'index.html' : req.path.replace(/^\//, '')))
-    .find(fp => fileExists(fp));
-  if (candidate) return res.sendFile(candidate);
-  return next();
+// ----------------------------------------------------------------------------
+// Static hosting for all other assets
+FRONTEND_DIRS.forEach(d => {
+  app.use(express.static(d, { index: false }));
 });
 
 // ----------------------------------------------------------------------------
@@ -172,15 +188,6 @@ function mount(route, router, label) {
   if (!router) return;
   app.use(route, router);
   console.log(`➡️  Mounted ${label || route} at ${route}`);
-}
-
-function fileExists(fp) {
-  try {
-    const fs = require('fs');
-    return fs.existsSync(fp);
-  } catch {
-    return false;
-  }
 }
 
 module.exports = app;
