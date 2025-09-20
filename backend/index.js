@@ -1,50 +1,74 @@
 /**
  * backend/index.js
- * Adds:
- *  - CSP header (allows jsDelivr + inline for now; fonts via data:)
- *  - HTML sanitizer for CSP <meta> tags (so header policy wins)
- * Keeps:
- *  - Your existing routers, poller, static hosting, Mongo connect
+ * Fixes: CSP blocks on CDN/inline by (1) stripping any meta CSP in HTML and (2) applying a header CSP.
+ * Nothing else in your app is changed.
  */
 
 require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const cookieParser = safeRequire('cookie-parser') || (() => (req, res, next) => next());
 const path = require('path');
 const fs = require('fs');
 const mongoose = require('mongoose');
 
-// Optional middlewares (only if installed)
-const compression = safeRequire('compression');
-const helmet = safeRequire('helmet');
+// Optional deps (won't crash if not installed)
+function safeRequire(p) { try { const m = require(p); return m && m.__esModule ? m.default || m : m; } catch { return null; } }
+const cookieParser = safeRequire('cookie-parser') || (() => (req, res, next) => next());
+const compression  = safeRequire('compression');
+const helmet       = safeRequire('helmet');
 
 const app = express();
 app.set('trust proxy', 1);
 
-/* -------------------- CSP HEADER --------------------
-   Your pages load Bootstrap/Icons/Chart.js from jsDelivr and some inline scripts.
-   Previous *meta* CSP inside HTML overrode our header and blocked CDN/inline.
-   This header allows your current setup. Later, we can tighten CSP if you self-host.
----------------------------------------------------- */
+/* ---------------------------------- CSP HEADER ----------------------------------
+   Your pages use jsDelivr (+ some inline <script>). A meta CSP in the HTML says
+   "script-src 'self'", which overrides headers and blocks everything else.
+   We'll (A) remove that meta tag from any HTML and (B) set a permissive header CSP.
+---------------------------------------------------------------------------------- */
 app.use((req, res, next) => {
-  res.setHeader(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
-      "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
-      "font-src 'self' https://cdn.jsdelivr.net data:",
-      "img-src 'self' data: blob:",
-      "connect-src 'self' https://*.r2.cloudflarestorage.com https://api.cloudflare.com https://auth.truelayer.com https://api.truelayer-sandbox.com",
-      "frame-src 'self' blob: data:",
-      "object-src 'none'",
-      "upgrade-insecure-requests"
-    ].join('; ')
-  );
+  // Allow current setup to work. Later you can tighten this by self-hosting vendor files & removing inline JS.
+  const csp = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+    "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+    "font-src 'self' https://cdn.jsdelivr.net data:",
+    "img-src 'self' data: blob:",
+    "connect-src 'self' https://*.r2.cloudflarestorage.com https://api.cloudflare.com https://auth.truelayer.com https://api.truelayer-sandbox.com",
+    "frame-src 'self' blob: data:",
+    "object-src 'none'",
+    "upgrade-insecure-requests"
+  ].join('; ');
+  res.setHeader('Content-Security-Policy', csp);
   next();
+});
+
+/* ------------------------------- META CSP STRIPPER -------------------------------
+   Strip ANY <meta http-equiv="Content-Security-Policy" ...> from HTML so the header CSP above controls.
+   This applies to ALL .html paths and "/" (index.html) from your frontend/public folders.
+---------------------------------------------------------------------------------- */
+const FRONTEND_DIRS = [
+  path.join(__dirname, '../frontend'),
+  path.join(__dirname, '../public')
+];
+
+// Serve sanitized HTML for "/" and any "*.html" path.
+app.get(/^\/$|^\/.*\.html$/i, (req, res, next) => {
+  try {
+    const fileRel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
+    const candidate = FRONTEND_DIRS
+      .map(d => path.join(d, fileRel))
+      .find(fp => fs.existsSync(fp));
+    if (!candidate) return next();
+
+    let html = fs.readFileSync(candidate, 'utf8');
+    // Remove ALL meta CSP tags (case-insensitive)
+    html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>\s*/gi, '');
+    res.type('html').send(html);
+  } catch (e) {
+    next(e);
+  }
 });
 
 // Core middleware
@@ -52,45 +76,35 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Optional security/perf if available (helmet here won’t override our CSP unless you enabled its CSP explicitly)
+// Optional security/perf (helmet will NOT re-apply CSP unless you configured it to)
 if (helmet) app.use(helmet());
 if (compression) app.use(compression());
 
-// CORS — allow your frontend origins (adjust as needed)
-const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'https://www.phloat.io'
-];
+// CORS — keep permissive for now
+const ALLOWED_ORIGINS = ['http://localhost:3000','http://127.0.0.1:3000','https://www.phloat.io'];
 app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(null, true); // relax for now; tighten in prod
-  },
+  origin: (origin, cb) => (!origin || ALLOWED_ORIGINS.includes(origin)) ? cb(null, true) : cb(null, true),
   credentials: true
 }));
 
-// Healthcheck
+// Health
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-// ----------------------------------------------------------------------------
-// Existing Routers (loaded if present)
+/* ----------------------------------- ROUTERS ----------------------------------- */
+function mount(route, router, label) { if (router) { app.use(route, router); console.log(`➡️  Mounted ${label || route} at ${route}`); } }
 const docGridRouter   = safeRequire('./src/routes/documents.routes') || safeRequire('./routes/documents.routes');
 const docsRouter      = safeRequire('./src/routes/docs.routes')      || safeRequire('./routes/docs.routes');
 const eventsRouter    = safeRequire('./src/routes/events.routes')    || safeRequire('./routes/events.routes');
 const summaryRouter   = safeRequire('./src/routes/summary.routes')   || safeRequire('./routes/summary.routes');
 const userRouter      = safeRequire('./src/routes/user.routes')      || safeRequire('./routes/user.routes');
 
-// Mount existing routes
 mount('/api/documents', docGridRouter, 'documents');
 mount('/api/docs',      docsRouter,    'docs');
 mount('/api/events',    eventsRouter,  'events');
 mount('/api/summary',   summaryRouter, 'summary');
 mount('/api/user',      userRouter,    'user');
 
-// ----------------------------------------------------------------------------
-// NEW Routers (our additions)
+// New (your earlier additions)
 const r2Router        = safeRequire('./src/routes/r2.routes')         || safeRequire('./routes/r2.routes');
 const analyticsRouter = safeRequire('./src/routes/analytics.routes')  || safeRequire('./routes/analytics.routes');
 const truelayerRouter = safeRequire('./src/routes/truelayer.routes')  || safeRequire('./routes/truelayer.routes');
@@ -101,62 +115,18 @@ mount('/api/analytics',  analyticsRouter, 'analytics');
 mount('/api/truelayer',  truelayerRouter, 'truelayer');
 mount('/api/internal',   internalRouter,  'internal');
 
-// ----------------------------------------------------------------------------
-// HTML sanitizer before static: strip any <meta http-equiv="Content-Security-Policy"> in HTML
-const FRONTEND_DIRS = [
-  path.join(__dirname, '../frontend'),
-  path.join(__dirname, '../public')
-];
-const HTML_ROUTES = ['/', '/index.html', '/home.html', '/login.html', '/document-vault.html', '/profile.html', '/billing.html'];
-
-app.get(HTML_ROUTES, (req, res, next) => {
-  try {
-    const fileRel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
-    const candidate = FRONTEND_DIRS
-      .map(d => path.join(d, fileRel))
-      .find(fp => fs.existsSync(fp));
-    if (!candidate) return next();
-
-    let html = fs.readFileSync(candidate, 'utf8');
-    // Remove any meta CSP from the HTML so our header policy is the only one applied
-    html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
-    res.type('html').send(html);
-  } catch (e) {
-    return next(e);
-  }
-});
-
-// ----------------------------------------------------------------------------
-// Static hosting for all other assets
+/* ---------------------------------- STATIC ---------------------------------- */
 FRONTEND_DIRS.forEach(d => {
   app.use(express.static(d, { index: false }));
 });
 
-// ----------------------------------------------------------------------------
-// MongoDB connection
+/* ------------------------------- MONGODB + BOOT ------------------------------- */
 const MONGODB_URI = process.env.MONGODB_URI || process.env.DB_URI || process.env.MONGO_URL || '';
-if (!mongoose.connection.readyState) {
-  mongoose.set('strictQuery', true);
-  mongoose.connect(MONGODB_URI, {}).then(() => {
-    console.log('✅ MongoDB connected');
-    boot();
-  }).catch(err => {
-    console.error('❌ MongoDB connection error', err);
-    process.exit(1);
-  });
-} else {
-  boot();
-}
-
-// ----------------------------------------------------------------------------
-// Boot server + start queue poller
 function boot() {
   const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
 
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-  });
-
+  // Queue poller (only if configured)
   const qc = safeRequire('./src/queue-consumer') || safeRequire('./queue-consumer');
   const shouldStartQueue =
     process.env.CF_QUEUES_API_TOKEN &&
@@ -172,22 +142,17 @@ function boot() {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Helpers
-function safeRequire(p) {
-  try {
-    const mod = require(p);
-    return mod && mod.__esModule && mod.default ? mod.default : mod;
-  } catch (e) {
-    if (process.env.DEBUG) console.warn(`[safeRequire] Could not load ${p}: ${e.message}`);
-    return null;
-  }
-}
-
-function mount(route, router, label) {
-  if (!router) return;
-  app.use(route, router);
-  console.log(`➡️  Mounted ${label || route} at ${route}`);
+if (!mongoose.connection.readyState) {
+  mongoose.set('strictQuery', true);
+  mongoose.connect(MONGODB_URI, {}).then(() => {
+    console.log('✅ MongoDB connected');
+    boot();
+  }).catch(err => {
+    console.error('❌ MongoDB connection error', err);
+    process.exit(1);
+  });
+} else {
+  boot();
 }
 
 module.exports = app;
