@@ -1,127 +1,120 @@
-/**
- * backend/index.js
- * - CSP header (allows jsDelivr + inline) and strips meta CSP in HTML.
- * - Mounts auth, user, billing, vault, internal, truelayer routes.
- * - Starts Cloudflare Queue poller only if configured.
- */
-
+// backend/index.js
 require('dotenv').config();
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
+let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,next)=>next(); }
 const mongoose = require('mongoose');
 
-function safeRequire(p) { try { const m = require(p); return m && m.__esModule ? (m.default || m) : m; } catch { return null; } }
-const cookieParser = safeRequire('cookie-parser') || (() => (req, res, next) => next());
-const compression  = safeRequire('compression');
-const helmet       = safeRequire('helmet');
-const morgan       = safeRequire('morgan');
+// Helper to require modules without crashing if missing
+function safeRequire(modPath) { try { return require(modPath); } catch { return null; } }
+
+// ---- Routers (mount only if found) ----
+const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
+const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
+const aiRouter     = safeRequire('./routes/ai')                   || safeRequire('./src/routes/ai');
+
+
+const docsRouter =
+  safeRequire('./src/routes/documents.routes')  ||
+  safeRequire('./routes/documents.routes')      ||
+  safeRequire('./src/routes/docs.routes')       ||
+  safeRequire('./routes/docs.routes');
+
+const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequire('./routes/events.routes');
+const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
+const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
+const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
+
+// ---- AUTH GATE ----
+const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
 
 const app = express();
-app.set('trust proxy', 1);
+const PORT = process.env.PORT || 3000;
 
-// CSP header (allow CDN + inline now; tighten later if you self-host assets)
-app.use((req, res, next) => {
-  const csp = [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
-    "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
-    "font-src 'self' https://cdn.jsdelivr.net data:",
-    "img-src 'self' data: blob:",
-    "connect-src 'self' https://*.r2.cloudflarestorage.com https://api.cloudflare.com https://auth.truelayer.com https://api.truelayer-sandbox.com",
-    "frame-src 'self' blob: data:",
-    "object-src 'none'",
-    "upgrade-insecure-requests"
-  ].join('; ');
-  res.setHeader('Content-Security-Policy', csp);
-  next();
-});
+const FRONTEND_DIR = path.join(__dirname, '../frontend');
+const UPLOADS_DIR  = path.join(__dirname, '../uploads');
+const DATA_DIR     = path.join(__dirname, '../data');
 
-// Strip any <meta http-equiv="Content-Security-Policy"> inside HTML so server header wins
-const FRONTEND_DIRS = [ path.join(__dirname, '../frontend'), path.join(__dirname, '../public') ];
-app.get(/^\/$|^\/.*\.html$/i, (req, res, next) => {
-  try {
-    const fileRel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
-    const candidate = FRONTEND_DIRS.map(d => path.join(d, fileRel)).find(fp => fs.existsSync(fp));
-    if (!candidate) return next();
-    let html = fs.readFileSync(candidate, 'utf8');
-    html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>\s*/gi, '');
-    res.type('html').send(html);
-  } catch (e) { next(e); }
-});
 
-// Core middleware
-if (morgan) app.use(morgan('tiny'));
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
-app.use(cookieParser());
-if (helmet) app.use(helmet());
-if (compression) app.use(compression());
+// ---- Middleware ----
+app.use(morgan('combined'));
+app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
+app.use(express.json({ limit: '10mb' }));
 
-// CORS
-const ALLOWED_ORIGINS = ['http://localhost:3000','http://127.0.0.1:3000','https://www.phloat.io'];
-app.use(cors({
-  origin: (origin, cb) => (!origin || ALLOWED_ORIGINS.includes(origin)) ? cb(null, true) : cb(null, true),
-  credentials: true
-}));
+// ---- Static ----
+app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/data', express.static(DATA_DIR)); // optional
+app.use(express.static(FRONTEND_DIR));      // serves your HTML/JS/CSS
 
-// Health
-app.get('/health', (_req, res) => res.status(200).send('ok'));
-
-// Helpers
-function mount(route, router, label) { if (router) { app.use(route, router); console.log(`➡️  Mounted ${label || route} at ${route}`); } }
-
-// Routers
-const authRouter      = require('./src/routes/auth.routes');
-const userRouter      = require('./src/routes/user.routes');
-const billingRouter   = require('./src/routes/billing.routes');
-const vaultRouter     = require('./src/routes/vault.routes');
-const internalRouter  = require('./src/routes/internal.routes');
-const truelayerRouter = require('./src/routes/truelayer.routes');
-
-mount('/api/auth',      authRouter,      'auth');
-mount('/api/user',      userRouter,      'user');
-mount('/api/billing',   billingRouter,   'billing');
-mount('/api/vault',     vaultRouter,     'vault');
-mount('/api/internal',  internalRouter,  'internal');
-mount('/api/truelayer', truelayerRouter, 'truelayer');
-
-// Static
-FRONTEND_DIRS.forEach(d => app.use(express.static(d, { index: false })));
-
-// Mongo + boot
-const MONGODB_URI = process.env.MONGODB_URI || process.env.DB_URI || process.env.MONGO_URL || '';
-function boot() {
-  const PORT = process.env.PORT || 3001;
-  app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
-
-  // Cloudflare Queues polling
-  const qc = require('./src/queue-consumer');
-  const shouldStartQueue = process.env.CF_QUEUES_ENABLED !== 'false' &&
-    process.env.CF_QUEUES_API_TOKEN && process.env.CF_ACCOUNT_ID && process.env.CF_QUEUE_ID;
-  if (qc && typeof qc.startQueuePolling === 'function' && shouldStartQueue) {
-    console.log('⏱️  Starting Cloudflare Queues polling…');
-    qc.startQueuePolling();
-  } else {
-    console.log('ℹ️  Queue polling disabled (missing config or CF_QUEUES_ENABLED=false).');
+// ---- Mount helper ----
+function mount(prefix, router, name) {
+  if (!router) {
+    console.warn(`⚠️  Skipping ${name} router (module not found)`);
+    return;
   }
+  app.use(prefix, router);
+  console.log(`✅ Mounted ${name} at ${prefix}`);
 }
 
-if (MONGODB_URI) {
-  mongoose.set('strictQuery', true);
-  mongoose.connect(MONGODB_URI, {}).then(() => {
-    console.log('✅ MongoDB connected');
-    boot();
-  }).catch(err => {
-    console.error('❌ MongoDB connection error', err);
+// ---- Health ----
+app.get('/api/ping', (_req, res) => res.json({ message: 'pong' }));
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// ---- API mounts ----
+mount('/api/auth', authRouter, 'auth');
+mount('/api/user', userRouter, 'user');
+
+// Protect docs endpoints with Unauthorized page/JSON
+if (requireAuthOrHtmlUnauthorized && docsRouter) {
+  app.use('/api/docs', requireAuthOrHtmlUnauthorized);
+  app.use('/api/documents', requireAuthOrHtmlUnauthorized);
+}
+mount('/api/docs', docsRouter, 'documents');
+mount('/api/documents', docsRouter, 'documents (alias)');
+
+mount('/api/events', eventsRouter, 'events');
+mount('/api/summary', summaryRouter, 'summary');
+mount('/api/billing', billingRouter, 'billing');
+mount('/api/ai', aiRouter, 'ai');
+mount('/api/vault', vaultRouter, 'vault');
+
+
+
+
+// ---- Frontend landing (keep explicit root) ----
+app.get('/', (_req, res) => res.sendFile(path.join(FRONTEND_DIR, 'index.html')));
+
+// ---- API 404s (JSON) AFTER all API routes ----
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
+
+// ---- Pretty 404 for non-API requests (HTML) ----
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) return next(); // already handled above
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+
+  const accept = (req.headers.accept || '').toLowerCase();
+  const wantsHtml = accept.includes('text/html') || accept === '*/*' || accept === '';
+  if (!wantsHtml) return res.status(404).type('text/plain').send('Not Found');
+
+  res.status(404).sendFile(path.join(FRONTEND_DIR, '404.html'));
+});
+
+// ---- Error handler ----
+app.use((err, _req, res, _next) => {
+  console.error('❌ Server error:', err);
+  res.status(500).json({ error: 'Server error' });
+});
+
+// ---- Mongo + start ----
+const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accountant_app';
+mongoose.connect(mongoUri, {})
+  .then(() => {
+    console.log('✅ Connected to MongoDB');
+    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB connection error:', err);
     process.exit(1);
   });
-} else {
-  console.warn('⚠️  No Mongo URI set; starting without DB.');
-  boot();
-}
-
-module.exports = app;
