@@ -6,7 +6,6 @@
   const remember = document.getElementById('remember');
   const btn = document.getElementById('login-btn');
   const err = document.getElementById('login-error');
-  const next = new URLSearchParams(location.search).get('next') || './home.html';
 
   function setLoading(v) {
     if (!btn) return;
@@ -21,6 +20,11 @@
   }
   function clearError(){
     if (err) { err.textContent = ''; err.classList.add('d-none'); }
+  }
+
+  function getNext() {
+    const raw = new URLSearchParams(location.search).get('next');
+    return (window.Auth && Auth.sanitizeNextParam) ? Auth.sanitizeNextParam(raw) : (raw || '/home.html');
   }
 
   form?.addEventListener('submit', async (e)=>{
@@ -42,15 +46,14 @@
         try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
         return showError(msg);
       }
-      if (res.status >= 500) return showError('Server error. Please try again shortly.');
       if (!res.ok) return showError(`Login failed (status ${res.status}).`);
       const data = await res.json();
       const token = data.token;
       if (!token) return showError('No token returned from server.');
-      // remember → localStorage; else session
       if (remember && remember.checked) localStorage.setItem('token', token);
       else sessionStorage.setItem('token', token);
       if (data.user) try { (remember && remember.checked ? localStorage : sessionStorage).setItem('me', JSON.stringify(data.user)); } catch {}
+      const next = getNext();
       location.href = next;
     } catch (e) {
       console.error(e); showError('Network error. Is the server running?');

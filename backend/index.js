@@ -1,7 +1,10 @@
 /**
  * backend/index.js
- * Mounts /api/billing and keeps CSP + meta-CSP strip in place.
+ * - CSP header (allows jsDelivr + inline) and strips meta CSP in HTML.
+ * - Mounts auth, user, billing, vault, internal, truelayer routes.
+ * - Starts Cloudflare Queue poller only if configured.
  */
+
 require('dotenv').config();
 
 const express = require('express');
@@ -14,11 +17,12 @@ function safeRequire(p) { try { const m = require(p); return m && m.__esModule ?
 const cookieParser = safeRequire('cookie-parser') || (() => (req, res, next) => next());
 const compression  = safeRequire('compression');
 const helmet       = safeRequire('helmet');
+const morgan       = safeRequire('morgan');
 
 const app = express();
 app.set('trust proxy', 1);
 
-// --- CSP header (allows jsDelivr + inline; tighten later if you self-host) ---
+// CSP header (allow CDN + inline now; tighten later if you self-host assets)
 app.use((req, res, next) => {
   const csp = [
     "default-src 'self'",
@@ -36,7 +40,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- Strip any <meta http-equiv="Content-Security-Policy"> from HTML responses ---
+// Strip any <meta http-equiv="Content-Security-Policy"> inside HTML so server header wins
 const FRONTEND_DIRS = [ path.join(__dirname, '../frontend'), path.join(__dirname, '../public') ];
 app.get(/^\/$|^\/.*\.html$/i, (req, res, next) => {
   try {
@@ -50,8 +54,9 @@ app.get(/^\/$|^\/.*\.html$/i, (req, res, next) => {
 });
 
 // Core middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+if (morgan) app.use(morgan('tiny'));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 if (helmet) app.use(helmet());
 if (compression) app.use(compression());
@@ -69,38 +74,20 @@ app.get('/health', (_req, res) => res.status(200).send('ok'));
 // Helpers
 function mount(route, router, label) { if (router) { app.use(route, router); console.log(`➡️  Mounted ${label || route} at ${route}`); } }
 
-// Existing routes
-const docGridRouter   = safeRequire('./src/routes/documents.routes') || safeRequire('./routes/documents.routes');
-const docsRouter      = safeRequire('./src/routes/docs.routes')      || safeRequire('./routes/docs.routes');
-const eventsRouter    = safeRequire('./src/routes/events.routes')    || safeRequire('./routes/events.routes');
-const summaryRouter   = safeRequire('./src/routes/summary.routes')   || safeRequire('./routes/summary.routes');
-const userRouter      = safeRequire('./src/routes/user.routes')      || safeRequire('./routes/user.routes');
+// Routers
+const authRouter      = require('./src/routes/auth.routes');
+const userRouter      = require('./src/routes/user.routes');
+const billingRouter   = require('./src/routes/billing.routes');
+const vaultRouter     = require('./src/routes/vault.routes');
+const internalRouter  = require('./src/routes/internal.routes');
+const truelayerRouter = require('./src/routes/truelayer.routes');
 
-// Newer routes you already added
-const r2Router        = safeRequire('./src/routes/r2.routes')         || safeRequire('./routes/r2.routes');
-const analyticsRouter = safeRequire('./src/routes/analytics.routes')  || safeRequire('./routes/analytics.routes');
-const truelayerRouter = safeRequire('./src/routes/truelayer.routes')  || safeRequire('./routes/truelayer.routes');
-const internalRouter  = safeRequire('./src/routes/internal.routes')   || safeRequire('./routes/internal.routes');
-const authRouter      = safeRequire('./src/routes/auth.routes')       || safeRequire('./routes/auth.routes');
-
-// ✅ NEW: billing router
-const billingRouter   = safeRequire('./src/routes/billing.routes')    || safeRequire('./routes/billing.routes');
-
-// Mount
-mount('/api/documents', docGridRouter, 'documents');
-mount('/api/docs',      docsRouter,    'docs');
-mount('/api/events',    eventsRouter,  'events');
-mount('/api/summary',   summaryRouter, 'summary');
-mount('/api/user',      userRouter,    'user');
-
-mount('/api/r2',         r2Router,        'r2');
-mount('/api/analytics',  analyticsRouter, 'analytics');
-mount('/api/truelayer',  truelayerRouter, 'truelayer');
-mount('/api/internal',   internalRouter,  'internal');
-mount('/api/auth',       authRouter,      'auth');
-
-// ✅ Mount billing
-mount('/api/billing',    billingRouter,   'billing');
+mount('/api/auth',      authRouter,      'auth');
+mount('/api/user',      userRouter,      'user');
+mount('/api/billing',   billingRouter,   'billing');
+mount('/api/vault',     vaultRouter,     'vault');
+mount('/api/internal',  internalRouter,  'internal');
+mount('/api/truelayer', truelayerRouter, 'truelayer');
 
 // Static
 FRONTEND_DIRS.forEach(d => app.use(express.static(d, { index: false })));
@@ -111,8 +98,10 @@ function boot() {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
 
-  const qc = safeRequire('./src/queue-consumer') || safeRequire('./queue-consumer');
-  const shouldStartQueue = process.env.CF_QUEUES_API_TOKEN && process.env.CF_ACCOUNT_ID && process.env.CF_QUEUE_ID && (process.env.CF_QUEUES_ENABLED !== 'false');
+  // Cloudflare Queues polling
+  const qc = require('./src/queue-consumer');
+  const shouldStartQueue = process.env.CF_QUEUES_ENABLED !== 'false' &&
+    process.env.CF_QUEUES_API_TOKEN && process.env.CF_ACCOUNT_ID && process.env.CF_QUEUE_ID;
   if (qc && typeof qc.startQueuePolling === 'function' && shouldStartQueue) {
     console.log('⏱️  Starting Cloudflare Queues polling…');
     qc.startQueuePolling();
@@ -121,11 +110,17 @@ function boot() {
   }
 }
 
-if (!mongoose.connection.readyState) {
+if (MONGODB_URI) {
   mongoose.set('strictQuery', true);
-  mongoose.connect(MONGODB_URI, {}).then(() => { console.log('✅ MongoDB connected'); boot(); })
-    .catch(err => { console.error('❌ MongoDB connection error', err); process.exit(1); });
+  mongoose.connect(MONGODB_URI, {}).then(() => {
+    console.log('✅ MongoDB connected');
+    boot();
+  }).catch(err => {
+    console.error('❌ MongoDB connection error', err);
+    process.exit(1);
+  });
 } else {
+  console.warn('⚠️  No Mongo URI set; starting without DB.');
   boot();
 }
 

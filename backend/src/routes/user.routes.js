@@ -1,11 +1,10 @@
 // backend/src/routes/user.routes.js
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const User = require('../../models/User');
+const User = require('../models/User');
 
 const router = express.Router();
 
-// GET /api/user/me (used by Auth.enforce/requireAuth)
 router.get('/me', async (req, res) => {
   try {
     const hdr = req.headers.authorization || '';

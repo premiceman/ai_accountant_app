@@ -1,64 +1,52 @@
 // backend/src/queue-consumer.js
-const { pull, ack } = require("./utils/queues");
-const { fetch } = require("undici");
+const { pull, ack } = require('./utils/queues');
+const { fetch } = require('undici');
 
-const DEFAULT_BASE = process.env.INTERNAL_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
+const INTERNAL_BASE_URL = process.env.INTERNAL_BASE_URL || process.env.PUBLIC_BASE_URL || process.env.BASE_URL || 'https://www.phloat.io';
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY || 'superlongrandomsecret';
 
 async function callInternal(path, body) {
-  const url = `${DEFAULT_BASE.replace(/\/$/, '')}/api/internal${path}`;
+  const url = new URL(path, INTERNAL_BASE_URL).toString();
   const r = await fetch(url, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "content-type": "application/json",
-      "x-internal-key": process.env.INTERNAL_API_KEY
+      'Content-Type': 'application/json',
+      'x-internal-key': INTERNAL_API_KEY
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body || {})
   });
-  if (!r.ok) throw new Error(`internal ${path} failed: ${r.status} ${await r.text()}`);
-  return r.json();
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`internal call failed ${r.status}: ${t}`);
+  }
+  return r.json().catch(()=> ({}));
 }
 
 async function runQueueOnce() {
-  const p = await pull({ batchSize: 8, visibilityMs: 20000 });
-  const msgs = p?.result?.messages || [];
-  if (!msgs.length) return;
-
-  const acks = [], retries = [];
-  for (const m of msgs) {
-    const leaseId = m.lease_id || m.id || m.metadata?.lease_id;
-    try {
-      const body = typeof m.body === "string" ? JSON.parse(m.body) : m.body;
-
-      if (body?.event === "validate") {
-        await callInternal("/validate", { docId: body.docId });
-        await callInternal("/extract", { docId: body.docId });
-
-        // Materialize current UK tax year
-        const now = new Date();
-        const year = (now.getMonth() > 2 || (now.getMonth() === 2 && now.getDate() >= 6))
-          ? now.getFullYear()
-          : now.getFullYear() - 1;
-        await callInternal("/materialize", {
-          userId: body.userId,
-          from: `${year}-04-06`,
-          to: `${year + 1}-04-05`
-        });
+  try {
+    const res = await pull(5, 60000);
+    const msgs = res.messages || [];
+    for (const m of msgs) {
+      try {
+        const body = m.body || {};
+        const kind = body.event || body.type || 'validate';
+        if (kind === 'validate') await callInternal('/api/internal/validate', body);
+        else if (kind === 'extract') await callInternal('/api/internal/extract', body);
+        else if (kind === 'analytics') await callInternal('/api/internal/analytics', body);
+        await ack(m.id);
+      } catch (e) {
+        console.error('queue msg failed', e);
+        // don't ack on failure so the message can be retried
       }
-
-      acks.push(leaseId);
-    } catch (e) {
-      console.error("queue msg failed", e);
-      retries.push(leaseId);
     }
-  }
-
-  if (acks.length || retries.length) {
-    await ack({ leaseIds: acks, retryIds: retries });
+  } catch (e) {
+    console.error('queue poll error', e);
   }
 }
 
 function startQueuePolling() {
-  setInterval(() => runQueueOnce().catch(e => console.error("queue poll error", e)), 4000);
+  runQueueOnce();
+  setInterval(runQueueOnce, 10000);
 }
 
 module.exports = { startQueuePolling };

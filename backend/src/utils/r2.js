@@ -1,37 +1,35 @@
 // backend/src/utils/r2.js
-const { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
-const endpoint = process.env.R2_S3_ENDPOINT; // e.g. https://<ACCOUNT_ID>.r2.cloudflarestorage.com
-
-const s3 = new S3Client({
-  region: "auto",
-  endpoint,
+const cfg = {
+  region: 'auto',
+  endpoint: process.env.R2_S3_ENDPOINT,
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY
   },
-  forcePathStyle: true,
-});
+};
+const BUCKET = process.env.R2_BUCKET;
 
-async function presignPut({ Key, ContentType, expiresIn = 900 }) {
-  const cmd = new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key, ContentType });
+const s3 = new S3Client(cfg);
+
+async function putObject(key, body, contentType) {
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
+}
+
+async function signedGetUrl(key, expiresIn = 60 * 10) {
+  const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });
   return getSignedUrl(s3, cmd, { expiresIn });
 }
 
-async function presignGet({ Key, expiresIn = 900 }) {
-  const cmd = new GetObjectCommand({ Bucket: process.env.R2_BUCKET, Key });
+async function signedPutUrl(key, contentType = 'application/octet-stream', expiresIn = 60 * 10) {
+  const cmd = new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType });
   return getSignedUrl(s3, cmd, { expiresIn });
 }
 
-async function headObject(Key) {
-  return s3.send(new HeadObjectCommand({ Bucket: process.env.R2_BUCKET, Key }));
+async function deleteObject(key) {
+  await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
 }
 
-async function getObjectBuffer(Key) {
-  const res = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET, Key }));
-  const arr = await res.Body?.transformToByteArray();
-  return Buffer.from(arr || []);
-}
-
-module.exports = { s3, presignPut, presignGet, headObject, getObjectBuffer };
+module.exports = { s3, putObject, signedGetUrl, signedPutUrl, deleteObject };

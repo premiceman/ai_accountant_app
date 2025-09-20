@@ -50,11 +50,32 @@
     return fetch(url, { ...options, headers });
   }
 
+  // Are we on the login page?
+  function onLoginPage() {
+    const p = location.pathname.toLowerCase();
+    return p.endsWith('/login.html') || p === '/login.html' || p === '/';
+  }
+
+  function sanitizeNextParam(next) {
+    try {
+      if (!next) return '/home.html';
+      const u = new URL(next, location.origin);
+      // disallow login.html as next to avoid loops
+      if (u.pathname.toLowerCase().endsWith('/login.html')) return '/home.html';
+      // only allow same-origin
+      if (u.origin !== location.origin) return '/home.html';
+      return u.pathname + u.search + u.hash;
+    } catch {
+      return '/home.html';
+    }
+  }
+
   async function requireAuth() {
     const t = getToken();
     if (!t || isExpired(t)) {
-      clearTokens();
-      location.replace('/login.html?next=' + encodeURIComponent(location.pathname + location.search));
+      if (onLoginPage()) throw new Error('Not authenticated');
+      const next = sanitizeNextParam(location.pathname + location.search);
+      location.replace('/login.html?next=' + encodeURIComponent(next));
       throw new Error('Not authenticated');
     }
     try {
@@ -66,7 +87,10 @@
       if (g && me?.firstName) g.textContent = me.firstName;
       return { me, token: t };
     } catch {
-      return { me: null, token: t };
+      if (onLoginPage()) throw new Error('Not authenticated');
+      const next = sanitizeNextParam(location.pathname + location.search);
+      location.replace('/login.html?next=' + encodeURIComponent(next));
+      throw new Error('Not authenticated');
     }
   }
 
@@ -75,13 +99,13 @@
     if (h && !h.dataset.lockTitle) h.textContent = title;
   }
 
-  // ✅ Back-compat for pages that call Auth.enforce()
   async function enforce() { return requireAuth(); }
 
   window.Auth = {
     getToken, setToken, clearTokens,
     requireAuth, enforce,
     fetch: fetchWithAuth,
-    setBannerTitle
+    setBannerTitle,
+    sanitizeNextParam
   };
 })();
