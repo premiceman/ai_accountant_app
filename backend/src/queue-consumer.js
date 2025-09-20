@@ -2,15 +2,13 @@
 const { pull, ack } = require("./utils/queues");
 const { fetch } = require("undici");
 
-const INTERNAL_URL = process.env.INTERNAL_BASE_URL || ""; // optional base if you use a custom internal host
+const DEFAULT_BASE = process.env.INTERNAL_BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
 
 async function callInternal(path, body) {
-  const r = await fetch(`${INTERNAL_URL}/api/internal${path}`, {
+  const url = `${DEFAULT_BASE.replace(/\/$/, '')}/api/internal${path}`;
+  const r = await fetch(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-internal-key": process.env.INTERNAL_API_KEY
-    },
+    headers: { "content-type": "application/json", "x-internal-key": process.env.INTERNAL_API_KEY },
     body: JSON.stringify(body)
   });
   if (!r.ok) throw new Error(`internal ${path} failed: ${r.status} ${await r.text()}`);
@@ -41,14 +39,11 @@ async function runQueueOnce() {
       retries.push(leaseId);
     }
   }
-
   if (acks.length || retries.length) await ack({ leaseIds: acks, retryIds: retries });
 }
 
 function startQueuePolling() {
-  setInterval(() => {
-    runQueueOnce().catch(e => console.error("queue poll error", e));
-  }, 4000);
+  setInterval(() => runQueueOnce().catch(e => console.error("queue poll error", e)), 4000);
 }
 
 module.exports = { startQueuePolling };

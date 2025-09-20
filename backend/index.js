@@ -55,6 +55,26 @@ app.use(cors({
 // Healthcheck
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
+// --- CSP quick-unblock (put near top, after app creation) ---
+app.use((req, res, next) => {
+  // WARNING: 'unsafe-inline' reduces protection. This is to get you moving quickly.
+  // Later, replace inline scripts with external files or add nonces/hashes.
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "connect-src 'self' https://*.r2.cloudflarestorage.com https://api.cloudflare.com https://auth.truelayer.com https://api.truelayer-sandbox.com",
+      "frame-src 'self' blob: data:",
+      "object-src 'none'"
+    ].join('; ')
+  );
+  next();
+});
+
+
 // ----------------------------------------------------------------------------
 /**
  * Existing Routers (loaded if present)
