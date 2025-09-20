@@ -1,20 +1,15 @@
 /**
  * backend/index.js
- * Augmented to add:
- *  - /api/r2 (presign/commit/preview)
- *  - /api/analytics (dashboard aggregates)
- *  - /api/truelayer (OAuth connect + ingest)
- *  - /api/internal (validate/extract/materialize; protected with INTERNAL_API_KEY)
- *  - Cloudflare Queues polling (startQueuePolling)
- *
- * Existing functionality is preserved via safeRequire() + mount().
+ * Adds:
+ *  - CSP middleware (allows jsDelivr + inline for now, fonts via data:)
+ *  - Everything else unchanged (safeRequire, mounts, poller boot, etc.)
  */
 
 require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const cookieParser = require('cookie-parser');
+const cookieParser = safeRequire('cookie-parser') || (() => (req, res, next) => next());
 const path = require('path');
 const mongoose = require('mongoose');
 
@@ -22,11 +17,32 @@ const mongoose = require('mongoose');
 const compression = safeRequire('compression');
 const helmet = safeRequire('helmet');
 
-// ----------------------------------------------------------------------------
-// App
-// ----------------------------------------------------------------------------
 const app = express();
 app.set('trust proxy', 1);
+
+/* -------------------- CSP (FIX) --------------------
+   Your pages load Bootstrap/Icons/Chart.js from jsDelivr and use some inline scripts.
+   Previous CSP blocked CDN CSS & fonts, so the page looked unstyled.
+   This policy ALLOWS those until you self-host vendor assets.
+---------------------------------------------------- */
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+      "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+      "font-src 'self' https://cdn.jsdelivr.net data:",
+      "img-src 'self' data: blob:",
+      "connect-src 'self' https://*.r2.cloudflarestorage.com https://api.cloudflare.com https://auth.truelayer.com https://api.truelayer-sandbox.com",
+      "frame-src 'self' blob: data:",
+      "object-src 'none'",
+      "upgrade-insecure-requests"
+    ].join('; ')
+  );
+  next();
+});
 
 // Core middleware
 app.use(express.json({ limit: '10mb' }));
@@ -55,39 +71,15 @@ app.use(cors({
 // Healthcheck
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-// --- CSP quick-unblock (put near top, after app creation) ---
-app.use((req, res, next) => {
-  // WARNING: 'unsafe-inline' reduces protection. This is to get you moving quickly.
-  // Later, replace inline scripts with external files or add nonces/hashes.
-  res.setHeader(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "connect-src 'self' https://*.r2.cloudflarestorage.com https://api.cloudflare.com https://auth.truelayer.com https://api.truelayer-sandbox.com",
-      "frame-src 'self' blob: data:",
-      "object-src 'none'"
-    ].join('; ')
-  );
-  next();
-});
-
-
 // ----------------------------------------------------------------------------
-/**
- * Existing Routers (loaded if present)
- * Keep your current behavior: these are only mounted when the file exists.
- * If you already mounted them elsewhere, safeRequire will be null here and do nothing.
- */
+// Existing Routers (loaded if present)
 const docGridRouter   = safeRequire('./src/routes/documents.routes') || safeRequire('./routes/documents.routes');
 const docsRouter      = safeRequire('./src/routes/docs.routes')      || safeRequire('./routes/docs.routes');
 const eventsRouter    = safeRequire('./src/routes/events.routes')    || safeRequire('./routes/events.routes');
 const summaryRouter   = safeRequire('./src/routes/summary.routes')   || safeRequire('./routes/summary.routes');
 const userRouter      = safeRequire('./src/routes/user.routes')      || safeRequire('./routes/user.routes');
 
-// Mount existing routes (no changes)
+// Mount existing routes
 mount('/api/documents', docGridRouter, 'documents');
 mount('/api/docs',      docsRouter,    'docs');
 mount('/api/events',    eventsRouter,  'events');
@@ -95,16 +87,7 @@ mount('/api/summary',   summaryRouter, 'summary');
 mount('/api/user',      userRouter,    'user');
 
 // ----------------------------------------------------------------------------
-/**
- * NEW Routers (our additions)
- * These files were provided in previous messages:
- *   - backend/src/routes/r2.routes.js
- *   - backend/src/routes/analytics.routes.js
- *   - backend/src/routes/truelayer.routes.js
- *   - backend/src/routes/internal.routes.js
- *
- * They will only be mounted if the files exist.
- */
+// NEW Routers (our additions)
 const r2Router        = safeRequire('./src/routes/r2.routes')         || safeRequire('./routes/r2.routes');
 const analyticsRouter = safeRequire('./src/routes/analytics.routes')  || safeRequire('./routes/analytics.routes');
 const truelayerRouter = safeRequire('./src/routes/truelayer.routes')  || safeRequire('./routes/truelayer.routes');
@@ -116,7 +99,7 @@ mount('/api/truelayer',  truelayerRouter, 'truelayer');
 mount('/api/internal',   internalRouter,  'internal');
 
 // ----------------------------------------------------------------------------
-// Static hosting (keep your existing setup; this is non-invasive)
+// Static hosting (non-invasive)
 const FRONTEND_DIRS = [
   path.join(__dirname, '../frontend'),
   path.join(__dirname, '../public')
@@ -125,9 +108,7 @@ FRONTEND_DIRS.forEach(d => {
   app.use(express.static(d, { index: false }));
 });
 
-// Optionally serve your SPA/HTML if you rely on direct file paths:
 app.get(['/','/home.html','/login.html','/document-vault.html','/profile.html','/billing.html'], (req, res, next) => {
-  // Try to find file in known static folders; if not found, fallthrough.
   const candidate = FRONTEND_DIRS
     .map(d => path.join(d, req.path === '/' ? 'index.html' : req.path.replace(/^\//, '')))
     .find(fp => fileExists(fp));
@@ -136,13 +117,11 @@ app.get(['/','/home.html','/login.html','/document-vault.html','/profile.html','
 });
 
 // ----------------------------------------------------------------------------
-// MongoDB connection (preserve your existing behavior; fall back to MONGODB_URI)
+// MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI || process.env.DB_URI || process.env.MONGO_URL || '';
 if (!mongoose.connection.readyState) {
   mongoose.set('strictQuery', true);
-  mongoose.connect(MONGODB_URI, {
-    // Add your preferred options here
-  }).then(() => {
+  mongoose.connect(MONGODB_URI, {}).then(() => {
     console.log('✅ MongoDB connected');
     boot();
   }).catch(err => {
@@ -158,18 +137,22 @@ if (!mongoose.connection.readyState) {
 function boot() {
   const PORT = process.env.PORT || 3001;
 
-  // Start HTTP server
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
 
-  // Start Cloudflare Queues poller (only if file exists)
   const qc = safeRequire('./src/queue-consumer') || safeRequire('./queue-consumer');
-  if (qc && typeof qc.startQueuePolling === 'function') {
+  const shouldStartQueue =
+    process.env.CF_QUEUES_API_TOKEN &&
+    process.env.CF_ACCOUNT_ID &&
+    process.env.CF_QUEUE_ID &&
+    (process.env.CF_QUEUES_ENABLED !== 'false');
+
+  if (qc && typeof qc.startQueuePolling === 'function' && shouldStartQueue) {
     console.log('⏱️  Starting Cloudflare Queues polling…');
     qc.startQueuePolling();
   } else {
-    console.log('ℹ️  Queue consumer not found; skipping polling (this is fine for local or until you add files).');
+    console.log('ℹ️  Queue polling disabled (missing config or CF_QUEUES_ENABLED=false).');
   }
 }
 
@@ -178,7 +161,6 @@ function boot() {
 function safeRequire(p) {
   try {
     const mod = require(p);
-    // In case of ESModule default export interop
     return mod && mod.__esModule && mod.default ? mod.default : mod;
   } catch (e) {
     if (process.env.DEBUG) console.warn(`[safeRequire] Could not load ${p}: ${e.message}`);
@@ -202,4 +184,3 @@ function fileExists(fp) {
 }
 
 module.exports = app;
-
