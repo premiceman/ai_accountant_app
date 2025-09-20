@@ -1,11 +1,7 @@
 /**
  * backend/index.js
- * Fixes:
- *  - Removes any meta CSP in HTML and applies a permissive header CSP (for jsDelivr + inline).
- *  - Mounts /api/auth so POST /api/auth/login works.
- * Nothing else in your app is changed.
+ * Mounts /api/billing and keeps CSP + meta-CSP strip in place.
  */
-
 require('dotenv').config();
 
 const express = require('express');
@@ -22,10 +18,7 @@ const helmet       = safeRequire('helmet');
 const app = express();
 app.set('trust proxy', 1);
 
-/* ------------------------- CSP HEADER -------------------------
-   Allows your current setup (cdn.jsdelivr + some inline <script>).
-   Later we can tighten this if you self-host vendor assets and remove inline JS.
------------------------------------------------------------------ */
+// --- CSP header (allows jsDelivr + inline; tighten later if you self-host) ---
 app.use((req, res, next) => {
   const csp = [
     "default-src 'self'",
@@ -43,20 +36,13 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ----------- Strip any <meta http-equiv="Content-Security-Policy"> in HTML ----------- */
-const FRONTEND_DIRS = [
-  path.join(__dirname, '../frontend'),
-  path.join(__dirname, '../public')
-];
-// Serve sanitized HTML for "/" and any "*.html" path.
+// --- Strip any <meta http-equiv="Content-Security-Policy"> from HTML responses ---
+const FRONTEND_DIRS = [ path.join(__dirname, '../frontend'), path.join(__dirname, '../public') ];
 app.get(/^\/$|^\/.*\.html$/i, (req, res, next) => {
   try {
     const fileRel = req.path === '/' ? 'index.html' : req.path.replace(/^\//, '');
-    const candidate = FRONTEND_DIRS
-      .map(d => path.join(d, fileRel))
-      .find(fp => fs.existsSync(fp));
+    const candidate = FRONTEND_DIRS.map(d => path.join(d, fileRel)).find(fp => fs.existsSync(fp));
     if (!candidate) return next();
-
     let html = fs.readFileSync(candidate, 'utf8');
     html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>\s*/gi, '');
     res.type('html').send(html);
@@ -80,27 +66,32 @@ app.use(cors({
 // Health
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
-/* ------------------------------- ROUTES ------------------------------- */
+// Helpers
 function mount(route, router, label) { if (router) { app.use(route, router); console.log(`➡️  Mounted ${label || route} at ${route}`); } }
 
+// Existing routes
 const docGridRouter   = safeRequire('./src/routes/documents.routes') || safeRequire('./routes/documents.routes');
 const docsRouter      = safeRequire('./src/routes/docs.routes')      || safeRequire('./routes/docs.routes');
 const eventsRouter    = safeRequire('./src/routes/events.routes')    || safeRequire('./routes/events.routes');
 const summaryRouter   = safeRequire('./src/routes/summary.routes')   || safeRequire('./routes/summary.routes');
 const userRouter      = safeRequire('./src/routes/user.routes')      || safeRequire('./routes/user.routes');
 
-mount('/api/documents', docGridRouter, 'documents');
-mount('/api/docs',      docsRouter,    'docs');
-mount('/api/events',    eventsRouter,  'events');
-mount('/api/summary',   summaryRouter, 'summary');
-mount('/api/user',      userRouter,    'user');
-
-// New routers (ensure these files exist)
+// Newer routes you already added
 const r2Router        = safeRequire('./src/routes/r2.routes')         || safeRequire('./routes/r2.routes');
 const analyticsRouter = safeRequire('./src/routes/analytics.routes')  || safeRequire('./routes/analytics.routes');
 const truelayerRouter = safeRequire('./src/routes/truelayer.routes')  || safeRequire('./routes/truelayer.routes');
 const internalRouter  = safeRequire('./src/routes/internal.routes')   || safeRequire('./routes/internal.routes');
 const authRouter      = safeRequire('./src/routes/auth.routes')       || safeRequire('./routes/auth.routes');
+
+// ✅ NEW: billing router
+const billingRouter   = safeRequire('./src/routes/billing.routes')    || safeRequire('./routes/billing.routes');
+
+// Mount
+mount('/api/documents', docGridRouter, 'documents');
+mount('/api/docs',      docsRouter,    'docs');
+mount('/api/events',    eventsRouter,  'events');
+mount('/api/summary',   summaryRouter, 'summary');
+mount('/api/user',      userRouter,    'user');
 
 mount('/api/r2',         r2Router,        'r2');
 mount('/api/analytics',  analyticsRouter, 'analytics');
@@ -108,22 +99,20 @@ mount('/api/truelayer',  truelayerRouter, 'truelayer');
 mount('/api/internal',   internalRouter,  'internal');
 mount('/api/auth',       authRouter,      'auth');
 
-/* ---------------------------------- STATIC ---------------------------------- */
-FRONTEND_DIRS.forEach(d => { app.use(express.static(d, { index: false })); });
+// ✅ Mount billing
+mount('/api/billing',    billingRouter,   'billing');
 
-/* ------------------------------- MONGODB + BOOT ------------------------------- */
+// Static
+FRONTEND_DIRS.forEach(d => app.use(express.static(d, { index: false })));
+
+// Mongo + boot
 const MONGODB_URI = process.env.MONGODB_URI || process.env.DB_URI || process.env.MONGO_URL || '';
 function boot() {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
 
   const qc = safeRequire('./src/queue-consumer') || safeRequire('./queue-consumer');
-  const shouldStartQueue =
-    process.env.CF_QUEUES_API_TOKEN &&
-    process.env.CF_ACCOUNT_ID &&
-    process.env.CF_QUEUE_ID &&
-    (process.env.CF_QUEUES_ENABLED !== 'false');
-
+  const shouldStartQueue = process.env.CF_QUEUES_API_TOKEN && process.env.CF_ACCOUNT_ID && process.env.CF_QUEUE_ID && (process.env.CF_QUEUES_ENABLED !== 'false');
   if (qc && typeof qc.startQueuePolling === 'function' && shouldStartQueue) {
     console.log('⏱️  Starting Cloudflare Queues polling…');
     qc.startQueuePolling();
@@ -134,13 +123,8 @@ function boot() {
 
 if (!mongoose.connection.readyState) {
   mongoose.set('strictQuery', true);
-  mongoose.connect(MONGODB_URI, {}).then(() => {
-    console.log('✅ MongoDB connected');
-    boot();
-  }).catch(err => {
-    console.error('❌ MongoDB connection error', err);
-    process.exit(1);
-  });
+  mongoose.connect(MONGODB_URI, {}).then(() => { console.log('✅ MongoDB connected'); boot(); })
+    .catch(err => { console.error('❌ MongoDB connection error', err); process.exit(1); });
 } else {
   boot();
 }

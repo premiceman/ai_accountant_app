@@ -10,11 +10,13 @@
     }
     return null;
   }
+
   function setToken(token, { session = false } = {}) {
     clearTokens();
     if (session) sessionStorage.setItem('token', token);
     else localStorage.setItem('token', token);
   }
+
   function clearTokens() {
     for (const k of STORAGE_KEYS) {
       try { localStorage.removeItem(k); } catch {}
@@ -27,16 +29,17 @@
   function decodeJWT(t) {
     try {
       const b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const json = decodeURIComponent(atob(b64).split('').map(c => {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join(''));
+      const json = decodeURIComponent(atob(b64).split('').map(c =>
+        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+      ).join(''));
       return JSON.parse(json);
     } catch { return null; }
   }
+
   function isExpired(token) {
     const p = decodeJWT(token);
     if (!p || !p.exp) return false;
-    const now = Math.floor(Date.now()/1000);
+    const now = Math.floor(Date.now() / 1000);
     return p.exp <= now + 5;
   }
 
@@ -54,7 +57,6 @@
       location.replace('/login.html?next=' + encodeURIComponent(location.pathname + location.search));
       throw new Error('Not authenticated');
     }
-    // Load me (tolerant)
     try {
       const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
       if (!res.ok) throw new Error('me failed');
@@ -64,7 +66,6 @@
       if (g && me?.firstName) g.textContent = me.firstName;
       return { me, token: t };
     } catch {
-      // if server failed, still pass token (page might handle)
       return { me: null, token: t };
     }
   }
@@ -74,9 +75,12 @@
     if (h && !h.dataset.lockTitle) h.textContent = title;
   }
 
+  // ✅ Back-compat for pages that call Auth.enforce()
+  async function enforce() { return requireAuth(); }
+
   window.Auth = {
     getToken, setToken, clearTokens,
-    requireAuth,
+    requireAuth, enforce,
     fetch: fetchWithAuth,
     setBannerTitle
   };
