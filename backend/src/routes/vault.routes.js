@@ -1,47 +1,51 @@
 // backend/src/routes/vault.routes.js
 //
-// R2-only implementation of the Document Vault.
+// R2-backed Document Vault with backend-proxied preview/download and rename.
 // - Collections: <userId>/_collections.json
-// - Files:       <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<originalName>
-// - JWT userId is used as the per-user namespace.
-// - Endpoints match frontend/js/document-vault.js expectations.
+// - Files:       <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<safeName>.pdf
 //
 const express = require('express');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
+
 const {
   putObject,
   deleteObject,
-  signedGetUrl,
   listAll,
   s3,
   BUCKET
 } = require('../utils/r2');
-const { GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
+
+const {
+  GetObjectCommand,
+  PutObjectCommand,
+  CopyObjectCommand
+} = require('@aws-sdk/client-s3');
+
 const { getSignedUrl: presign } = require('@aws-sdk/s3-request-presigner');
 
 const router = express.Router();
-// ↑ 50 MB (parity with legacy route)
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB parity
+});
 
-// -------- auth helpers --------
+// ---------- auth ----------
 function getUser(req) {
   try {
     const hdr = req.headers.authorization || '';
-    const parts = hdr.split(' ');
-    if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
-    const token = parts[1];
+    const [scheme, token] = hdr.split(' ');
+    if (scheme !== 'Bearer' || !token) return null;
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     return { id: decoded.id };
   } catch { return null; }
 }
 
-// -------- id/paths helpers --------
+// ---------- id/key helpers ----------
 function b64url(buf) {
-  return Buffer.from(buf).toString('base64')
-    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  return Buffer.from(buf).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 function b64urlDecode(s) {
   s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -55,7 +59,7 @@ function userPrefix(userId) { return `${userId}/`; }
 function collectionsKey(userId) { return `${userId}/_collections.json`; }
 function collectionPrefix(userId, colId) { return `${userId}/${colId}/`; }
 
-// -------- collections control doc in R2 --------
+// ---------- collections control doc in R2 ----------
 async function loadCollectionsDoc(userId) {
   const key = collectionsKey(userId);
   try {
@@ -69,10 +73,9 @@ async function loadCollectionsDoc(userId) {
       name: String(c.name || c.title || 'Untitled')
     })).filter(c => c.id);
   } catch {
-    return []; // not found yet
+    return [];
   }
 }
-
 async function saveCollectionsDoc(userId, arr) {
   const payload = Buffer.from(JSON.stringify({ collections: arr }, null, 2));
   await s3.send(new PutObjectCommand({
@@ -82,7 +85,6 @@ async function saveCollectionsDoc(userId, arr) {
     ContentType: 'application/json'
   }));
 }
-
 async function computeCollectionMetrics(userId, cols) {
   const out = [];
   for (const c of cols) {
@@ -96,7 +98,55 @@ async function computeCollectionMetrics(userId, cols) {
   return out;
 }
 
-// -------- routes --------
+// ---------- streaming helper with Range support ----------
+async function streamR2Object(req, res, key, { inline = true, downloadName = null } = {}) {
+  const rangeHeader = req.headers.range; // support partial content for PDFs
+  const cmdParams = { Bucket: BUCKET, Key: key };
+  if (rangeHeader) cmdParams.Range = rangeHeader;
+
+  let data;
+  try {
+    data = await s3.send(new GetObjectCommand(cmdParams));
+  } catch (err) {
+    const code = err?.$metadata?.httpStatusCode || 404;
+    return res.status(code).json({ error: 'Not found' });
+  }
+
+  // Basic headers
+  res.set('Accept-Ranges', 'bytes');
+  if (data.ContentType) res.set('Content-Type', data.ContentType);
+  if (data.ContentLength != null) res.set('Content-Length', String(data.ContentLength));
+  if (data.ContentRange) res.set('Content-Range', data.ContentRange);
+
+  const filename = downloadName || (key.split('/').pop() || 'file.pdf');
+
+  // Content-Disposition
+  const disp = inline ? 'inline' : 'attachment';
+  res.set('Content-Disposition', `${disp}; filename="${encodeURIComponent(filename)}"`);
+
+  // Status code for ranged responses
+  if (rangeHeader && data.ContentRange) res.status(206);
+
+  // Stream body
+  const body = data.Body;
+  if (typeof body?.pipe === 'function') {
+    body.pipe(res);
+  } else if (body) {
+    // web stream
+    const reader = body.getReader();
+    async function pump() {
+      const { done, value } = await reader.read();
+      if (done) return res.end();
+      res.write(Buffer.from(value));
+      return pump();
+    }
+    pump().catch(() => res.end());
+  } else {
+    res.end();
+  }
+}
+
+// ---------- routes ----------
 
 // GET /api/vault/stats
 router.get('/stats', async (req, res) => {
@@ -134,7 +184,7 @@ router.post('/collections', async (req, res) => {
   const curr = await loadCollectionsDoc(u.id);
   curr.push({ id, name });
   await saveCollectionsDoc(u.id, curr);
-  // marker (optional)
+  // optional folder marker
   await putObject(collectionPrefix(u.id, id), Buffer.alloc(0), 'application/x-directory').catch(()=>{});
   res.json({ collection: { id, name, fileCount: 0, bytes: 0 } });
 });
@@ -152,20 +202,22 @@ router.get('/collections/:id/files', async (req, res) => {
   const all = await listAll(pref);
   const fileObjs = all.filter(o => !String(o.Key).endsWith('/'));
 
-  const items = await Promise.all(fileObjs.map(async (o) => {
+  const items = fileObjs.map((o) => {
     const key = String(o.Key);
     const fileId = keyToFileId(key);
     const name = key.split('/').pop() || 'file.pdf';
-    const url = await signedGetUrl(key, 300); // 5 minutes
+    // IMPORTANT: use backend-proxied endpoints, not direct R2 URLs
+    const viewPath = `/api/vault/files/${fileId}/view`;
+    const downloadPath = `/api/vault/files/${fileId}/download`;
     return {
       id: fileId,
       name,
       size: o.Size || 0,
       uploadedAt: o.LastModified ? new Date(o.LastModified).toISOString() : null,
-      viewUrl: url,
-      downloadUrl: url
+      viewUrl: viewPath,
+      downloadUrl: downloadPath
     };
-  }));
+  });
   items.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
   res.json(items);
 });
@@ -184,7 +236,6 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
 
   const uploaded = [];
   for (const f of files) {
-    // Accept PDF only (front-end enforces too)
     const okMime = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
     if (!okMime) return res.status(400).json({ error: 'Only PDF files are allowed' });
 
@@ -192,7 +243,16 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
     const key = `${u.id}/${colId}/${date}-${randomUUID()}-${safeBase}`;
     await putObject(key, f.buffer, 'application/pdf');
-    uploaded.push({ id: keyToFileId(key), name: safeBase, size: f.size || 0, uploadedAt: new Date().toISOString() });
+
+    const id = keyToFileId(key);
+    uploaded.push({
+      id,
+      name: safeBase,
+      size: f.size || 0,
+      uploadedAt: new Date().toISOString(),
+      viewUrl: `/api/vault/files/${id}/view`,
+      downloadUrl: `/api/vault/files/${id}/download`
+    });
   }
   res.status(201).json({ uploaded });
 });
@@ -201,6 +261,7 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
 router.delete('/files/:id', async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
+
   const fileId = String(req.params.id || '');
   if (!fileId) return res.status(400).json({ error: 'Missing id' });
 
@@ -210,6 +271,78 @@ router.delete('/files/:id', async (req, res) => {
 
   await deleteObject(key).catch(()=>{});
   res.json({ ok: true });
+});
+
+// GET /api/vault/files/:id/view  (inline preview)
+router.get('/files/:id/view', async (req, res) => {
+  const u = getUser(req);
+  if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  const key = fileIdToKey(String(req.params.id || ''));
+  if (!key.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  await streamR2Object(req, res, key, { inline: true });
+});
+
+// GET /api/vault/files/:id/download  (attachment)
+router.get('/files/:id/download', async (req, res) => {
+  const u = getUser(req);
+  if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  const key = fileIdToKey(String(req.params.id || ''));
+  if (!key.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  const name = key.split('/').pop() || 'file.pdf';
+  await streamR2Object(req, res, key, { inline: false, downloadName: name });
+});
+
+// PATCH /api/vault/files/:id  (rename)
+router.patch('/files/:id', express.json(), async (req, res) => {
+  const u = getUser(req);
+  if (!u) return res.status(401).json({ error: 'Unauthorized' });
+
+  const fileId = String(req.params.id || '');
+  const newNameRaw = String(req.body?.name || '').trim();
+  if (!fileId || !newNameRaw) return res.status(400).json({ error: 'Missing id or name' });
+
+  const oldKey = fileIdToKey(fileId);
+  const allowedPrefix = userPrefix(u.id);
+  if (!oldKey.startsWith(allowedPrefix)) return res.status(403).json({ error: 'Forbidden' });
+
+  // sanitize new filename, enforce .pdf
+  let safeBase = newNameRaw.replace(/[^\w.\- ]+/g, '_');
+  if (!/\.pdf$/i.test(safeBase)) safeBase += '.pdf';
+
+  // preserve colId + date + uuid; only swap trailing name
+  const parts = oldKey.split('/');
+  const userId = parts[0];
+  const colId = parts[1];
+  const oldFile = parts.slice(2).join('/'); // YYYYMMDD-UUID-oldname.pdf
+  const m = oldFile.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/);
+  const date = m ? m[1] : dayjs().format('YYYYMMDD');
+  const uuid = m ? m[2] : randomUUID();
+
+  const newKey = `${userId}/${colId}/${date}-${uuid}-${safeBase}`;
+
+  if (newKey === oldKey) return res.json({
+    id: fileId,
+    name: safeBase,
+    viewUrl: `/api/vault/files/${fileId}/view`,
+    downloadUrl: `/api/vault/files/${fileId}/download`
+  });
+
+  // Copy then delete
+  const copySource = `/${BUCKET}/${encodeURIComponent(oldKey)}`;
+  await s3.send(new CopyObjectCommand({
+    Bucket: BUCKET,
+    Key: newKey,
+    CopySource: copySource
+  }));
+  await deleteObject(oldKey);
+
+  const newId = keyToFileId(newKey);
+  res.json({
+    id: newId,
+    name: safeBase,
+    viewUrl: `/api/vault/files/${newId}/view`,
+    downloadUrl: `/api/vault/files/${newId}/download`
+  });
 });
 
 module.exports = router;
