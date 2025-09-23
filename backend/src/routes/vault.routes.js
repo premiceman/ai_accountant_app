@@ -1,12 +1,11 @@
 // backend/src/routes/vault.routes.js
 //
 // R2-only implementation of the Document Vault.
-// - No MongoDB needed.
-// - Collections are stored in a per-user control file: <userId>/_collections.json
-// - Files are stored under: <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<originalName>
-// - All endpoints are scoped by the JWT userId.
-// Endpoints kept compatible with your frontend/js/document-vault.js.
-
+// - Collections: <userId>/_collections.json
+// - Files:       <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<originalName>
+// - JWT userId is used as the per-user namespace.
+// - Endpoints match frontend/js/document-vault.js expectations.
+//
 const express = require('express');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
@@ -24,24 +23,24 @@ const { GetObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl: presign } = require('@aws-sdk/s3-request-presigner');
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+// ↑ 50 MB (parity with legacy route)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// --- auth helpers ---
+// -------- auth helpers --------
 function getUser(req) {
   try {
     const hdr = req.headers.authorization || '';
-    const m = hdr.match(/^Bearer\s+(.+)$/i);
-    if (!m) return null;
-    const token = m[1];
-    const secret = process.env.JWT_SECRET || 'dev_secret_change_me';
-    return jwt.verify(token, secret); // { id, email, ... }
+    const parts = hdr.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
+    const token = parts[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    return { id: decoded.id };
   } catch { return null; }
 }
 
-// --- encoding of file IDs (so front-end can delete by id) ---
+// -------- id/paths helpers --------
 function b64url(buf) {
-  return Buffer.from(String(buf))
-    .toString('base64')
+  return Buffer.from(buf).toString('base64')
     .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 function b64urlDecode(s) {
@@ -52,12 +51,11 @@ function b64urlDecode(s) {
 function keyToFileId(key) { return b64url(key); }
 function fileIdToKey(id) { return b64urlDecode(id); }
 
-// --- paths in R2 ---
 function userPrefix(userId) { return `${userId}/`; }
 function collectionsKey(userId) { return `${userId}/_collections.json`; }
 function collectionPrefix(userId, colId) { return `${userId}/${colId}/`; }
 
-// --- load/save collections control doc ---
+// -------- collections control doc in R2 --------
 async function loadCollectionsDoc(userId) {
   const key = collectionsKey(userId);
   try {
@@ -65,40 +63,42 @@ async function loadCollectionsDoc(userId) {
     const res = await fetch(url);
     if (!res.ok) throw new Error('fetch collections doc failed');
     const json = await res.json();
-    // normalize
     const items = Array.isArray(json?.collections) ? json.collections : Array.isArray(json) ? json : [];
     return items.map(c => ({
       id: String(c.id || c._id || c.uuid || c.collectionId || ''),
       name: String(c.name || c.title || 'Untitled')
     })).filter(c => c.id);
   } catch {
-    return []; // no doc yet
+    return []; // not found yet
   }
 }
 
-async function saveCollectionsDoc(userId, collections) {
-  const key = collectionsKey(userId);
-  const body = Buffer.from(JSON.stringify({ collections }, null, 2), 'utf8');
+async function saveCollectionsDoc(userId, arr) {
+  const payload = Buffer.from(JSON.stringify({ collections: arr }, null, 2));
   await s3.send(new PutObjectCommand({
-    Bucket: BUCKET, Key: key, Body: body, ContentType: 'application/json'
+    Bucket: BUCKET,
+    Key: collectionsKey(userId),
+    Body: payload,
+    ContentType: 'application/json'
   }));
 }
 
-// --- utility: compute metrics for each collection by listing objects ---
-async function computeCollectionMetrics(userId, collections) {
+async function computeCollectionMetrics(userId, cols) {
   const out = [];
-  for (const c of collections) {
+  for (const c of cols) {
     const pref = collectionPrefix(userId, c.id);
     const all = await listAll(pref);
-    const fileObjs = all.filter(o => !String(o.Key).endsWith('/')); // skip any pseudo-folders
-    const fileCount = fileObjs.length;
-    const bytes = fileObjs.reduce((s, o) => s + (o.Size || 0), 0);
+    const files = all.filter(o => !String(o.Key).endsWith('/'));
+    const fileCount = files.length;
+    const bytes = files.reduce((s, o) => s + (o.Size || 0), 0);
     out.push({ id: c.id, name: c.name, fileCount, bytes });
   }
   return out;
 }
 
-// --- GET /api/vault/stats ---
+// -------- routes --------
+
+// GET /api/vault/stats
 router.get('/stats', async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
@@ -115,50 +115,48 @@ router.get('/stats', async (req, res) => {
   });
 });
 
-// --- GET /api/vault/collections ---
+// GET /api/vault/collections
 router.get('/collections', async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
-
-  const cols = await loadCollectionsDoc(u.id);                 // [{id,name}]
+  const cols = await loadCollectionsDoc(u.id);
   const withMetrics = await computeCollectionMetrics(u.id, cols);
-  res.json({ collections: withMetrics });                      // shape matches your front-end
+  res.json({ collections: withMetrics });
 });
 
-// --- POST /api/vault/collections { name } ---
+// POST /api/vault/collections
 router.post('/collections', async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
   const name = String(req.body?.name || '').trim() || 'Untitled';
-  const id = randomUUID(); // collection id is uuid; used in path
+  const id = randomUUID();
   const curr = await loadCollectionsDoc(u.id);
   curr.push({ id, name });
   await saveCollectionsDoc(u.id, curr);
-
-  // create a zero-byte "folder marker" (optional, harmless)
+  // marker (optional)
   await putObject(collectionPrefix(u.id, id), Buffer.alloc(0), 'application/x-directory').catch(()=>{});
-
   res.json({ collection: { id, name, fileCount: 0, bytes: 0 } });
 });
 
-// --- GET /api/vault/collections/:id/files ---
+// GET /api/vault/collections/:id/files
 router.get('/collections/:id/files', async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const colId = String(req.params.id);
 
-  // authorize: collection must exist for this user
   const cols = await loadCollectionsDoc(u.id);
   if (!cols.some(c => c.id === colId)) return res.status(404).json({ error: 'Collection not found' });
 
   const pref = collectionPrefix(u.id, colId);
   const all = await listAll(pref);
   const fileObjs = all.filter(o => !String(o.Key).endsWith('/'));
+
   const items = await Promise.all(fileObjs.map(async (o) => {
-    const name = o.Key.substring(pref.length);
-    const fileId = keyToFileId(o.Key);
-    const url = await signedGetUrl(o.Key, 300);
+    const key = String(o.Key);
+    const fileId = keyToFileId(key);
+    const name = key.split('/').pop() || 'file.pdf';
+    const url = await signedGetUrl(key, 300); // 5 minutes
     return {
       id: fileId,
       name,
@@ -168,12 +166,11 @@ router.get('/collections/:id/files', async (req, res) => {
       downloadUrl: url
     };
   }));
-  // newest first
   items.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
   res.json(items);
 });
 
-// --- POST /api/vault/collections/:id/files  (multipart) ---
+// POST /api/vault/collections/:id/files
 router.post('/collections/:id/files', upload.array('files'), async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
@@ -182,23 +179,25 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
   const cols = await loadCollectionsDoc(u.id);
   if (!cols.some(c => c.id === colId)) return res.status(404).json({ error: 'Collection not found' });
 
-  const files = Array.isArray(req.files) ? req.files : [];
-  if (!files.length) return res.status(400).json({ error: 'No files' });
+  const files = req.files || [];
+  if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
 
-  const datePart = dayjs().format('YYYYMMDD');
   const uploaded = [];
-
   for (const f of files) {
-    const safeName = String(f.originalname || 'document').replace(/[\\/:*?"<>|]+/g, '_');
-    const key = `${u.id}/${colId}/${datePart}-${randomUUID()}-${safeName}`;
-    await putObject(key, f.buffer, f.mimetype || 'application/octet-stream');
-    uploaded.push({ id: keyToFileId(key) });
-  }
+    // Accept PDF only (front-end enforces too)
+    const okMime = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
+    if (!okMime) return res.status(400).json({ error: 'Only PDF files are allowed' });
 
-  res.json({ uploaded: uploaded.length, items: uploaded });
+    const date = dayjs().format('YYYYMMDD');
+    const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
+    const key = `${u.id}/${colId}/${date}-${randomUUID()}-${safeBase}`;
+    await putObject(key, f.buffer, 'application/pdf');
+    uploaded.push({ id: keyToFileId(key), name: safeBase, size: f.size || 0, uploadedAt: new Date().toISOString() });
+  }
+  res.status(201).json({ uploaded });
 });
 
-// --- DELETE /api/vault/files/:id ---
+// DELETE /api/vault/files/:id
 router.delete('/files/:id', async (req, res) => {
   const u = getUser(req);
   if (!u) return res.status(401).json({ error: 'Unauthorized' });
@@ -206,8 +205,6 @@ router.delete('/files/:id', async (req, res) => {
   if (!fileId) return res.status(400).json({ error: 'Missing id' });
 
   const key = fileIdToKey(fileId);
-
-  // authorize: key must start with this user's prefix
   const allowedPrefix = userPrefix(u.id);
   if (!key.startsWith(allowedPrefix)) return res.status(403).json({ error: 'Forbidden' });
 
