@@ -1,15 +1,13 @@
 // frontend/js/document-vault.js
 // Document Vault wiring with robust payload normalization + front-end fallbacks
-// so counters work even when the API returns zeros. Option B upload (no programmatic
-// .click()) avoids double-open dialogs while preserving drag&drop and all actions.
-
+// Adds: per-collection Delete + Download ZIP actions (minimal UI), dbl-click rename stays.
 (function () {
   // ---------------- DOM helpers ----------------
   const $  = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const on = (el, ev, fn, opts) => el && el.addEventListener(ev, fn, opts);
 
-  // ---------------- Elements (new IDs first, then legacy fallbacks) ----------------
+  // ---------------- Elements ----------------
   // KPIs
   const elFileCount = $('#file-count') || $('#m-files');
   const elTotalGB   = $('#total-gb')   || $('#m-storage');
@@ -30,7 +28,7 @@
   const elBackToCollections = $('#back-to-collections') || $('#btn-back');
   const elCurrentCollectionName = $('#current-collection-name') || $('#panel-name');
 
-  // Upload / Dropzone (Option B — label/input handles picker)
+  // Upload / Dropzone
   const elDropzone  = $('#dropzone');
   const elFileInput = $('#file-input');
 
@@ -40,7 +38,7 @@
   const elPreviewFilename = $('#preview-filename');
 
   // Sections
-  const elCollectionsSection = $('#collections-section') || $('#collections'); // legacy toggle
+  const elCollectionsSection = $('#collections-section') || $('#collections');
 
   // State
   let collections = [];
@@ -233,23 +231,76 @@
     }
 
     for (const c of filtered) {
-      const row = document.createElement('a');
-      row.href = '#';
-      row.className = 'collection-item';
+      const row = document.createElement('div');
+      row.className = 'collection-item d-flex justify-content-between align-items-center';
       row.dataset.id = c.id;
+
       row.innerHTML = `
-        <div class="collection-name"><i class="bi bi-folder2 me-2 text-primary"></i>${escapeHtml(c.name)}</div>
-        <div class="collection-meta" data-meta-for="${escapeHtml(c.id)}">
-          ${(c.fileCount || 0)} files · ${fmtBytes(c.bytes || 0)}
+        <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
+          <i class="bi bi-folder2 me-1 text-primary"></i>
+          <a href="#" class="collection-name text-decoration-none text-reset flex-grow-1 text-truncate">
+            ${escapeHtml(c.name)}
+          </a>
+          <div class="collection-meta text-muted small flex-shrink-0 ms-2" data-meta-for="${escapeHtml(c.id)}">
+            ${(c.fileCount || 0)} files · ${fmtBytes(c.bytes || 0)}
+          </div>
+        </div>
+        <div class="collection-actions ms-2 flex-shrink-0">
+          <button class="btn btn-sm btn-light border me-1" data-col-action="download" title="Download as .zip"><i class="bi bi-download"></i></button>
+          <button class="btn btn-sm btn-light border text-danger" data-col-action="delete" title="Delete collection"><i class="bi bi-trash"></i></button>
         </div>
       `;
-      on(row, 'click', (e) => { e.preventDefault(); openCollection(c); });
+
+      // Open collection
+      on(row.querySelector('.collection-name'), 'click', (e) => { e.preventDefault(); openCollection(c); });
+
+      // Download ZIP
+      on(row.querySelector('[data-col-action="download"]'), 'click', async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        try {
+          const resp = await Auth.fetch(`/api/vault/collections/${c.id}/archive`);
+          if (!resp.ok) { const t = await resp.text().catch(()=> ''); alert(t || 'Download failed'); return; }
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${(c.name || 'collection').replace(/[\\/:*?"<>|]+/g, '_')}.zip`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+        } catch (err) {
+          console.error(err);
+          alert('Download failed');
+        }
+      });
+
+      // Delete collection (with confirmation text exactly as requested)
+      on(row.querySelector('[data-col-action="delete"]'), 'click', async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const ok = confirm('Are you sure you want to delete this collection and all contained files. This action is irreversible');
+        if (!ok) return;
+        try {
+          const resp = await Auth.fetch(`/api/vault/collections/${c.id}`, { method: 'DELETE' });
+          if (!resp.ok) { const t = await resp.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
+          // If we are currently viewing this collection, exit to collections view
+          if (currentCol && String(currentCol.id) === String(c.id)) {
+            exitCollectionView();
+          }
+          await Promise.all([loadCollections(), loadStats()]);
+        } catch (err) {
+          console.error(err);
+          alert('Delete failed');
+        }
+      });
+
       elCollectionsList.appendChild(row);
     }
   }
 
   async function openCollection(col) {
     currentCol = col;
+    const elCurrentCollectionName = $('#current-collection-name') || $('#panel-name');
     if (elCurrentCollectionName) elCurrentCollectionName.textContent = col?.name || 'All documents';
     if (elBackToCollections) elBackToCollections.classList.remove('d-none');
     if (elCollectionsSection && elCollectionsSection.id === 'collections-section') {
@@ -260,6 +311,7 @@
 
   function exitCollectionView() {
     currentCol = null;
+    const elCurrentCollectionName = $('#current-collection-name') || $('#panel-name');
     if (elCurrentCollectionName) elCurrentCollectionName.textContent = 'All documents';
     if (elBackToCollections) elBackToCollections.classList.add('d-none');
     setPreviewSrc('about:blank');
@@ -317,11 +369,11 @@
           const del = await Auth.fetch(`/api/vault/files/${f.id}`, { method: 'DELETE' });
           if (!del.ok) { const t = await del.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
           await Promise.all([loadFiles(), loadStats(), loadCollections()]);
-          await ensureMetricsAndStats(); // keep counters in sync after deletion
+          await ensureMetricsAndStats();
           setPreviewSrc('about:blank');
         });
 
-        // --- NEW: Rename on double-click of the filename (minimal, no UI change) ---
+        // dbl-click rename (kept as before)
         const titleEl = row.querySelector('.doc-title[data-filename]');
         if (titleEl) {
           on(titleEl, 'dblclick', async (ev) => {
@@ -341,7 +393,6 @@
                 return;
               }
               const j = await resp.json();
-              // Update same object that button handlers closed over
               f.id = j.id || f.id;
               f.name = j.name || f.name;
               f.viewUrl = j.viewUrl || f.viewUrl;
@@ -355,13 +406,11 @@
             }
           });
         }
-        // ---------------------------------------------------------------------------
 
         elDocumentsList.appendChild(row);
       }
     }
 
-    // Update the per-collection meta and global KPIs based on actual file list (fallback if API zeros)
     await updateCollectionMetaFromFiles(currentCol.id, files);
     await maybeFallbackStatsFromCollections();
   }
@@ -389,7 +438,7 @@
 
     const fd = new FormData();
     for (const file of files) {
-      fd.append('files', file); // modern plural
+      fd.append('files', file);
     }
 
     const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, {
@@ -402,17 +451,14 @@
       return;
     }
     await Promise.all([loadFiles(), loadStats(), loadCollections()]);
-    await ensureMetricsAndStats(); // counters stay correct even if API returns zeros
+    await ensureMetricsAndStats();
   }
 
   // ---------------- Front-end fallbacks for counters ----------------
-
-  // If the API returns zeros for stats/collections, compute from per-collection /files
   async function recomputeAllCollectionMetrics() {
     if (!collections.length) return { totalFiles: 0, totalBytes: 0 };
 
-    let totalFiles = 0;
-    let totalBytes = 0;
+    let totalFiles = 0, totalBytes = 0;
 
     for (const c of collections) {
       try {
@@ -423,19 +469,15 @@
         const count = files.length;
         const bytes = files.reduce((s, f) => s + (toNumber(f.size) || 0), 0);
 
-        // Persist into state
         c.fileCount = count;
         c.bytes = bytes;
 
-        // Update the visible row meta if present
         const metaEl = elCollectionsList?.querySelector(`[data-meta-for="${CSS.escape(String(c.id))}"]`);
         if (metaEl) metaEl.textContent = `${count} files · ${fmtBytes(bytes)}`;
 
         totalFiles += count;
         totalBytes += bytes;
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     }
 
     return { totalFiles, totalBytes };
@@ -444,7 +486,6 @@
   async function maybeFallbackStatsFromCollections() {
     if (_didFallbackStats) return;
     const shownFiles = (elFileCount?.textContent || '').trim();
-    // If the server reported zeros, recompute from client side
     if (shownFiles === '0' && collections.length) {
       const agg = await recomputeAllCollectionMetrics();
       if ((agg.totalFiles || agg.totalBytes) && elFileCount && elTotalGB) {
@@ -461,7 +502,6 @@
 
   async function ensureCollectionMetrics() {
     if (_didFallbackCollectionMetrics) return;
-    // If every collection shows 0/0, try to fill them in
     const allZero = collections.length > 0 && collections.every(c => !toNumber(c.fileCount) && !toNumber(c.bytes));
     if (allZero) {
       await recomputeAllCollectionMetrics();
@@ -516,17 +556,14 @@
     }
   });
 
-  // Back link (legacy)
   on(elBackToCollections, 'click', (e) => { e.preventDefault(); exitCollectionView(); });
 
-  // File input change → upload (Option B: NO programmatic .click())
   on(elFileInput, 'change', async (e) => {
     const files = e.target.files;
     await uploadFilesToCurrent(files);
-    e.target.value = ''; // allow re-upload of same-named file
+    e.target.value = '';
   });
 
-  // Drag & drop uploads supported
   if (elDropzone) {
     on(elDropzone, 'dragover', (e) => { e.preventDefault(); elDropzone.classList.add('dragging'); });
     on(elDropzone, 'dragleave', () => elDropzone.classList.remove('dragging'));
@@ -549,12 +586,9 @@
       if (elBackToCollections) elBackToCollections.classList.add('d-none');
       setPreviewSrc('about:blank');
 
-      // Fill in numbers if API reported zeros
       await ensureMetricsAndStats();
     } catch (e) {
       console.error('[document-vault] init error', e);
     }
   });
 })();
-
-  

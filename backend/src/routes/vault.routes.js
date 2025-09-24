@@ -1,17 +1,32 @@
 // backend/src/routes/vault.routes.js
 //
-// R2-backed Document Vault with backend-proxied preview/download and rename.
+// R2-backed Document Vault with:
+// - backend-proxied preview/download (+ Range)
+// - rename (copy→delete)
+// - list shows clean filename (strip YYYYMMDD-UUID- prefix)
+// - NEW: delete collection (and all files)
+// - NEW: download collection as ZIP
+//
 // Collections: <userId>/_collections.json
-// Files: <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<safeName>.pdf
+// Files:       <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<safeName>.pdf
 //
 const express = require('express');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
+
 const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
-const { GetObjectCommand, PutObjectCommand, CopyObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  GetObjectCommand,
+  PutObjectCommand,
+  CopyObjectCommand,
+  DeleteObjectsCommand
+} = require('@aws-sdk/client-s3');
 const { getSignedUrl: presign } = require('@aws-sdk/s3-request-presigner');
+
+// NEW: for ZIP streaming
+const archiver = require('archiver');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
@@ -127,7 +142,6 @@ router.get('/collections/:id/files', async (req, res) => {
   const pref = collectionPrefix(u.id, colId);
   const objs = (await listAll(pref)).filter(o => !String(o.Key).endsWith('/'));
 
-  // >>> Only change needed: derive display name from key without date+uuid prefix
   const items = objs.map(o => {
     const key = String(o.Key);
     const id = keyToFileId(key);
@@ -141,8 +155,6 @@ router.get('/collections/:id/files', async (req, res) => {
       downloadUrl: `/api/vault/files/${id}/download`
     };
   }).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
-  // <<<
-
   res.json(items);
 });
 
@@ -167,7 +179,7 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     const id = keyToFileId(key);
     uploaded.push({
       id,
-      name: safeBase, // returned name has no prefix already
+      name: safeBase,
       size: f.size || 0,
       uploadedAt: new Date().toISOString(),
       viewUrl: `/api/vault/files/${id}/view`,
@@ -237,6 +249,85 @@ router.patch('/files/:id', express.json(), async (req, res) => {
     viewUrl: `/api/vault/files/${newId}/view`,
     downloadUrl: `/api/vault/files/${newId}/download`
   });
+});
+
+// NEW: Delete entire collection and all contained files
+router.delete('/collections/:id', async (req, res) => {
+  const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  const colId = String(req.params.id || '');
+  if (!colId) return res.status(400).json({ error: 'Missing collection id' });
+
+  // Ensure the collection exists for this user
+  const cols = await loadCollectionsDoc(u.id);
+  if (!cols.some(c => c.id === colId)) return res.status(404).json({ error: 'Collection not found' });
+
+  // List all objects with this prefix
+  const prefix = collectionPrefix(u.id, colId);
+  const objs = await listAll(prefix);
+  const toDelete = objs
+    .filter(o => String(o.Key).startsWith(prefix))
+    .map(o => ({ Key: o.Key }));
+
+  // Batch delete in chunks of 1000 (S3 limit per request)
+  for (let i = 0; i < toDelete.length; i += 1000) {
+    const chunk = toDelete.slice(i, i + 1000);
+    await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: chunk } }));
+  }
+
+  // Remove collection entry from control doc
+  const remaining = cols.filter(c => c.id !== colId);
+  await saveCollectionsDoc(u.id, remaining);
+
+  res.json({ ok: true, removed: { objects: toDelete.length, collectionId: colId } });
+});
+
+// NEW: Download an entire collection as a ZIP (streamed)
+router.get('/collections/:id/archive', async (req, res) => {
+  const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
+  const colId = String(req.params.id || '');
+  if (!colId) return res.status(400).json({ error: 'Missing collection id' });
+
+  // Verify ownership and get collection name for filename
+  const cols = await loadCollectionsDoc(u.id);
+  const col = cols.find(c => c.id === colId);
+  if (!col) return res.status(404).json({ error: 'Collection not found' });
+  const zipName = `${col.name || 'collection'}.zip`.replace(/[\\/:*?"<>|]+/g, '_');
+
+  // List files for this collection
+  const prefix = collectionPrefix(u.id, colId);
+  const objs = (await listAll(prefix)).filter(o => !String(o.Key).endsWith('/'));
+  if (!objs.length) {
+    // Return an empty ZIP rather than 404 for a better UX
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(zipName)}"`);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', err => { try { res.status(500).end(); } catch {} });
+    archive.pipe(res);
+    await archive.finalize();
+    return;
+  }
+
+  // Stream ZIP
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(zipName)}"`);
+
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  archive.on('error', err => { try { res.status(500).end(); } catch {} });
+  archive.pipe(res);
+
+  // Append each R2 object as <displayName>
+  for (const o of objs) {
+    const key = String(o.Key);
+    const entryName = extractDisplayNameFromKey(key);
+    try {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+      archive.append(obj.Body, { name: entryName });
+    } catch {
+      // Skip missing/unreadable objects
+    }
+  }
+
+  await archive.finalize();
 });
 
 module.exports = router;
