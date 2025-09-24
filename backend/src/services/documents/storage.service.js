@@ -1,108 +1,133 @@
 // backend/src/services/documents/storage.service.js
-//
-// Thin R2-backed storage service for the Documents section.
-// Provides the same surface your code expects from the old GridFS wrapper.
-//
-// Methods:
-//   list(userId)
-//   uploadMany(userId, files[])  // files: [{ buffer, originalname, mimetype, size }]
-//   remove(userId, id)
-//   getViewStream(userId, id)    // returns { stream, headers }
-//   getDownloadStream(userId, id)// returns { stream, headers }
-//
-const dayjs = require('dayjs');
-const { randomUUID } = require('crypto');
-const { s3, BUCKET, putObject, deleteObject, listAll } = require('../../utils/r2');
-const { GetObjectCommand } = require('@aws-sdk/client-s3');
+// GridFS helpers for storing and retrieving document files, with per-user enforcement.
 
-function b64url(buf) {
-  return Buffer.from(buf).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-}
-function b64urlDecode(s) {
-  s = s.replace(/-/g, '+').replace(/_/g, '/');
-  while (s.length % 4) s += '=';
-  return Buffer.from(s, 'base64').toString('utf8');
-}
-function keyToFileId(key) { return b64url(key); }
-function fileIdToKey(id) { return b64urlDecode(id); }
+const mongoose = require('mongoose');
+const { GridFSBucket, ObjectId } = require('mongodb');
 
-function docsPrefix(userId) { return `${userId}/accounting files/`; }
-function extractDisplayNameFromKey(key) {
-  const tail = String(key).split('/').pop() || 'document.pdf';
-  const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/i);
-  return m ? m[3] : tail;
-}
-
-async function list(userId) {
-  const objs = (await listAll(docsPrefix(userId))).filter(o => !String(o.Key).endsWith('/'));
-  return objs.map(o => {
-    const key = String(o.Key);
-    const id = keyToFileId(key);
-    return {
-      id,
-      filename: extractDisplayNameFromKey(key),
-      length: o.Size || 0,
-      uploadDate: o.LastModified ? new Date(o.LastModified) : null,
-      contentType: 'application/octet-stream'
-    };
-  }).sort((a,b) => (b.uploadDate || 0) - (a.uploadDate || 0));
-}
-
-async function uploadMany(userId, files) {
-  const out = [];
-  for (const f of files || []) {
-    const date = dayjs().format('YYYYMMDD');
-    const safeBase = String(f.originalname || 'document.pdf').replace(/[^\w.\- ]+/g, '_');
-    const key = `${userId}/accounting files/${date}-${randomUUID()}-${safeBase}`;
-    await putObject(key, f.buffer, f.mimetype || 'application/octet-stream');
-    out.push({
-      id: keyToFileId(key),
-      filename: safeBase,
-      length: f.size || 0,
-      uploadDate: new Date(),
-      contentType: f.mimetype || 'application/octet-stream'
-    });
+function bucket() {
+  if (!mongoose.connection || !mongoose.connection.db) {
+    throw new Error('MongoDB not connected');
   }
+  return new GridFSBucket(mongoose.connection.db, { bucketName: 'documents' });
+}
+
+function filesColl() {
+  if (!mongoose.connection || !mongoose.connection.db) {
+    throw new Error('MongoDB not connected');
+  }
+  return mongoose.connection.db.collection('documents.files');
+}
+
+/**
+ * Save a Buffer to GridFS (native driver).
+ * NOTE: The "finish" event does NOT pass a file doc. Use uploadStream.id and (optionally)
+ *       fetch the created file document from the files collection.
+ * @param {Buffer} buffer
+ * @param {String} filename
+ * @param {Object} opts - { contentType?, metadata? }
+ * @returns {Promise<{ id, length, uploadDate, contentType, filename, metadata }>}
+ */
+async function saveBufferToGridFS(buffer, filename, opts = {}) {
+  const { contentType = 'application/octet-stream', metadata = {} } = opts;
+
+  return new Promise((resolve, reject) => {
+    const uploadStream = bucket().openUploadStream(filename, {
+      contentType,
+      metadata,
+    });
+
+    uploadStream.once('error', reject);
+    uploadStream.once('finish', async () => {
+      try {
+        const _id = uploadStream.id; // ObjectId of the stored file
+        // Fetch the file doc to get canonical length/uploadDate/etc.
+        const doc = await filesColl().findOne({ _id });
+        resolve({
+          id: String(_id),
+          length: doc?.length ?? buffer.length,
+          uploadDate: doc?.uploadDate ?? new Date(),
+          contentType: doc?.contentType ?? contentType,
+          filename: doc?.filename ?? filename,
+          metadata: doc?.metadata ?? metadata,
+        });
+      } catch (e) {
+        // Fallback: still return something usable even if the lookup failed
+        resolve({
+          id: String(uploadStream.id),
+          length: buffer.length,
+          uploadDate: new Date(),
+          contentType,
+          filename,
+          metadata,
+        });
+      }
+    });
+
+    uploadStream.end(buffer);
+  });
+}
+
+/**
+ * List files for a user (and optional filters).
+ * @param {Object} filter - { userId, type?, year? }
+ * @returns {Promise<Array>}
+ */
+async function listFiles(filter = {}) {
+  const { userId, type, year } = filter;
+  const query = {};
+  if (userId) query['metadata.userId'] = String(userId);
+  if (type)   query['metadata.type'] = type;
+  if (year)   query['metadata.year'] = String(year);
+
+  const cur = filesColl().find(query).sort({ uploadDate: -1 });
+
+  const out = [];
+  await cur.forEach((f) => {
+    out.push({
+      id: String(f._id),
+      filename: f.filename,
+      length: f.length,
+      uploadDate: f.uploadDate,
+      mime: f.contentType || 'application/octet-stream',
+      type: f.metadata?.type || null,
+      year: f.metadata?.year || null,
+      userId: f.metadata?.userId || null,
+      storedAs: String(f._id),
+    });
+  });
   return out;
 }
 
-async function remove(userId, id) {
-  const key = fileIdToKey(String(id || ''));
-  if (!key.startsWith(docsPrefix(userId))) throw new Error('Forbidden');
-  await deleteObject(key).catch(() => {});
-  return { ok: true };
+/** Ensure a file belongs to the given user; returns file doc if so. */
+async function assertUserOwnsFile(fileId, userId) {
+  const _id = typeof fileId === 'string' ? new ObjectId(fileId) : fileId;
+  const doc = await filesColl().findOne({ _id, 'metadata.userId': String(userId) });
+  if (!doc) {
+    const err = new Error('Not found');
+    err.code = 404;
+    throw err;
+  }
+  return doc;
 }
 
-async function getViewStream(userId, id) {
-  const key = fileIdToKey(String(id || ''));
-  if (!key.startsWith(docsPrefix(userId))) throw new Error('Forbidden');
-  const data = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
-  return {
-    stream: data.Body,
-    headers: {
-      'Content-Type': data.ContentType || 'application/octet-stream',
-      'Content-Disposition': `inline; filename="${encodeURIComponent(key.split('/').pop() || 'document.pdf')}"`
-    }
-  };
+/** Stream a file if and only if it belongs to the user (ownership check must be done before calling). */
+function streamFileById(fileId) {
+  const _id = typeof fileId === 'string' ? new ObjectId(fileId) : fileId;
+  return bucket().openDownloadStream(_id);
 }
 
-async function getDownloadStream(userId, id) {
-  const key = fileIdToKey(String(id || ''));
-  if (!key.startsWith(docsPrefix(userId))) throw new Error('Forbidden');
-  const data = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
-  return {
-    stream: data.Body,
-    headers: {
-      'Content-Type': data.ContentType || 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${encodeURIComponent(key.split('/').pop() || 'document.pdf')}"`
-    }
-  };
+/** Delete a file if and only if it belongs to the user. */
+async function deleteFileById(fileId, userId) {
+  const _id = typeof fileId === 'string' ? new ObjectId(fileId) : fileId;
+  await assertUserOwnsFile(_id, userId);
+  await bucket().delete(_id);
+  return true;
 }
 
 module.exports = {
-  list,
-  uploadMany,
-  remove,
-  getViewStream,
-  getDownloadStream,
+  saveBufferToGridFS,
+  listFiles,
+  streamFileById,
+  deleteFileById,
+  assertUserOwnsFile,
 };
