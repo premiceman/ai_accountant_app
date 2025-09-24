@@ -1,14 +1,13 @@
 // backend/src/routes/documents.routes.js
 //
 // Documents section (separate from Vault) backed by Cloudflare R2.
-// Stores under:
-//   <userId>/accounting files/<type>/<year>/<YYYYMMDD>-<uuid>-<originalName>
-// and GET honors ?type=&year= filters.
 //
-// Other behaviors unchanged:
-// - URL-safe ids (base64url) + encodeURIComponent in URLs
-// - Legacy POST response { files: [...] } preserved
-// - Preview/Download proxied with Range support
+// Changes vs prior version (to satisfy legacy UI on /documents.html):
+// - GET /api/documents returns { documents: [...] }  (NOT a bare array)
+// - POST /api/documents returns { success: true, files: [...], documents: [...] }
+//
+// Storage layout (unchanged):
+//   <userId>/accounting files/<type>/<year>/<YYYYMMDD>-<uuid>-<originalName>
 //
 const express = require('express');
 const multer = require('multer');
@@ -51,8 +50,7 @@ function fileIdToKey(id) { return b64urlDecode(String(id)); }
 
 function docsRootPrefix(userId) { return `${userId}/accounting files/`; }
 
-// Key format parts:
-//   [0]=userId, [1]="accounting files", [2]=type, [3]=year, [4...]=tail
+// Key format parts: [0]=userId, [1]="accounting files", [2]=type, [3]=year, [4...]=tail
 function parseKeyParts(key) {
   const parts = String(key).split('/');
   return {
@@ -106,7 +104,7 @@ async function streamR2Object(req, res, key, { inline = true, downloadName = nul
 
 // ---------- routes ----------
 
-// List user's documents, honoring ?type=&year=
+// List user's documents, honoring ?type=&year=. RETURNS { documents: [...] }
 router.get('/', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -121,7 +119,7 @@ router.get('/', async (req, res) => {
     const prefix = `${root}${qType}/${qYear}/`;
     objects = await listAll(prefix);
   } else {
-    // Broader: list all then filter in-memory by segments (keeps backward compatibility)
+    // Broad: list all then filter by path parts
     objects = await listAll(root);
     if (qType || qYear) {
       objects = objects.filter(o => {
@@ -138,16 +136,16 @@ router.get('/', async (req, res) => {
 
   const items = objs.map(o => {
     const key = String(o.Key);
-    const id = keyToFileId(key);                // URL-safe id
-    const encId = encodeURIComponent(id);       // encode when embedding in URL
+    const id = keyToFileId(key);                 // URL-safe id
+    const encId = encodeURIComponent(id);        // encode when embedding in URL
     const name = extractDisplayNameFromKey(key);
     const uploadedAt = o.LastModified ? new Date(o.LastModified).toISOString() : null;
     const size = o.Size || 0;
 
     const parts = parseKeyParts(key);
 
+    // Return legacy + new fields so both codepaths are happy
     return {
-      // fields your normalizer handles
       id,
       name,
       size,
@@ -155,22 +153,22 @@ router.get('/', async (req, res) => {
       viewUrl: `/api/documents/${encId}/view`,
       downloadUrl: `/api/documents/${encId}/download`,
 
-      // legacy fields (older Documents UI)
       filename: name,
       length: size,
       uploadDate: uploadedAt ? new Date(uploadedAt) : null,
       contentType: 'application/octet-stream',
 
-      // echo type/year so the UI can tag/filter
       type: parts.type || undefined,
       year: parts.year || undefined
     };
   }).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
 
-  res.json(items);
+  // >>> IMPORTANT: legacy UI expects an object with a 'documents' array
+  res.json({ documents: items });
 });
 
 // Upload (supports 'files'[], or single 'file'), stores in <type>/<year> subfolders
+// RETURNS { success: true, files: [...], documents: [...] }
 router.post('/', upload.any(), async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -232,7 +230,8 @@ router.post('/', upload.any(), async (req, res) => {
     legacyFiles.push(legacy);
   }
 
-  return res.status(201).json({ files: legacyFiles, uploaded });
+  // >>> IMPORTANT: legacy UI expects 'files' and/or 'documents'
+  res.status(201).json({ success: true, files: legacyFiles, documents: uploaded });
 });
 
 // Delete one document
