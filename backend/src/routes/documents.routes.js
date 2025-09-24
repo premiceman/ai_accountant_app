@@ -1,10 +1,14 @@
 // backend/src/routes/documents.routes.js
 //
 // Documents section (separate from Vault) backed by Cloudflare R2.
-// Fix: make IDs URL-safe (base64url) and encode in URLs so preview/download/delete work.
+// Stores under:
+//   <userId>/accounting files/<type>/<year>/<YYYYMMDD>-<uuid>-<originalName>
+// and GET honors ?type=&year= filters.
 //
-// Layout per user:
-//   <userId>/accounting files/<YYYYMMDD>-<uuid>-<originalName>
+// Other behaviors unchanged:
+// - URL-safe ids (base64url) + encodeURIComponent in URLs
+// - Legacy POST response { files: [...] } preserved
+// - Preview/Download proxied with Range support
 //
 const express = require('express');
 const multer = require('multer');
@@ -39,14 +43,27 @@ function b64urlEncode(str) {
 }
 function b64urlDecode(s) {
   s = String(s).replace(/-/g, '+').replace(/_/g, '/');
-  // restore padding
   while (s.length % 4) s += '=';
   return Buffer.from(s, 'base64').toString('utf8');
 }
 function keyToFileId(key) { return b64urlEncode(String(key)); }
 function fileIdToKey(id) { return b64urlDecode(String(id)); }
 
-function docsPrefix(userId) { return `${userId}/accounting files/`; }
+function docsRootPrefix(userId) { return `${userId}/accounting files/`; }
+
+// Key format parts:
+//   [0]=userId, [1]="accounting files", [2]=type, [3]=year, [4...]=tail
+function parseKeyParts(key) {
+  const parts = String(key).split('/');
+  return {
+    userId: parts[0] || '',
+    bucketFolder: parts[1] || '',
+    type: parts[2] || '',
+    year: parts[3] || '',
+    tail: parts.slice(4).join('/')
+  };
+}
+
 function extractDisplayNameFromKey(key) {
   const tail = String(key).split('/').pop() || 'document';
   const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/i);
@@ -89,11 +106,35 @@ async function streamR2Object(req, res, key, { inline = true, downloadName = nul
 
 // ---------- routes ----------
 
-// List user's documents
+// List user's documents, honoring ?type=&year=
 router.get('/', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
-  const objs = (await listAll(docsPrefix(u.id))).filter(o => !String(o.Key).endsWith('/'));
+  const qType = String(req.query.type || '').trim();
+  const qYear = String(req.query.year || '').trim();
+
+  const root = docsRootPrefix(u.id);
+
+  let objects = [];
+  if (qType && qYear) {
+    // Most selective: list only this subprefix
+    const prefix = `${root}${qType}/${qYear}/`;
+    objects = await listAll(prefix);
+  } else {
+    // Broader: list all then filter in-memory by segments (keeps backward compatibility)
+    objects = await listAll(root);
+    if (qType || qYear) {
+      objects = objects.filter(o => {
+        const { type, year } = parseKeyParts(o.Key || '');
+        if (qType && qYear) return type === qType && year === qYear;
+        if (qType) return type === qType;
+        if (qYear) return year === qYear;
+        return true;
+      });
+    }
+  }
+
+  const objs = objects.filter(o => !String(o.Key).endsWith('/'));
 
   const items = objs.map(o => {
     const key = String(o.Key);
@@ -103,8 +144,10 @@ router.get('/', async (req, res) => {
     const uploadedAt = o.LastModified ? new Date(o.LastModified).toISOString() : null;
     const size = o.Size || 0;
 
+    const parts = parseKeyParts(key);
+
     return {
-      // new-ish fields your normalizer handles
+      // fields your normalizer handles
       id,
       name,
       size,
@@ -112,23 +155,27 @@ router.get('/', async (req, res) => {
       viewUrl: `/api/documents/${encId}/view`,
       downloadUrl: `/api/documents/${encId}/download`,
 
-      // legacy fields (for older Documents UI)
+      // legacy fields (older Documents UI)
       filename: name,
       length: size,
       uploadDate: uploadedAt ? new Date(uploadedAt) : null,
-      contentType: 'application/octet-stream'
+      contentType: 'application/octet-stream',
+
+      // echo type/year so the UI can tag/filter
+      type: parts.type || undefined,
+      year: parts.year || undefined
     };
   }).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
 
   res.json(items);
 });
 
-// Upload (supports 'files'[], or single 'file')
+// Upload (supports 'files'[], or single 'file'), stores in <type>/<year> subfolders
 router.post('/', upload.any(), async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
-  const docType = String(req.query.type || '').trim();
-  const year    = String(req.query.year || '').trim();
+  const docType = String(req.query.type || '').trim() || 'general';
+  const year    = String(req.query.year || '').trim() || 'unspecified';
 
   let files = req.files || [];
   if (!files.length && req.file) files = [req.file];
@@ -150,7 +197,7 @@ router.post('/', upload.any(), async (req, res) => {
 
     const date = dayjs().format('YYYYMMDD');
     const safeBase = String(f.originalname || 'document').replace(/[^\w.\- ]+/g, '_');
-    const key = `${u.id}/accounting files/${date}-${randomUUID()}-${safeBase}`;
+    const key = `${docsRootPrefix(u.id)}${docType}/${year}/${date}-${randomUUID()}-${safeBase}`;
     await putObject(key, f.buffer, f.mimetype || 'application/octet-stream');
 
     const id = keyToFileId(key);              // URL-safe id
@@ -165,8 +212,8 @@ router.post('/', upload.any(), async (req, res) => {
       uploadedAt,
       viewUrl: `/api/documents/${encId}/view`,
       downloadUrl: `/api/documents/${encId}/download`,
-      type: docType || undefined,
-      year: year || undefined
+      type: docType,
+      year: year
     };
 
     const legacy = {
@@ -177,8 +224,8 @@ router.post('/', upload.any(), async (req, res) => {
       contentType: f.mimetype || 'application/octet-stream',
       viewUrl: common.viewUrl,
       downloadUrl: common.downloadUrl,
-      type: common.type,
-      year: common.year
+      type: docType,
+      year: year
     };
 
     uploaded.push(common);
@@ -192,9 +239,8 @@ router.post('/', upload.any(), async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
-  // id is base64url in path → decode to key
   const key = fileIdToKey(decodeURIComponent(String(req.params.id || '')));
-  if (!key.startsWith(docsPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  if (!key.startsWith(docsRootPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
 
   await deleteObject(key).catch(() => {});
   res.json({ ok: true });
@@ -204,7 +250,7 @@ router.delete('/:id', async (req, res) => {
 router.get('/:id/view', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const key = fileIdToKey(decodeURIComponent(String(req.params.id || '')));
-  if (!key.startsWith(docsPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  if (!key.startsWith(docsRootPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
   await streamR2Object(req, res, key, { inline: true });
 });
 
@@ -212,7 +258,7 @@ router.get('/:id/view', async (req, res) => {
 router.get('/:id/download', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const key = fileIdToKey(decodeURIComponent(String(req.params.id || '')));
-  if (!key.startsWith(docsPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  if (!key.startsWith(docsRootPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
   const name = key.split('/').pop() || 'document';
   await streamR2Object(req, res, key, { inline: false, downloadName: name });
 });
