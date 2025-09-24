@@ -1,371 +1,335 @@
 // frontend/js/documents.js
-// Use the actual backend route (/api/documents), not /api/docs.
-// Also fixes a small XHR status check bug.
+// Robust Documents page wiring (R2 or GridFS) with payload normalization
+// and resilient modal handling to avoid aria-hidden focus warnings.
 
-const DOCS_API = '/api/documents';
-let ALL_FILES = []; // cache of /api/documents to render lists & modals
+(function () {
+  // ---------- DOM helpers ----------
+  const $  = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const on = (el, ev, fn, opts) => el && el.addEventListener(ev, fn, opts);
 
-// -------------------------------- Init ------------------------------------
-(async function init() {
-  try {
-    await Auth.requireAuth();
-    Auth.setBannerTitle('Documents');
-    await renderDocsTable();  // table + progress + actions
-  } catch (e) {
-    console.error(e);
-    setMsg('Failed to load documents.');
-  }
-})();
+  // ---------- Elements (with graceful fallbacks) ----------
+  const elList             = $('#documents-list') || $('#docs-list') || $('#document-list');
+  const elEmpty            = $('#documents-empty') || null;
+  const elUploadForm       = $('#documents-upload-form') || $('#upload-form');
+  const elFileInput        = $('#documents-file-input') || $('#file-input') || $('input[type="file"]');
+  const elTypeSelect       = $('#doc-type') || $('#documents-type') || $('select[name="type"]');
+  const elYearSelect       = $('#doc-year') || $('#documents-year') || $('select[name="year"]');
+  const elProgressBar      = $('#upload-progress') || $('.progress-bar')?.[0] || null;
+  const elModal            = $('#filesModal') || $('#documents-modal') || null;
+  const elRefreshBtn       = $('#documents-refresh') || $('#btn-refresh') || null;
 
-// ---- UK catalogue (required + helpful) ----
-const DOCS = [
-  // Identity & Residency
-  { key: 'proof_of_id',         label: 'Proof of ID',                                 cadence:{months:60},  why:'Verify identity (KYC/AML), protect account changes.', where:'Passport or DVLA Driving Licence.',                          required:true },
-  { key: 'proof_of_address',    label: 'Proof of Address',                            cadence:{months:6},   why:'Confirm UK residency for tax and correspondence.',     where:'Recent utility bill, bank/credit statement, council tax.',    required:true },
+  // state
+  let currentType = '';
+  let currentYear = '';
 
-  // Self Assessment / HMRC
-  { key: 'sa100_return_copy',   label: 'SA100 Self Assessment (copy)',                cadence:{yearlyBy:'01-31'}, why:'Record of filed return; carry-forwards, audit.',   where:'HMRC online → Self Assessment.',                               required:true },
-  { key: 'sa302_tax_calc',      label: 'SA302 / Tax Calculation',                     cadence:{yearlyBy:'01-31'}, why:'Official calculation; supports mortgages/audit.',  where:'HMRC online → SA tax calculation.',                             required:true },
-  { key: 'hmrc_statement',      label: 'HMRC Statement of Account',                   cadence:{yearlyBy:'01-31'}, why:'Shows balancing payment & payments on account.',    where:'HMRC online → SA account.',                                     required:true },
-
-  // Employment & Payroll
-  { key: 'p60',                 label: 'P60 End of Year Certificate',                 cadence:{yearlyBy:'06-01'}, why:'Summary of pay & tax; essential for SA.',          where:'Employer/Payroll portal (by 31 May).',                         required:true },
-  { key: 'p11d',                label: 'P11D Benefits in Kind',                       cadence:{yearlyBy:'07-06'}, why:'Taxable benefits (car, medical, etc.).',           where:'Employer/Payroll portal (by 6 July).',                         required:true },
-  { key: 'p45',                 label: 'P45 (leaver\'s certificate)',                 cadence:{adhoc:true},        why:'Pay/tax to date when leaving a job.',            where:'Provided by former employer.',                                  required:false },
-  { key: 'payslips',            label: 'Payslips (monthly)',                          cadence:{months:1},          why:'Reconcile vs bank & P60/P11D.',                  where:'Employer/Payroll portal.',                                      required:false },
-
-  // Pensions & Wrappers
-  { key: 'pension_statement',   label: 'Pension Annual Statement (SIPP/Workplace)',   cadence:{yearlyBy:'06-30'},  why:'Tracks contributions (PIA) vs Annual Allowance.', where:'Pension provider portal/annual pack.',                          required:true },
-  { key: 'pension_pia',         label: 'Pension Input Amounts (last 3 years)',        cadence:{yearlyBy:'06-30'},  why:'Needed for carry-forward and AA charges.',        where:'Pension schemes provide PIA per tax year.',                     required:true },
-  { key: 'isa_statement',       label: 'ISA Annual Statement',                        cadence:{yearlyBy:'05-31'},  why:'Evidence of ISA subscriptions/limits.',           where:'ISA provider annual statement.',                                required:false },
-
-  // Savings & Investments Income
-  { key: 'interest_certs',      label: 'Bank/Building Society Interest Certificates', cadence:{yearlyBy:'06-30'},  why:'Declare savings interest beyond PSA.',            where:'Bank portals (tax certificates) or statements.',                required:true },
-  { key: 'dividend_vouchers',   label: 'Dividend Vouchers',                           cadence:{months:12},         why:'Evidence of dividend income & withholding.',     where:'Broker portal or registrar.',                                   required:true },
-  { key: 'broker_tax_pack',     label: 'Broker Annual Tax Pack / CTC',                cadence:{yearlyBy:'06-30'},  why:'Summarises dividends, interest & disposals.',    where:'Broker portal (HL, AJ Bell, IBKR, etc.).',                      required:true },
-
-  // Capital Gains (Shares/Funds/Crypto)
-  { key: 'trade_confirmations', label: 'Trade Confirmations / Contract Notes',        cadence:{months:1},          why:'Evidence of acquisitions/disposals & fees.',     where:'Broker portal (PDF/CSV).',                                      required:true },
-  { key: 'corp_actions',        label: 'Corporate Actions Evidence',                  cadence:{adhoc:true},        why:'Affects base cost (splits, rights, DRIP/scrip).', where:'Broker notices/registrar.',                                     required:false },
-  { key: 'crypto_history',      label: 'Crypto Full Trade History (CSV/API)',         cadence:{months:1},          why:'HMRC requires records; pooling; staking/airdrops.', where:'Exchange CSV/API; wallet explorers; tax tools.',               required:true },
-
-  // Property (Rental)
-  { key: 'tenancy_agreements',  label: 'Tenancy Agreements (AST)',                    cadence:{adhoc:true},        why:'Evidence of rental terms & periods let.',        where:'Lettings agent or signed AST.',                                 required:false },
-  { key: 'agent_statements',    label: 'Letting Agent Monthly Statements',            cadence:{months:1},          why:'Income/fees records for SA property pages.',     where:'Agent portal/email statements.',                                 required:true },
-  { key: 'mortgage_interest',   label: 'Annual Mortgage Interest Certificate',        cadence:{yearlyBy:'05-31'},  why:'Loan interest deduction evidence (rental).',     where:'Lender annual certificate.',                                     required:true },
-  { key: 'repairs_capital',     label: 'Repairs vs Capital Improvements Receipts',    cadence:{months:1},          why:'Split revenue vs capital for SA & future CGT.',  where:'Contractor invoices/receipts.',                                   required:true },
-
-  // Property (Purchase/Sale/SDLT)
-  { key: 'purchase_completion', label: 'Purchase Completion Statement',               cadence:{adhoc:true},        why:'Establishes base cost; incl. legal fees & SDLT.', where:'Conveyancer/solicitor pack.',                                   required:true },
-  { key: 'sale_completion',     label: 'Sale Completion Statement',                   cadence:{adhoc:true},        why:'Proceeds & fees for CGT calculation.',           where:'Conveyancer/solicitor pack.',                                    required:true },
-  { key: 'sdlt_return',         label: 'SDLT Return & Calculation',                   cadence:{adhoc:true},        why:'Confirms SDLT paid and rates used.',              where:'Conveyancer or HMRC SDLT copy.',                                 required:true },
-
-  // Equity Compensation
-  { key: 'equity_grants',       label: 'RSU/ESPP/Option Grant Agreements & Schedules', cadence:{adhoc:true},       why:'Defines vest/exercise terms; tax at vest.',       where:'Plan admin (Computershare/Equiniti/Fidelity).',                 required:true },
-  { key: 'equity_events',       label: 'Vest/Exercise/Sell Confirmations',            cadence:{months:1},          why:'Taxed amounts at vest/exercise; basis updates.', where:'Plan/Broker statements.',                                        required:true },
-
-  // Donations, Gifts & IHT
-  { key: 'gift_aid',            label: 'Gift Aid Donation Schedule & Receipts',       cadence:{months:12},         why:'Gross-up claims in SA; higher rate relief.',      where:'Charity statements; CAF reports.',                               required:true },
-  { key: 'gifts_log',           label: 'Gifts Log (7-year IHT tracking)',             cadence:{months:12},         why:'Track annual exemptions & PETs for IHT.',         where:'Self-maintained log with evidence.',                             required:false },
-
-  // Education & Loans / Household
-  { key: 'student_loans',       label: 'Student/Postgrad Loan Statements',            cadence:{yearlyBy:'04-30'},  why:'Plan type and balance; check PAYE/SA deductions.', where:'SLC online account.',                                           required:false },
-  { key: 'child_benefit',       label: 'Child Benefit Award & Payments',              cadence:{months:12},         why:'Assess HICBC if income exceeds thresholds.',      where:'GOV.UK child benefit service.',                                  required:false },
-  { key: 'marriage_allowance',  label: 'Marriage Allowance Transfer Confirmation',    cadence:{yearlyBy:'01-31'},  why:'Impacts personal allowance transfer between spouses.', where:'GOV.UK marriage allowance service.',                         required:false }
-];
-
-// --------------------------- Render table & progress ----------------------
-async function renderDocsTable() {
-  setMsg('Loading…');
-
-  ALL_FILES = [];
-  try {
-    const r = await Auth.fetch(DOCS_API);
-    if (r.ok) {
-      const j = await r.json();
-      ALL_FILES = Array.isArray(j.files) ? j.files : [];
-    }
-  } catch {}
-
-  const latestByType = {};
-  for (const f of ALL_FILES) {
-    const t = f.type || 'other';
-    if (!latestByType[t] || new Date(f.uploadDate) > new Date(latestByType[t].uploadDate)) {
-      latestByType[t] = f;
-    }
-  }
-
-  const cmp = computeCompletion(latestByType);
-  updateProgress(cmp);
-
-  const tbody = document.getElementById('docs-table-body');
-  tbody.innerHTML = '';
-
-  for (const d of DOCS) {
-    const latest = latestByType[d.key] || null;
-    const lastUploaded = latest?.uploadDate ? new Date(latest.uploadDate) : null;
-    const overdue = isOverdue(d.cadence, lastUploaded);
-
-    const tr = document.createElement('tr');
-    tr.dataset.key = d.key;
-    tr.innerHTML = `
-      <td class="fw-semibold">${d.label}</td>
-      <td>${d.required ? '<span class="badge text-bg-danger">Required</span>' : '<span class="badge text-bg-secondary">Helpful</span>'}</td>
-      <td>${statusBadge(latest, overdue)}</td>
-      <td>${lastUploaded ? fmtDateTime(lastUploaded) : '—'}</td>
-      <td>${dueLabel(d.cadence, lastUploaded)}</td>
-      <td class="small text-muted doc-why">${escapeHtml(d.why)}</td>
-      <td class="small text-muted doc-where">${escapeHtml(d.where)}</td>
-      <td class="text-end">
-        <div class="btn-group" role="group" aria-label="Actions">
-          <button class="btn btn-sm btn-primary btn-icon" data-action="upload" data-type="${d.key}">
-            <i class="bi bi-upload"></i><span class="visually-hidden">Upload</span>
-          </button>
-          <button class="btn btn-sm btn-outline-secondary btn-icon" data-action="view" data-type="${d.key}">
-            <i class="bi bi-eye"></i><span class="visually-hidden">View files</span>
-          </button>
-          <button class="btn btn-sm btn-outline-danger btn-icon" data-action="delete-latest" data-type="${d.key}" ${latest ? '' : 'disabled'}>
-            <i class="bi bi-trash3"></i><span class="visually-hidden">Delete latest</span>
-          </button>
-        </div>
-      </td>
-    `;
-
-    const uploadBtn = tr.querySelector('[data-action="upload"]');
-    const viewBtn   = tr.querySelector('[data-action="view"]');
-    const delLatest = tr.querySelector('[data-action="delete-latest"]');
-
-    uploadBtn.addEventListener('click', (e) => triggerUpload(d.key, e.currentTarget));
-    viewBtn.addEventListener('click', () => openFilesModal(d.key, d.label));
-    if (delLatest && latest) delLatest.addEventListener('click', async () => {
-      if (!confirm('Delete the latest uploaded file for this document?')) return;
-      await deleteFile(latest.id);
+  // ---------- Utilities ----------
+  async function ensureAuthHelper() {
+    if (window.Auth) return;
+    await new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = '/js/auth.js';
+      s.onload = resolve;
+      s.onerror = resolve;
+      document.head.appendChild(s);
     });
-
-    [uploadBtn, viewBtn, delLatest].forEach(el => {
-      if (el) new bootstrap.Tooltip(el, { container: 'body', placement: 'top' });
-    });
-
-    tbody.appendChild(tr);
   }
 
-  setMsg('');
-}
-
-// ------------------------------ Progress math ----------------------------
-function computeCompletion(latestByType) {
-  const required = DOCS.filter(d => d.required);
-  const overall  = DOCS;
-  const isUpToDate = (d) => {
-    const last = latestByType[d.key]?.uploadDate ? new Date(latestByType[d.key].uploadDate) : null;
-    return !!last && !isOverdue(d.cadence, last);
-  };
-  const reqDone = required.filter(isUpToDate).length;
-  const allDone = overall.filter(isUpToDate).length;
-  return {
-    required: { done: reqDone, total: required.length, pct: pct(reqDone, required.length) },
-    overall:  { done: allDone, total: overall.length,  pct: pct(allDone, overall.length) }
-  };
-}
-function updateProgress(cmp) {
-  const bar = document.getElementById('progress-bar');
-  const cap = document.getElementById('progress-caption');
-  const sub = document.getElementById('progress-subcaption');
-  bar.style.width = `${cmp.required.pct}%`;
-  bar.setAttribute('aria-valuenow', String(cmp.required.pct));
-  bar.textContent = `${cmp.required.pct}%`;
-  cap.textContent = `${cmp.required.done} / ${cmp.required.total} complete`;
-  sub.textContent = `Overall (required + helpful): ${cmp.overall.done} / ${cmp.overall.total} (${cmp.overall.pct}%)`;
-}
-function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
-
-// ------------------------------ Modal (files) ----------------------------
-// ------------------------------ Modal (files) ----------------------------
-function openFilesModal(typeKey, label) {
-  const list = ALL_FILES
-    .filter(f => (f.type || 'other') === typeKey)
-    .sort((a,b)=> new Date(b.uploadDate)-new Date(a.uploadDate));
-
-  const body  = document.getElementById('filesModalBody');
-  const title = document.getElementById('filesModalLabel');
-  title.textContent = `${label} — Files`;
-
-  if (list.length === 0) {
-    body.innerHTML = `<tr><td colspan="4" class="text-muted small">No files uploaded yet.</td></tr>`;
-  } else {
-    body.innerHTML = '';
-    for (const f of list) {
-      const tr = document.createElement('tr');
-      // expose the id so preview code can find it
-      tr.setAttribute('data-doc-id', String(f.id || ''));
-      const safeName = escapeHtml(f.filename || 'file');
-
-      tr.innerHTML = `
-        <td class="doc-filename" data-filename="${safeName}">
-        <a href="#" class="doc-filename-link" data-filename="${safeName}" aria-label="Preview or download">${safeName}</a>
-        </td>
-        <td>${f.uploadDate ? fmtDateTime(new Date(f.uploadDate)) : '—'}</td>
-        <td>${humanSize(f.length)}</td>
-        <td class="text-end">
-          <button class="btn btn-sm btn-outline-danger btn-icon" data-id="${f.id}">
-            <i class="bi bi-trash3"></i><span class="visually-hidden">Delete</span>
-          </button>
-        </td>
-      `;
-
-      // keep your existing delete wiring
-      const delBtn = tr.querySelector('button');
-      new bootstrap.Tooltip(delBtn, { container: 'body', placement: 'top' });
-      delBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete "${f.filename}"?`)) return;
-        await deleteFile(f.id, /*refreshModal*/true, typeKey, label);
-      });
-
-      body.appendChild(tr);
+  function toNumber(x) {
+    if (x == null) return 0;
+    if (typeof x === 'number' && isFinite(x)) return x;
+    if (typeof x === 'string') {
+      const n = Number(x.replace?.(/[, ]+/g, '') ?? x);
+      return isFinite(n) ? n : 0;
     }
+    return 0;
+  }
+  function pickString(...cands) {
+    for (const c of cands) if (typeof c === 'string' && c.trim()) return c.trim();
+    return '';
+  }
+  function firstNonNull(...cands) {
+    for (const c of cands) if (c != null) return c;
+    return undefined;
+  }
+  function b64urlEncode(str) {
+    return btoa(unescape(encodeURIComponent(str)))
+      .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  function safeIdToPath(id) {
+    // If the id already looks URL-safe, keep; else encode
+    if (/^[A-Za-z0-9\-_]+$/.test(String(id))) return encodeURIComponent(id);
+    return encodeURIComponent(b64urlEncode(String(id)));
+  }
+  function fmtBytes(bytes) {
+    const b = Number(bytes || 0);
+    if (b <= 0) return '0 B';
+    const u = ['B','KB','MB','GB','TB','PB'];
+    const i = Math.floor(Math.log(b) / Math.log(1024));
+    return `${(b / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${u[i]}`;
+  }
+  function niceDate(d) { try { return d ? new Date(d).toLocaleString() : '—'; } catch { return '—'; } }
+  function escapeHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // ---------- Normalizers ----------
+  function normalizeItem(it) {
+    // Accept both legacy and new shapes
+    const id         = pickString(it.id, it._id, it.fileId, it.key);
+    const name       = pickString(it.name, it.filename, it.title, 'document');
+    const size       = toNumber(firstNonNull(it.size, it.length, it.bytes, it.fileSize));
+    const uploadedAt = pickString(it.uploadedAt, it.uploadDate, it.createdAt, it.timeCreated);
+    const type       = pickString(it.type);
+    const year       = pickString(it.year);
+
+    // URLs: use given ones, else build from id
+    let viewUrl     = pickString(it.viewUrl, it.previewUrl, it.url);
+    let downloadUrl = pickString(it.downloadUrl);
+    if (!viewUrl && id) viewUrl = `/api/documents/${safeIdToPath(id)}/view`;
+    if (!downloadUrl && id) downloadUrl = `/api/documents/${safeIdToPath(id)}/download`;
+
+    return { id, name, size, uploadedAt, viewUrl, downloadUrl, type, year };
   }
 
-  const modal = new bootstrap.Modal(document.getElementById('filesModal'));
-  modal.show();
-}
+  function normalizeListPayload(json) {
+    // Accept: array OR {documents:[...]} OR {data:[...]} OR {items:[...]}
+    const raw = Array.isArray(json) ? json
+      : (json?.documents || json?.items || json?.data || json?.files || []);
+    return (raw || []).map(normalizeItem).filter(x => x.id);
+  }
 
+  function normalizeUploadPayload(json) {
+    // Accept: {files:[...]}, {uploaded:[...]}, {documents:[...]} or array
+    const raws = [];
+    if (Array.isArray(json)) raws.push(...json);
+    if (Array.isArray(json?.files)) raws.push(...json.files);
+    if (Array.isArray(json?.uploaded)) raws.push(...json.uploaded);
+    if (Array.isArray(json?.documents)) raws.push(...json.documents);
+    return raws.map(normalizeItem).filter(x => x.id);
+  }
 
-async function deleteFile(fileId, refreshModal=false, typeKey=null, label='') {
-  try {
-    const res = await Auth.fetch(`${DOCS_API}/${fileId}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const t = await res.text().catch(()=> '');
-      alert('Delete failed: ' + t);
+  // ---------- Render ----------
+  function renderList(items) {
+    if (!elList) return;
+    elList.innerHTML = '';
+
+    if (!items.length) {
+      if (elEmpty) elEmpty.classList.remove('d-none');
       return;
     }
-    await renderDocsTable();
-    if (refreshModal && typeKey) openFilesModal(typeKey, label);
-  } catch (e) {
-    alert('Delete failed (network).');
-  }
-}
+    if (elEmpty) elEmpty.classList.add('d-none');
 
-// ------------------------------ Upload flow ------------------------------
-function triggerUpload(typeKey, btnEl) {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.pdf,.jpg,.jpeg,.png,.csv,.heic,.webp';
+    for (const f of items) {
+      const row = document.createElement('div');
+      row.className = 'doc-row d-flex justify-content-between align-items-center';
+      row.dataset.id = f.id;
 
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
+      row.innerHTML = `
+        <div class="d-flex align-items-center gap-2 min-w-0">
+          <i class="bi bi-file-earmark-text text-primary"></i>
+          <div class="min-w-0">
+            <div class="text-truncate">${escapeHtml(f.name)}</div>
+            <div class="text-muted small">${fmtBytes(f.size)} · ${niceDate(f.uploadedAt)}</div>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-1 flex-shrink-0">
+          <button class="btn btn-sm btn-light border" data-action="preview" title="Preview"><i class="bi bi-eye"></i></button>
+          <button class="btn btn-sm btn-light border" data-action="download" title="Download"><i class="bi bi-download"></i></button>
+          <button class="btn btn-sm btn-light border text-danger" data-action="delete" title="Delete"><i class="bi bi-trash"></i></button>
+        </div>
+      `;
 
-    const tableWrap = btnEl?.closest('.table-responsive');
-    const setWrapProgress = (pFloat) => {
-      if (!tableWrap) return;
-      tableWrap.classList.add('table-uploading');
-      const pct = Math.max(2, Math.round(pFloat * 100));
-      tableWrap.style.setProperty('--upload-w', pct + '%');
-    };
-    const clearWrapProgress = () => {
-      if (!tableWrap) return;
-      tableWrap.style.setProperty('--upload-w', '100%');
-      setTimeout(() => {
-        tableWrap.classList.remove('table-uploading');
-        tableWrap.style.removeProperty('--upload-w');
-      }, 350);
-    };
+      const btnPrev = row.querySelector('[data-action="preview"]');
+      const btnDown = row.querySelector('[data-action="download"]');
+      const btnDel  = row.querySelector('[data-action="delete"]');
 
-    if (btnEl) btnEl.classList.add('is-loading');
+      on(btnPrev, 'click', async () => {
+        if (!f.viewUrl) return alert('No preview URL available.');
+        try {
+          const r = await Auth.fetch(f.viewUrl);
+          if (!r.ok) { const t = await r.text().catch(()=> ''); alert(t || 'Preview failed'); return; }
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          // Use a shared iframe if present
+          const iframe = $('#documents-preview-frame') || $('#preview-frame');
+          const label  = $('#documents-preview-filename') || $('#preview-filename');
+          if (iframe) {
+            iframe.src = url;
+            iframe.classList.remove('d-none');
+          } else {
+            // fallback open new tab
+            window.open(url, '_blank', 'noopener');
+          }
+          if (label) label.textContent = f.name || '';
+        } catch (e) {
+          console.error(e); alert('Preview failed');
+        }
+      });
 
-    const year = currentTaxYearStart(new Date());
-    const url = `${DOCS_API}?type=${encodeURIComponent(typeKey)}&year=${year}`;
+      on(btnDown, 'click', async () => {
+        if (!f.downloadUrl) return alert('No download URL available.');
+        try {
+          const r = await Auth.fetch(f.downloadUrl);
+          if (!r.ok) { const t = await r.text().catch(()=> ''); alert(t || 'Download failed'); return; }
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = (f.name || 'document').replace(/[\\/:*?"<>|]+/g, '_');
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+        } catch (e) {
+          console.error(e); alert('Download failed');
+        }
+      });
 
-    try {
-      await uploadWithProgressToUrl(url, file, (p) => setWrapProgress(p));
-      await renderDocsTable(); // refresh lists/badges/counts
-    } catch (err) {
-      alert(err.message || 'Upload failed');
-    } finally {
-      clearWrapProgress();
-      if (btnEl) btnEl.classList.remove('is-loading');
-      input.value = '';
+      on(btnDel, 'click', async () => {
+        if (!confirm('Delete this document?')) return;
+        try {
+          // Prefer explicit DELETE URL if given; else build from id
+          const delUrl = `/api/documents/${safeIdToPath(f.id)}`;
+          const r = await Auth.fetch(delUrl, { method: 'DELETE' });
+          if (!r.ok) { const t = await r.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
+          await loadList(); // refresh
+        } catch (e) {
+          console.error(e); alert('Delete failed');
+        }
+      });
+
+      elList.appendChild(row);
     }
-  };
+  }
 
-  input.click();
-}
+  // ---------- API ----------
+  function currentQuery() {
+    const t = (elTypeSelect?.value || '').trim();
+    const y = (elYearSelect?.value || '').trim();
+    currentType = t;
+    currentYear = y;
+    const params = new URLSearchParams();
+    if (t) params.set('type', t);
+    if (y) params.set('year', y);
+    return params.toString() ? `?${params}` : '';
+  }
 
-// POST helper with real upload progress
-function uploadWithProgressToUrl(url, file, onProgress = () => {}) {
-  return new Promise((resolve, reject) => {
+  async function loadList() {
+    const q = currentQuery();
+    const r = await Auth.fetch(`/api/documents${q}`);
+    if (!r.ok) {
+      if (elList) elList.innerHTML = '<div class="text-muted small p-2">Failed to load documents.</div>';
+      return;
+    }
+    const j = await r.json().catch(() => ([]));
+    const items = normalizeListPayload(j);
+    renderList(items);
+  }
+
+  async function uploadFiles(files) {
+    if (!files || !files.length) return;
+
     const fd = new FormData();
-    fd.append('file', file);
+    // The legacy UI sometimes uses `file` and sometimes `files[]`; support both
+    let usedLegacySingleField = false;
+    if (files.length === 1) {
+      fd.append('file', files[0]);
+      usedLegacySingleField = true;
+    }
+    for (const f of files) fd.append('files', f);
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.withCredentials = true; // if you use cookie sessions
-    xhr.setRequestHeader('Authorization', `Bearer ${Auth.getToken()}`);
+    const q = currentQuery();
+    // Progress (best effort): fetch() doesn’t give upload progress; keep the bar animated if present
+    if (elProgressBar) {
+      elProgressBar.style.width = '5%';
+      elProgressBar.ariaValueNow = '5';
+      elProgressBar.classList.add('progress-bar-striped', 'progress-bar-animated');
+    }
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText || '{}'));
-      } else {
-        reject(new Error(`Upload failed (${xhr.status})`));
+    const resp = await Auth.fetch(`/api/documents${q}`, { method: 'POST', body: fd });
+    if (!resp.ok) {
+      const t = await resp.text().catch(()=> '');
+      if (elProgressBar) {
+        elProgressBar.style.width = '0%';
+        elProgressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
       }
-    };
-    xhr.onerror = () => reject(new Error('Network error'));
-    xhr.send(fd);
-  });
-}
+      alert(t || 'Upload failed');
+      return;
+    }
+    const j = await resp.json().catch(()=> ({}));
+    const added = normalizeUploadPayload(j);
 
-// ------------------------------ Utilities --------------------------------
-function statusBadge(latest, overdue) {
-  if (!latest) return '<span class="badge text-bg-secondary">Missing</span>';
-  if (overdue) return '<span class="badge text-bg-warning">Overdue</span>';
-  return '<span class="badge text-bg-success">Up to date</span>';
-}
-function isOverdue(cadence, last) {
-  if (cadence?.adhoc) return false;
-  const now = new Date();
-  if (cadence?.yearlyBy) {
-    const [mm, dd] = cadence.yearlyBy.split('-').map(Number);
-    const due = new Date(now.getFullYear(), mm - 1, dd);
-    return now > due && (!last || last < due);
+    // progress complete
+    if (elProgressBar) {
+      elProgressBar.style.width = '100%';
+      elProgressBar.ariaValueNow = '100';
+      setTimeout(() => {
+        elProgressBar.style.width = '0%';
+        elProgressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+      }, 500);
+    }
+
+    // Close modal safely, avoiding aria-hidden focus issue
+    if (elModal && window.bootstrap) {
+      try {
+        // blur any focused element inside the modal
+        const active = document.activeElement;
+        if (active && elModal.contains(active)) active.blur();
+        const modal = bootstrap.Modal.getOrCreateInstance(elModal);
+        const onHidden = () => {
+          elModal.removeEventListener('hidden.bs.modal', onHidden);
+          // focus back to list after closing
+          try { elList?.focus(); } catch {}
+        };
+        elModal.addEventListener('hidden.bs.modal', onHidden);
+        modal.hide();
+      } catch {}
+    }
+
+    // If the server gave us items, optimistically render them at the top
+    if (added.length) {
+      // Fetch an authoritative list so counters & server-side filters are consistent
+      await loadList();
+    } else {
+      // Even if POST body was weird, still refresh
+      await loadList();
+    }
+
+    // Clear file input value to allow re-upload of same file name
+    if (elFileInput) elFileInput.value = '';
   }
-  if (cadence?.months) {
-    if (!last) return true;
-    const next = new Date(last); next.setMonth(next.getMonth() + cadence.months);
-    return now > next;
+
+  // ---------- Events ----------
+  on(elTypeSelect, 'change', () => loadList());
+  on(elYearSelect, 'change', () => loadList());
+  on(elRefreshBtn, 'click', (e) => { e.preventDefault(); loadList(); });
+
+  if (elUploadForm) {
+    on(elUploadForm, 'submit', async (e) => {
+      e.preventDefault();
+      const files = elFileInput?.files;
+      if (!files || !files.length) { alert('Please choose a file.'); return; }
+      await uploadFiles(files);
+    });
   }
-  if (!last) return true;
-  const next = new Date(last); next.setMonth(next.getMonth() + 12);
-  return now > next;
-}
-function dueLabel(cadence, last) {
-  if (cadence?.adhoc) return 'As needed';
-  const now = new Date();
-  if (cadence?.yearlyBy) {
-    const [mm, dd] = cadence.yearlyBy.split('-').map(Number);
-    const due = new Date(now.getFullYear(), mm - 1, dd);
-    return (now > due && (!last || last < due)) ? `Overdue (was due ${due.toLocaleDateString()})` : `Due by ${due.toLocaleDateString()}`;
+
+  if (elFileInput) {
+    on(elFileInput, 'change', async (e) => {
+      const files = e.target.files;
+      if (!files || !files.length) return;
+      // Some UIs submit on change; support both submit and change flows
+      if (!elUploadForm) await uploadFiles(files);
+    });
   }
-  if (cadence?.months) {
-    if (!last) return 'Overdue (no upload yet)';
-    const next = new Date(last); next.setMonth(next.getMonth() + cadence.months);
-    return (now > next) ? `Overdue (was due ${next.toLocaleDateString()})` : `Due ${next.toLocaleDateString()}`;
-  }
-  if (!last) return 'Overdue (no upload yet)';
-  const next = new Date(last); next.setMonth(next.getMonth() + 12);
-  return (now > next) ? `Overdue (was due ${next.toLocaleDateString()})` : `Due ${next.toLocaleDateString()}`;
-}
-function fmtDateTime(d) { try { return d.toLocaleString(); } catch { return '—'; } }
-function humanSize(bytes) {
-  const b = Number(bytes||0);
-  if (b < 1024) return `${b} B`;
-  const kb = b/1024; if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb/1024; if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  const gb = mb/1024; return `${gb.toFixed(1)} GB`;
-}
-function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function setMsg(t){ const el=document.getElementById('docs-msg'); if(el) el.textContent=t||''; }
-function currentTaxYearStart(d){ const y=d.getFullYear(); const starts=new Date(y,3,6); return d>=starts?y:y-1; }
-function countFiles(typeKey){ return ALL_FILES.filter(f => (f.type||'other')===typeKey).length; }
+
+  // ---------- Init ----------
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      await ensureAuthHelper();
+      await Auth.requireAuth();
+      // Seed filters (if selects have defaults)
+      currentQuery();
+      await loadList();
+    } catch (e) {
+      console.error('[documents] init error', e);
+    }
+  });
+})();
+
