@@ -5,9 +5,23 @@
   let PLANS = [];
   let PLAN_BY_ID = {};
   let PAYMENT_METHODS = [];
+  let INTEGRATIONS = [];
+  let INTEGRATION_CATALOG = [];
+  let ACTIVE_INTEGRATION = null;
+  let SHEET_MODE = 'edit';
 
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+
+  const normaliseKey = (key='') => String(key).toLowerCase();
+  const slugify = (text='') => String(text).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const escapeHtml = (str='') => String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const escapeAttr = (str='') => escapeHtml(str);
 
   const fmtMoney = (n, curr='GBP') => {
     const sym = curr === 'GBP' ? '£' : (curr === 'EUR' ? '€' : '$');
@@ -21,6 +35,30 @@
     return Math.floor(ms / (1000*60*60*24));
   };
   const cap = (s) => String(s || '').slice(0,1).toUpperCase() + String(s || '').slice(1);
+
+  const STATUS_META = {
+    not_connected: {
+      label: 'Not connected',
+      dot: 'status-red',
+      summary: 'Red indicator — integration is not yet configured.'
+    },
+    pending: {
+      label: 'Action required',
+      dot: 'status-amber',
+      summary: 'Amber indicator — needs attention before data can sync.'
+    },
+    error: {
+      label: 'Attention needed',
+      dot: 'status-amber',
+      summary: 'Amber indicator — connection reported an error.'
+    },
+    connected: {
+      label: 'Connected',
+      dot: 'status-green',
+      summary: 'Green indicator — everything is syncing as expected.'
+    }
+  };
+  const STATUS_ORDER = { connected: 0, pending: 1, error: 1, not_connected: 2 };
 
   function setTileGrid(stats) {
     const wrap = $('#stat-tiles');
@@ -70,6 +108,429 @@
       return { text: fmtMoney(couldSave, def.currency), delta: 'if yearly', dir: 'up' };
     } else {
       return { text: '—', delta: null, dir: null };
+    }
+  }
+
+  function normaliseCatalogItem(raw) {
+    return {
+      key: normaliseKey(raw?.key),
+      label: raw?.label || 'Integration',
+      category: raw?.category || 'Data source',
+      description: raw?.description || '',
+      comingSoon: !!raw?.comingSoon,
+      docsUrl: raw?.docsUrl || null,
+      help: raw?.help || null,
+      requiredEnv: Array.isArray(raw?.requiredEnv) ? raw.requiredEnv : [],
+      missingEnv: Array.isArray(raw?.missingEnv) ? raw.missingEnv : [],
+      envReady: raw?.envReady !== false,
+      defaultStatus: raw?.defaultStatus || (raw?.comingSoon ? 'pending' : 'not_connected'),
+      isCatalog: true,
+      metadata: {}
+    };
+  }
+
+  function mergeIntegrations(catalog, userIntegrations) {
+    const map = new Map();
+    for (const item of catalog) {
+      map.set(item.key, {
+        ...item,
+        status: item.defaultStatus || 'not_connected',
+        metadata: {},
+        lastCheckedAt: null
+      });
+    }
+    for (const entry of (userIntegrations || [])) {
+      const key = normaliseKey(entry?.key);
+      if (!key) continue;
+      const existing = map.get(key);
+      if (existing) {
+        map.set(key, {
+          ...existing,
+          status: entry.status || existing.status,
+          metadata: entry.metadata || existing.metadata || {},
+          lastCheckedAt: entry.lastCheckedAt || existing.lastCheckedAt
+        });
+      } else {
+        map.set(key, {
+          key,
+          label: entry.label || cap(key),
+          category: entry.metadata?.category || 'Custom data source',
+          description: entry.metadata?.description || '',
+          comingSoon: false,
+          docsUrl: null,
+          help: null,
+          requiredEnv: [],
+          missingEnv: [],
+          envReady: true,
+          defaultStatus: entry.status || 'not_connected',
+          status: entry.status || 'not_connected',
+          metadata: entry.metadata || {},
+          lastCheckedAt: entry.lastCheckedAt || null,
+          isCatalog: false
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const orderA = STATUS_ORDER[a.status] ?? 9;
+      const orderB = STATUS_ORDER[b.status] ?? 9;
+      if (orderA !== orderB) return orderA - orderB;
+      if (a.comingSoon !== b.comingSoon) return a.comingSoon ? 1 : -1;
+      return (a.label || '').localeCompare(b.label || '');
+    });
+  }
+
+  function updateIntegrationSummary() {
+    const summary = $('#integration-summary');
+    if (!summary) return;
+    if (!INTEGRATIONS.length) {
+      summary.textContent = 'No integrations available yet.';
+      return;
+    }
+    const connected = INTEGRATIONS.filter((i) => i.status === 'connected').length;
+    const pending = INTEGRATIONS.filter((i) => i.status === 'pending' || i.status === 'error').length;
+    let text = connected
+      ? `${connected} integration${connected === 1 ? '' : 's'} connected`
+      : 'No live integrations yet — connect to unlock automations.';
+    if (pending) {
+      text += ` · ${pending} pending action${pending === 1 ? '' : 's'}`;
+    }
+    summary.textContent = text;
+  }
+
+  function renderIntegrations() {
+    const wrap = $('#integration-list');
+    if (!wrap) return;
+    wrap.classList.remove('opacity-50');
+    wrap.innerHTML = '';
+
+    if (!INTEGRATIONS.length) {
+      wrap.innerHTML = '<div class="text-muted small">Integration catalogue is loading…</div>';
+      updateIntegrationSummary();
+      return;
+    }
+
+    for (const integration of INTEGRATIONS) {
+      const statusMeta = STATUS_META[integration.status] || STATUS_META.not_connected;
+      const envMissing = Array.isArray(integration.missingEnv) && integration.missingEnv.length;
+      const card = document.createElement('div');
+      card.className = 'integration-card';
+      card.dataset.key = integration.key;
+      card.dataset.status = integration.status;
+      card.innerHTML = `
+        <div class="integration-card-header">
+          <span class="integration-status-dot ${statusMeta.dot}"></span>
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <h6>${escapeHtml(integration.label)}</h6>
+              ${integration.comingSoon ? '<span class="badge-coming-soon">Coming soon</span>' : ''}
+            </div>
+            <div class="meta">${escapeHtml(integration.category || 'Data source')}</div>
+          </div>
+        </div>
+        <div class="text-muted small">${escapeHtml(integration.description || (integration.comingSoon ? 'This connection is on the way — we will let you know as soon as it is ready.' : 'Connect to stream live financial data into your analytics.'))}</div>
+        ${envMissing ? `<div class="alert alert-warning border border-warning-subtle small mb-0">Set up pending — add missing environment variables (${integration.missingEnv.map((v) => escapeHtml(v)).join(', ')}) before launching the flow.</div>` : ''}
+        <div class="integration-actions">
+          <button class="btn btn-sm btn-primary" data-action="connect">${integration.status === 'connected' ? 'Manage connection' : 'Connect'}</button>
+          <button class="btn btn-sm btn-outline-secondary" data-action="edit">Edit</button>
+          <button class="btn btn-sm btn-link text-danger" data-action="delete">Delete</button>
+        </div>
+        <div class="integration-meta">
+          <span>${statusMeta.label}</span>
+          ${integration.lastCheckedAt ? `<span>Updated ${isoToNice(integration.lastCheckedAt)}</span>` : ''}
+          ${integration.docsUrl ? `<a href="${integration.docsUrl}" target="_blank" rel="noopener">Docs</a>` : ''}
+        </div>
+      `;
+      wrap.appendChild(card);
+    }
+
+    updateIntegrationSummary();
+  }
+
+  function createBlankIntegration() {
+    return {
+      key: '',
+      label: '',
+      category: 'Custom data source',
+      description: '',
+      status: 'not_connected',
+      metadata: {},
+      requiredEnv: [],
+      missingEnv: [],
+      envReady: true,
+      comingSoon: false,
+      docsUrl: null,
+      help: 'Outline how this custom connection should be used so every teammate is aligned.',
+      lastCheckedAt: null,
+      isCatalog: false
+    };
+  }
+
+  function bindIntegrationEvents() {
+    const wrap = $('#integration-list');
+    if (wrap && !wrap.dataset.bound) {
+      wrap.dataset.bound = '1';
+      wrap.addEventListener('click', (event) => {
+        const btn = event.target.closest('[data-action]');
+        if (!btn) return;
+        const card = btn.closest('[data-key]');
+        if (!card) return;
+        const integration = INTEGRATIONS.find((i) => i.key === card.dataset.key);
+        if (!integration) return;
+        const action = btn.dataset.action;
+        if (action === 'delete') {
+          deleteIntegration(integration);
+        } else if (action === 'edit') {
+          openIntegrationSheet(integration, 'edit');
+        } else if (action === 'connect') {
+          openIntegrationSheet(integration, integration.status === 'connected' ? 'manage' : 'connect');
+        }
+      });
+    }
+
+    const sheet = $('#integration-sheet');
+    if (sheet && !sheet.dataset.bound) {
+      sheet.dataset.bound = '1';
+      sheet.addEventListener('click', (ev) => {
+        if (ev.target === sheet) closeIntegrationSheet();
+      });
+      sheet.querySelectorAll('[data-close-sheet]').forEach((btn) => btn.addEventListener('click', closeIntegrationSheet));
+    }
+
+    const addBtn = $('#integration-add');
+    if (addBtn && !addBtn.dataset.bound) {
+      addBtn.dataset.bound = '1';
+      addBtn.addEventListener('click', () => {
+        openIntegrationSheet(createBlankIntegration(), 'create');
+      });
+    }
+
+    if (!document.body.dataset.integrationEsc) {
+      document.body.dataset.integrationEsc = '1';
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') closeIntegrationSheet();
+      });
+    }
+  }
+
+  function openIntegrationSheet(integration, mode='edit') {
+    const sheet = $('#integration-sheet');
+    if (!sheet) return;
+    ACTIVE_INTEGRATION = { ...integration, metadata: { ...(integration.metadata || {}) } };
+    SHEET_MODE = mode;
+
+    sheet.hidden = false;
+    requestAnimationFrame(() => sheet.classList.add('open'));
+
+    const meta = STATUS_META[integration.status] || STATUS_META.not_connected;
+    const title = $('#intg-sheet-title');
+    if (title) title.textContent = integration.label || (mode === 'create' ? 'Create integration' : 'Integration');
+    const subtitle = $('#intg-sheet-sub');
+    if (subtitle) subtitle.textContent = `${meta.label}${integration.category ? ` · ${integration.category}` : ''}`;
+
+    const sections = [];
+    if (integration.comingSoon && mode !== 'create') {
+      sections.push(`
+        <div class="alert alert-info border border-info-subtle">
+          Set up pending — HMRC requires production approval before we can finalise this connection. We will guide you through the activation as soon as access is granted.
+        </div>
+      `);
+    }
+    if (mode === 'create') {
+      sections.push(`
+        <div>
+          <label class="form-label">Display name</label>
+          <input type="text" class="form-control" id="intg-field-name" placeholder="e.g. Barclays Business" value="${escapeAttr(integration.label)}" />
+        </div>
+      `);
+      sections.push(`
+        <div>
+          <label class="form-label">Description</label>
+          <textarea class="form-control" id="intg-field-description" rows="2" placeholder="How will this data source be used?">${escapeHtml(integration.description || '')}</textarea>
+        </div>
+      `);
+    } else {
+      sections.push(`
+        <div>
+          <div class="small text-muted mb-1">About</div>
+          <p class="mb-0">${escapeHtml(integration.description || (integration.comingSoon ? 'This connection is being finalised. We will notify you when HMRC approves the connection.' : 'Launch the connection flow to pull live insights into Phloat.'))}</p>
+        </div>
+      `);
+    }
+
+    const options = Object.entries(STATUS_META)
+      .map(([value, m]) => `<option value="${value}" ${value === integration.status ? 'selected' : ''}>${m.label}</option>`)
+      .join('');
+    sections.push(`
+      <div>
+        <label class="form-label">Status</label>
+        <select class="form-select" id="intg-field-status" ${integration.comingSoon ? 'disabled' : ''}>
+          ${options}
+        </select>
+        <div class="form-text">${escapeHtml(meta.summary)}</div>
+      </div>
+    `);
+
+    const envList = Array.isArray(integration.requiredEnv) ? integration.requiredEnv : [];
+    if (envList.length) {
+      const missing = Array.isArray(integration.missingEnv) ? integration.missingEnv : [];
+      const missingSet = new Set(missing.map((m) => String(m).toUpperCase()));
+      const envRows = envList.map((name) => {
+        const missingEntry = missingSet.has(String(name).toUpperCase());
+        return `<li>${escapeHtml(name)} ${missingEntry ? '<span class="text-danger ms-1">Missing</span>' : '<span class="text-success ms-1">Detected</span>'}</li>`;
+      }).join('');
+      const alertClass = missing.length ? 'alert alert-warning border border-warning-subtle' : 'alert alert-success border border-success-subtle';
+      const heading = missing.length ? 'Set up pending — add these environment variables in Render:' : 'Environment variables detected:';
+      sections.push(`
+        <div class="${alertClass}">
+          <strong>${heading}</strong>
+          <ul class="env-list mt-2">${envRows}</ul>
+        </div>
+      `);
+    }
+
+    sections.push(`
+      <div>
+        <label class="form-label">Team notes</label>
+        <textarea class="form-control" id="intg-field-notes" rows="3" placeholder="Credentials, review cadence, anything the team should know.">${escapeHtml(integration.metadata?.notes || '')}</textarea>
+      </div>
+    `);
+
+    const body = $('#intg-sheet-body');
+    if (body) body.innerHTML = sections.join('');
+
+    const foot = $('#intg-sheet-footnote');
+    if (foot) {
+      const help = integration.help ? escapeHtml(integration.help) : '';
+      const docs = integration.docsUrl ? `<a href="${integration.docsUrl}" target="_blank" rel="noopener">Provider documentation</a>` : '';
+      foot.innerHTML = [help, docs].filter(Boolean).join(' · ');
+    }
+
+    const saveBtn = $('#intg-sheet-save');
+    if (saveBtn) {
+      if (integration.comingSoon) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Coming soon';
+        saveBtn.onclick = null;
+      } else {
+        saveBtn.disabled = false;
+        saveBtn.textContent = mode === 'create' ? 'Create integration' : 'Save changes';
+        saveBtn.onclick = handleIntegrationSave;
+      }
+    }
+  }
+
+  function closeIntegrationSheet() {
+    const sheet = $('#integration-sheet');
+    if (!sheet || sheet.hidden) return;
+    sheet.classList.remove('open');
+    const saveBtn = $('#intg-sheet-save');
+    if (saveBtn) saveBtn.onclick = null;
+    setTimeout(() => { sheet.hidden = true; }, 220);
+    ACTIVE_INTEGRATION = null;
+    SHEET_MODE = 'edit';
+  }
+
+  async function handleIntegrationSave() {
+    if (!ACTIVE_INTEGRATION) return;
+    const mode = SHEET_MODE;
+    const nameEl = $('#intg-field-name');
+    const descEl = $('#intg-field-description');
+    const statusEl = $('#intg-field-status');
+    const notesEl = $('#intg-field-notes');
+
+    let label = ACTIVE_INTEGRATION.label || '';
+    if (mode === 'create') label = (nameEl?.value || '').trim();
+    else if (nameEl) label = nameEl.value.trim() || label;
+    if (!label) {
+      alert('Please provide a name for this integration.');
+      return;
+    }
+
+    const status = statusEl ? statusEl.value : (ACTIVE_INTEGRATION.status || 'not_connected');
+    const metadata = { ...(ACTIVE_INTEGRATION.metadata || {}) };
+    if (descEl) metadata.description = descEl.value.trim();
+    if (notesEl) metadata.notes = notesEl.value.trim();
+
+    let key = ACTIVE_INTEGRATION.key;
+    if (!key || mode === 'create') {
+      key = slugify(label) || `integration-${Date.now()}`;
+    }
+
+    const saveBtn = $('#intg-sheet-save');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = mode === 'create' ? 'Creating…' : 'Saving…';
+    }
+
+    try {
+      await persistIntegration(key, status, label, metadata);
+      await loadIntegrations();
+      closeIntegrationSheet();
+    } catch (err) {
+      console.error('Integration save failed', err);
+      alert(err.message || 'Failed to save integration.');
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = mode === 'create' ? 'Create integration' : 'Save changes';
+      }
+    }
+  }
+
+  async function persistIntegration(key, status, label, metadata) {
+    const res = await Auth.fetch(`/api/integrations/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, label, metadata })
+    });
+    if (!res.ok) {
+      let message = 'Unable to save integration.';
+      try {
+        const err = await res.json();
+        if (err?.error) message = err.error;
+      } catch {
+        try {
+          const txt = await res.text();
+          if (txt) message = txt;
+        } catch {}
+      }
+      throw new Error(message || 'Unable to save integration.');
+    }
+    return res.json();
+  }
+
+  async function deleteIntegration(integration) {
+    if (!integration?.key) return;
+    const confirmMsg = integration.status === 'connected'
+      ? `Disconnect ${integration.label}?`
+      : `Remove ${integration.label}?`;
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      const res = await Auth.fetch(`/api/integrations/${encodeURIComponent(integration.key)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Unable to remove integration.');
+      await loadIntegrations();
+    } catch (err) {
+      console.error('Integration delete failed', err);
+      alert(err.message || 'Failed to delete integration.');
+    }
+  }
+
+  async function loadIntegrations(prefetched=null) {
+    try {
+      let payload = prefetched;
+      if (!payload) {
+        const res = await Auth.fetch('/api/integrations?t=' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        payload = await res.json();
+      }
+      INTEGRATION_CATALOG = (payload.catalog || []).map(normaliseCatalogItem);
+      INTEGRATIONS = mergeIntegrations(INTEGRATION_CATALOG, payload.integrations || []);
+      renderIntegrations();
+    } catch (err) {
+      console.error('Failed to load integrations', err);
+      const summary = $('#integration-summary');
+      if (summary) summary.textContent = 'Unable to load integrations right now.';
+      $('#integration-list')?.classList.add('opacity-50');
     }
   }
 
@@ -259,13 +720,15 @@
     try {
       await Auth.requireAuth();
       Auth.setBannerTitle('Profile');
+      bindIntegrationEvents();
 
       // parallel fetches
-      const [meRes, plansRes, subRes, pmRes] = await Promise.all([
+      const [meRes, plansRes, subRes, pmRes, integrationsRes] = await Promise.all([
         Auth.fetch('/api/user/me'),
         Auth.fetch('/api/billing/plans?t=' + Date.now()),
         Auth.fetch('/api/billing/subscription?t=' + Date.now()),
         Auth.fetch('/api/billing/payment-methods?t=' + Date.now()),
+        Auth.fetch('/api/integrations?t=' + Date.now())
       ]);
 
       USER = meRes.ok ? await meRes.json() : null;
@@ -275,6 +738,9 @@
       SUBSCRIPTION = subRes.ok ? await subRes.json() : null;
       const pmPayload = pmRes.ok ? await pmRes.json() : { methods: [] };
       PAYMENT_METHODS = pmPayload.methods || [];
+
+      const integrationsPayload = integrationsRes.ok ? await integrationsRes.json() : { catalog: [], integrations: [] };
+      await loadIntegrations(integrationsPayload);
 
       renderProfile();
       renderBilling();

@@ -63,10 +63,12 @@ router.get('/dashboard', auth, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const range = parseRange(req.query);
+  const integrations = Array.isArray(user.integrations) ? user.integrations : [];
+  const hasData = integrations.some((i) => i.status === 'connected');
   const payload = {
     range,
     preferences: user.preferences || {},
-    hasData: false,
+    hasData,
     accounting: {
       metrics: [],
       allowances: [],

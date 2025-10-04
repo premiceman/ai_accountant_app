@@ -114,6 +114,49 @@
 
     /* subtle section separators inside cards */
     .subtle-hr{ border:0; height:1px; background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.02), rgba(0,0,0,.06)); margin:.75rem 0; }
+
+    /* integrations */
+    .integration-list{ display:flex; flex-direction:column; gap:16px; }
+    .integration-card{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      border:1px solid rgba(0,0,0,.08);
+      border-radius:16px;
+      padding:16px;
+      background:rgba(255,255,255,0.96);
+      box-shadow:0 10px 24px rgba(15,23,42,0.08);
+      transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    .integration-card:hover{ transform:translateY(-2px); box-shadow:0 16px 32px rgba(15,23,42,0.12); }
+    .integration-card[data-status="connected"]{ border-color:rgba(22,163,74,.25); box-shadow:0 14px 32px rgba(22,163,74,.12); }
+    .integration-card-header{ display:flex; gap:12px; align-items:flex-start; }
+    .integration-status-dot{ width:14px; height:14px; border-radius:999px; margin-top:4px; flex-shrink:0; box-shadow:0 0 0 6px rgba(148,163,184,.18); }
+    .integration-status-dot.status-green{ background:#16a34a; box-shadow:0 0 0 6px rgba(22,163,74,.18); }
+    .integration-status-dot.status-amber{ background:#f59e0b; box-shadow:0 0 0 6px rgba(245,158,11,.18); }
+    .integration-status-dot.status-red{ background:#dc2626; box-shadow:0 0 0 6px rgba(220,38,38,.18); }
+    .integration-card h6{ margin:0; font-weight:600; }
+    .integration-card .meta{ font-size:.78rem; color:var(--muted); }
+    .integration-actions{ display:flex; flex-wrap:wrap; gap:8px; }
+    .integration-actions .btn{ border-radius:999px; padding:.35rem .85rem; }
+    .integration-actions .btn-link{ padding:0; }
+    .integration-meta{ font-size:.78rem; color:var(--muted); display:flex; flex-wrap:wrap; gap:1rem; }
+    .integration-badge{ font-size:.72rem; border-radius:999px; padding:.1rem .5rem; background:rgba(99,102,241,.1); color:#4338ca; }
+
+    .integration-sheet{ position:fixed; inset:0; display:flex; align-items:flex-end; justify-content:center; padding:24px; background:rgba(15,23,42,.45); backdrop-filter: blur(6px); z-index:1080; opacity:0; visibility:hidden; transition:opacity .2s ease; }
+    .integration-sheet.open{ opacity:1; visibility:visible; }
+    .integration-sheet[hidden]{ display:none; }
+    .integration-sheet .sheet-panel{ width:min(680px, 96%); background:var(--tile-bg); border-radius:22px 22px 16px 16px; box-shadow:0 22px 44px rgba(15,23,42,.35); transform:translateY(32px); transition:transform .25s ease; padding:24px 28px; max-height:90vh; overflow-y:auto; }
+    .integration-sheet.open .sheet-panel{ transform:translateY(0); }
+    .sheet-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+    .sheet-body{ margin-top:1.25rem; display:flex; flex-direction:column; gap:1rem; font-size:.95rem; }
+    .sheet-body .alert{ margin-bottom:0; }
+    .sheet-footer{ margin-top:1.5rem; display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .sheet-footer .btn{ min-width:120px; }
+    .sheet-footer-note{ font-size:.78rem; color:var(--muted); }
+    .env-list{ display:flex; flex-direction:column; gap:.35rem; padding-left:1.1rem; margin:0; }
+    .env-list li{ font-size:.85rem; }
+    .badge-coming-soon{ background:rgba(148,163,184,.18); color:#475569; border-radius:999px; padding:.1rem .55rem; font-size:.72rem; }
   </style>
 </head>
 <body>
@@ -202,6 +245,21 @@
               </div>
             </div>
           </div>
+
+          <!-- Integrations -->
+          <div class="card card-elev mt-3" id="integrations">
+            <div class="card-body">
+              <div class="section-hd mb-2">
+                <div>
+                  <h5 class="mb-0">Integrations</h5>
+                  <div class="muted small">Control the live data sources that power your analytics.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-primary" id="integration-add" type="button">Add custom</button>
+              </div>
+              <div id="integration-summary" class="small text-muted mb-3">Loading integration catalogue…</div>
+              <div id="integration-list" class="integration-list"></div>
+            </div>
+          </div>
         </div>
 
         <!-- Right: Billing -->
@@ -267,6 +325,26 @@
   <script>Auth.enforce();</script>
   <script src="/js/profile.js"></script>
   <script src="/js/mobile-sidebar.js"></script>
+
+  <div class="integration-sheet" id="integration-sheet" hidden>
+    <div class="sheet-panel">
+      <div class="sheet-header">
+        <div>
+          <h5 class="mb-1" id="intg-sheet-title">Integration</h5>
+          <div class="small text-muted" id="intg-sheet-sub">Manage connection</div>
+        </div>
+        <button class="btn btn-light btn-sm" type="button" data-close-sheet>Close</button>
+      </div>
+      <div class="sheet-body" id="intg-sheet-body"></div>
+      <div class="sheet-footer">
+        <div class="sheet-footer-note" id="intg-sheet-footnote"></div>
+        <div class="d-flex gap-2 ms-auto">
+          <button class="btn btn-outline-secondary" type="button" data-close-sheet>Cancel</button>
+          <button class="btn btn-primary" type="button" id="intg-sheet-save">Save changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>
