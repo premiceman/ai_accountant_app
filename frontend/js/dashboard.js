@@ -160,8 +160,6 @@
     renderSuggestions(data);
     renderAccounting(data);
     renderFinancialPosture(data);
-    renderSalaryNavigator(data);
-    renderWealthLab(data);
   }
 
   function updateRangeLabel(range) {
@@ -285,76 +283,6 @@
     }
 
     setText('fp-perf-ytd', fp.investments?.ytd != null ? `YTD ${Number(fp.investments.ytd).toFixed(1)}%` : 'YTD —%');
-  }
-
-  function renderSalaryNavigator(data) {
-    const nav = data.salaryNavigator || {};
-    setText('salary-current', money(nav.currentSalary));
-    setText('salary-target', money(nav.targetSalary));
-    const slider = byId('salary-target-slider');
-    if (slider) {
-      slider.value = Math.min(Math.max(Number(nav.targetSalary || nav.currentSalary || 0), slider.min), slider.max);
-      slider.addEventListener('change', () => {
-        const newVal = Number(slider.value);
-        setText('salary-target', money(newVal));
-        const alert = document.createElement('div');
-        alert.className = 'alert alert-info mt-2';
-        alert.textContent = 'Save pending — connect your HR integration to store this target automatically.';
-        slider.closest('.card-body')?.appendChild(alert);
-      }, { once: true });
-    }
-
-    setText('salary-next-review', nav.nextReviewAt ? new Date(nav.nextReviewAt).toLocaleDateString() : 'Set review date');
-    const pct = Math.min(100, Math.max(0, Number(nav.progress || 0)));
-    const bar = byId('salary-review-progress');
-    if (bar) {
-      bar.style.width = `${pct}%`;
-      bar.textContent = `${pct}%`;
-    }
-
-    const list = byId('salary-achievements');
-    if (list) {
-      list.innerHTML = '';
-      (nav.achievements || []).forEach((ach) => {
-        const li = document.createElement('li');
-        li.className = 'list-group-item';
-        li.innerHTML = `<div class="fw-semibold">${escapeHtml(ach.title || 'Achievement')}</div><div class="small text-muted">${escapeHtml(ach.detail || '')}</div>`;
-        list.appendChild(li);
-      });
-      if (!nav.achievements?.length) {
-        list.innerHTML = '<li class="list-group-item text-muted">Add SMART objectives to build your promotion dossier.</li>';
-      }
-    }
-  }
-
-  function renderWealthLab(data) {
-    const wealth = data.wealthPlan || {};
-    renderList('wealth-assets', wealth.assets, 'Add your assets to calculate net worth.');
-    renderList('wealth-liabilities', wealth.liabilities, 'Record liabilities to build a payoff plan.');
-    const ctxValues = [wealth.summary?.strength || 0, 100 - (wealth.summary?.strength || 0)];
-    renderDonut('wealth-strength-chart', ctxValues, ['Strength', 'Headroom']);
-    setText('wealth-strategy', wealth.strategy?.summary || 'Connect your banks and upload statements to generate a tailored strategy.');
-  }
-
-  function renderList(id, items, emptyMsg) {
-    const el = byId(id);
-    if (!el) return;
-    el.innerHTML = '';
-    if (!Array.isArray(items) || !items.length) {
-      el.innerHTML = `<li class="list-group-item text-muted">${escapeHtml(emptyMsg)}</li>`;
-      return;
-    }
-    items.forEach((item) => {
-      const li = document.createElement('li');
-      li.className = 'list-group-item d-flex justify-content-between align-items-start gap-2';
-      li.innerHTML = `
-        <div>
-          <div class="fw-semibold">${escapeHtml(item.label || 'Item')}</div>
-          <div class="small text-muted">${escapeHtml(item.note || '')}</div>
-        </div>
-        <div class="fw-semibold">${money(item.value)}</div>`;
-      el.appendChild(li);
-    });
   }
 
   // ----- Charts -----

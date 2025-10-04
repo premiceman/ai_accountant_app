@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script src="/js/head-include.js"></script>
+  <title>Wealth Strategy Lab — Phloat.io</title>
+</head>
+<body>
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
+  <main class="container py-4">
+    <header class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+      <div>
+        <h1 class="page-title" data-page-title data-lock-title>Wealth strategy lab</h1>
+        <p class="text-muted mb-0">Model assets, liabilities and goals to engineer a wealth-building roadmap.</p>
+      </div>
+      <div class="text-end text-muted small">
+        <div>Financial strength score: <span id="wealth-strength-label">—</span></div>
+        <div>Plan refreshed: <span id="wealth-updated-label">—</span></div>
+      </div>
+    </header>
+
+    <section class="mb-4">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <div class="row g-4 align-items-center">
+            <div class="col-12 col-lg-4">
+              <div class="text-muted small">Current net worth</div>
+              <div class="display-4 fw-semibold" id="wealth-networth">£—</div>
+              <div class="small text-muted" id="wealth-networth-detail">Add assets and liabilities to calculate.</div>
+              <div class="mt-3">
+                <label class="form-label" for="wealth-monthly">Monthly wealth contribution (£)</label>
+                <input type="number" class="form-control" id="wealth-monthly" min="0" step="50" placeholder="750">
+              </div>
+            </div>
+            <div class="col-12 col-lg-4">
+              <canvas id="wealth-allocation-chart" height="180"></canvas>
+              <div class="small text-muted text-center mt-2">Assets vs liabilities</div>
+            </div>
+            <div class="col-12 col-lg-4">
+              <div class="card shadow-sm border">
+                <div class="card-body">
+                  <h5 class="card-title mb-1">Savings runway</h5>
+                  <div class="display-6" id="wealth-runway">— months</div>
+                  <div class="small text-muted">Based on contributions and emergency reserve guidance.</div>
+                  <button class="btn btn-sm btn-outline-primary mt-3" id="wealth-save-monthly">Save contribution</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-4">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Assets</h2>
+              <p class="text-muted small mb-0">Include property, pensions, savings, investments and alternative assets.</p>
+            </div>
+            <button class="btn btn-primary" id="wealth-add-asset"><i class="bi bi-plus-lg me-2"></i>Add asset</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table align-middle mb-0" id="wealth-assets-table">
+              <thead class="table-light"><tr><th>Name</th><th class="text-end">Value (£)</th><th class="text-end">Yield</th><th class="text-end">Actions</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="alert alert-light border mt-3 d-none" id="wealth-assets-empty">No assets added yet. Connect accounts or add manually.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-4">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Liabilities</h2>
+              <p class="text-muted small mb-0">Capture mortgages, loans and credit lines with interest to power debt sequencing.</p>
+            </div>
+            <button class="btn btn-outline-primary" id="wealth-add-liability"><i class="bi bi-plus-lg me-2"></i>Add liability</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table align-middle mb-0" id="wealth-liabilities-table">
+              <thead class="table-light"><tr><th>Name</th><th class="text-end">Balance (£)</th><th class="text-end">Rate</th><th class="text-end">Status</th><th class="text-end">Actions</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="alert alert-light border mt-3 d-none" id="wealth-liabilities-empty">No liabilities logged. Add mortgages, loans or credit card balances.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-4">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Goals</h2>
+              <p class="text-muted small mb-0">Define wealth objectives with target timelines and funding strategies.</p>
+            </div>
+            <button class="btn btn-outline-success" id="wealth-add-goal"><i class="bi bi-plus-lg me-2"></i>Add goal</button>
+          </div>
+          <div class="row g-3" id="wealth-goals"></div>
+          <div class="alert alert-light border mt-3 d-none" id="wealth-goals-empty">Set your first goal to begin receiving AI-powered strategies.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-5">
+      <div class="card shadow-sm border-0">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Strategy engine</h2>
+              <p class="text-muted small mb-0">Optimised debt clearance and investment roadmap based on your data.</p>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-outline-secondary" id="wealth-refresh-strategy"><i class="bi bi-cpu me-2"></i>Rebuild strategy</button>
+              <button class="btn btn-outline-dark" id="wealth-export"><i class="bi bi-filetype-pdf me-2"></i>Export plan</button>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-lg-6">
+              <h5 class="mb-3">Priority timeline</h5>
+              <ol class="timeline" id="wealth-timeline"></ol>
+            </div>
+            <div class="col-12 col-lg-6">
+              <h5 class="mb-3">Projected milestones</h5>
+              <ul class="list-group" id="wealth-milestones"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modals -->
+  <div class="modal fade" id="modal-asset" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Asset</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="form-asset">
+          <div class="modal-body row g-3">
+            <div class="col-12">
+              <label class="form-label" for="asset-name">Name</label>
+              <input type="text" class="form-control" id="asset-name" required placeholder="Stocks & Shares ISA">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="asset-value">Current value (£)</label>
+              <input type="number" class="form-control" id="asset-value" min="0" step="100" required>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="asset-yield">Annual yield (%)</label>
+              <input type="number" class="form-control" id="asset-yield" min="0" step="0.1" placeholder="4.5">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="asset-category">Category</label>
+              <select id="asset-category" class="form-select">
+                <option value="cash">Cash & savings</option>
+                <option value="investments">Investments</option>
+                <option value="property">Property</option>
+                <option value="pension">Pension</option>
+                <option value="business">Business</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="asset-notes">Notes</label>
+              <textarea id="asset-notes" class="form-control" rows="2" placeholder="Provider, account number or context"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save asset</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="modal-liability" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Liability</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="form-liability">
+          <div class="modal-body row g-3">
+            <div class="col-12">
+              <label class="form-label" for="liability-name">Name</label>
+              <input type="text" class="form-control" id="liability-name" required placeholder="Mortgage">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="liability-balance">Balance (£)</label>
+              <input type="number" class="form-control" id="liability-balance" min="0" step="100" required>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="liability-rate">Interest rate (%)</label>
+              <input type="number" class="form-control" id="liability-rate" min="0" step="0.1" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="liability-minimum">Minimum payment (£/month)</label>
+              <input type="number" class="form-control" id="liability-minimum" min="0" step="10" placeholder="650">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="liability-notes">Notes</label>
+              <textarea id="liability-notes" class="form-control" rows="2" placeholder="Fix expiry, lender, etc"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save liability</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="modal-goal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Goal</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="form-goal">
+          <div class="modal-body row g-3">
+            <div class="col-12">
+              <label class="form-label" for="goal-name">Goal title</label>
+              <input type="text" class="form-control" id="goal-name" required placeholder="House deposit">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="goal-target">Target amount (£)</label>
+              <input type="number" class="form-control" id="goal-target" min="0" step="100" required>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="goal-date">Target date</label>
+              <input type="date" class="form-control" id="goal-date" required>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="goal-notes">Notes</label>
+              <textarea id="goal-notes" class="form-control" rows="2" placeholder="Reason, assumptions or dependencies"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save goal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>Auth.enforce();</script>
+  <script src="/js/nav.js"></script>
+  <script src="/js/wealth-lab.js"></script>
+  <script src="/js/mobile-sidebar.js"></script>
+</body>
+</html>

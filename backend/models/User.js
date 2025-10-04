@@ -19,17 +19,40 @@ const SalaryNavigatorSchema = new mongoose.Schema({
   targetSalary:      { type: Number, default: null },
   currentSalary:     { type: Number, default: null },
   nextReviewAt:      { type: Date, default: null },
+  package:{
+    base:       { type: Number, default: 0 },
+    bonus:      { type: Number, default: 0 },
+    commission: { type: Number, default: 0 },
+    equity:     { type: Number, default: 0 },
+    benefits:   { type: Number, default: 0 },
+    other:      { type: Number, default: 0 },
+    notes:      { type: String, default: '' }
+  },
   contractFileId:    { type: mongoose.Schema.Types.ObjectId, ref: 'VaultFile', default: null },
+  contractFile: {
+    id:          { type: String, default: null },
+    name:        { type: String, default: null },
+    viewUrl:     { type: String, default: null },
+    downloadUrl: { type: String, default: null },
+    collectionId:{ type: String, default: null },
+    linkedAt:    { type: Date, default: null }
+  },
   benefits:          { type: mongoose.Schema.Types.Mixed, default: {} },
   achievements:      { type: [mongoose.Schema.Types.Mixed], default: [] },
   promotionCriteria: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  benchmarks:        { type: [mongoose.Schema.Types.Mixed], default: [] },
+  taxSummary:        { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { _id: false });
 
 const WealthPlanSchema = new mongoose.Schema({
   goals:        { type: [mongoose.Schema.Types.Mixed], default: [] },
   assets:       { type: [mongoose.Schema.Types.Mixed], default: [] },
   liabilities:  { type: [mongoose.Schema.Types.Mixed], default: [] },
+  contributions:{
+    monthly: { type: Number, default: 0 }
+  },
   strategy:     { type: mongoose.Schema.Types.Mixed, default: {} },
+  summary:      { type: mongoose.Schema.Types.Mixed, default: {} },
   lastComputed: { type: Date, default: null },
 }, { _id: false });
 
