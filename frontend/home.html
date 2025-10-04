@@ -275,120 +275,43 @@
       </div>
     </section>
 
-    <section class="mb-4" data-required-tier="premium" id="salary-sense">
-      <div class="card shadow-sm border-0">
-        <div class="card-body">
-          <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-            <div>
-              <h2 class="h4 mb-1">Compensation navigator</h2>
-              <p class="text-muted small mb-0">Upload contracts or map packages to see when to negotiate, benchmark roles and prepare evidence.</p>
-            </div>
-            <button class="btn btn-primary" id="salary-upload-contract">Upload contract</button>
-          </div>
-          <div class="row g-3">
-            <div class="col-12 col-xl-4">
-              <div class="card h-100 shadow-sm border">
-                <div class="card-body">
-                  <div class="text-muted small">Current salary</div>
-                  <div class="display-6" id="salary-current">£—</div>
-                  <div class="text-muted small">Including benefits</div>
-                  <hr>
-                  <div class="text-muted small">Target salary</div>
-                  <div class="h4" id="salary-target">£—</div>
-                  <input type="range" class="form-range" id="salary-target-slider" min="0" max="250000" step="1000">
+    <section class="mb-5">
+      <div class="row g-3">
+        <div class="col-12 col-lg-6">
+          <div class="card shadow-sm border-0 h-100 gradient-card gradient-card--comp">
+            <div class="card-body d-flex flex-column">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="badge rounded-pill text-bg-primary"><i class="bi bi-award"></i></div>
+                <div>
+                  <h3 class="h5 mb-0">Compensation navigator</h3>
+                  <p class="text-muted small mb-0">Plan pay conversations, benchmark roles and evidence your next promotion.</p>
                 </div>
               </div>
-            </div>
-            <div class="col-12 col-xl-4">
-              <div class="card h-100 shadow-sm border">
-                <div class="card-body">
-                  <h5 class="card-title">Next review</h5>
-                  <div id="salary-next-review" class="display-6">—</div>
-                  <p class="text-muted small">We suggest discussing remuneration when this progress bar reaches 100%.</p>
-                  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
-                    <div class="progress-bar" id="salary-review-progress" style="width:0%">0%</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-xl-4">
-              <div class="card h-100 shadow-sm border">
-                <div class="card-body">
-                  <h5 class="card-title">SMART achievements</h5>
-                  <ul class="list-group list-group-flush" id="salary-achievements"></ul>
-                  <button class="btn btn-sm btn-outline-primary mt-3" id="salary-add-achievement">Add achievement</button>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="alert alert-info d-flex align-items-center gap-2 mt-3" id="salary-market-insight">
-            <i class="bi bi-lightbulb"></i>
-            <div>
-              <strong>Market check pending</strong>
-              <div class="small">We scan UK job boards to benchmark comparable roles. Set up integrations to unlock automated salary intelligence.</div>
-            </div>
-          </div>
-          <div class="text-end mt-3">
-            <button class="btn btn-outline-secondary" id="salary-export">Export PDF dossier</button>
-          </div>
-          <div class="locked-overlay d-none" data-tier-lock>
-            <div class="locked-overlay__content">
-              <h3 class="h5 mb-2">Premium feature</h3>
-              <p class="mb-3">Unlock dynamic salary benchmarking, SMART evidence tracking and exportable promotion packs.</p>
-              <a href="/billing.html" class="btn btn-primary">View plans</a>
+              <ul class="list-unstyled small text-muted flex-grow-1">
+                <li class="mb-1"><i class="bi bi-check-circle text-success me-2"></i>SMART achievement tracking</li>
+                <li class="mb-1"><i class="bi bi-check-circle text-success me-2"></i>Salary benchmarking &amp; review timeline</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Exportable PDF dossier</li>
+              </ul>
+              <a class="btn btn-primary w-100 mt-3" href="/compensation.html">Launch compensation workspace</a>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section class="mb-5" data-required-tier="premium" id="wealth-lab">
-      <div class="card shadow-sm border-0">
-        <div class="card-body">
-          <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
-            <div>
-              <h2 class="h4 mb-1">Wealth strategy lab</h2>
-              <p class="text-muted small mb-0">Aggregate every asset and liability, then generate an AI-guided roadmap towards your goals.</p>
-            </div>
-            <button class="btn btn-primary" id="wealth-add-goal">Add goal</button>
-          </div>
-          <div class="row g-3">
-            <div class="col-12 col-lg-4">
-              <div class="card h-100 border shadow-sm">
-                <div class="card-body">
-                  <h5 class="card-title">Assets</h5>
-                  <ul class="list-group list-group-flush" id="wealth-assets"></ul>
-                  <button class="btn btn-sm btn-outline-primary mt-3" id="wealth-add-asset">Add asset</button>
+        <div class="col-12 col-lg-6">
+          <div class="card shadow-sm border-0 h-100 gradient-card gradient-card--wealth">
+            <div class="card-body d-flex flex-column">
+              <div class="d-flex align-items-center gap-3 mb-3">
+                <div class="badge rounded-pill text-bg-success"><i class="bi bi-gem"></i></div>
+                <div>
+                  <h3 class="h5 mb-0">Wealth strategy lab</h3>
+                  <p class="text-muted small mb-0">Model assets, liabilities and cashflow to build an actionable wealth roadmap.</p>
                 </div>
               </div>
-            </div>
-            <div class="col-12 col-lg-4">
-              <div class="card h-100 border shadow-sm">
-                <div class="card-body">
-                  <h5 class="card-title">Liabilities</h5>
-                  <ul class="list-group list-group-flush" id="wealth-liabilities"></ul>
-                  <button class="btn btn-sm btn-outline-primary mt-3" id="wealth-add-liability">Add liability</button>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-lg-4">
-              <div class="card h-100 border shadow-sm">
-                <div class="card-body">
-                  <h5 class="card-title">Strategy engine</h5>
-                  <div class="text-muted small" id="wealth-strategy">Connect your accounts to generate a strategy that clears liabilities and builds assets.</div>
-                  <div class="mt-3">
-                    <canvas id="wealth-strength-chart" height="160"></canvas>
-                  </div>
-                  <div class="text-muted small mt-2">Financial strength score powered by liabilities vs assets.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="locked-overlay d-none" data-tier-lock>
-            <div class="locked-overlay__content">
-              <h3 class="h5 mb-2">Premium feature</h3>
-              <p class="mb-3">Automate debt clearance plans, savings schedules and growth strategies with Phloat.io Premium.</p>
-              <a class="btn btn-primary" href="/billing.html">Upgrade plan</a>
+              <ul class="list-unstyled small text-muted flex-grow-1">
+                <li class="mb-1"><i class="bi bi-check-circle text-success me-2"></i>Asset &amp; liability playbooks</li>
+                <li class="mb-1"><i class="bi bi-check-circle text-success me-2"></i>Debt clearance sequencing &amp; savings targets</li>
+                <li><i class="bi bi-check-circle text-success me-2"></i>Goal-driven projections and exports</li>
+              </ul>
+              <a class="btn btn-success w-100 mt-3" href="/wealth-lab.html">Open wealth lab</a>
             </div>
           </div>
         </div>
