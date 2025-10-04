@@ -1,16 +1,26 @@
-<nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="home.html">AI Accountant</a>
-    <div class="collapse navbar-collapse">
+<nav class="navbar navbar-expand-lg bg-light border-bottom">
+  <div class="container">
+    <a class="navbar-brand" href="./home.html">AI Accountant</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbars" aria-controls="navbars" aria-expanded="false">
+      <span class="navbar-toggler-icon">☰</span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbars">
       <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <li class="nav-item">
-          <a class="nav-link active" aria-current="page" href="home.html">Home</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link" href="profile.html">Profile</a>
-        </li>
+        <li class="nav-item"><a class="nav-link" href="./home.html">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link" href="./documents.html">Documents</a></li>
+        <li class="nav-item"><a class="nav-link" href="./profile.html">Profile</a></li>
+        <li class="nav-item"><a class="nav-link" href="./billing.html">Billing</a></li>
       </ul>
-      <button class="btn btn-outline-danger" onclick="logout()">Sign Out</button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm" id="nav-signout">Sign out</button>
+      </div>
     </div>
   </div>
 </nav>
+<script>
+  (function(){
+    const btn=document.getElementById('nav-signout');
+    if(btn){ btn.addEventListener('click', ()=> window.Auth?.signOut && Auth.signOut()); }
+  })();
+</script>
+

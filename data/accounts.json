@@ -1,0 +1,12 @@
+{
+  "accounts": [
+    { "id": "cash-1",  "name": "NatWest Current", "type": "cash",       "balance": 4200 },
+    { "id": "save-1",  "name": "Premium Bonds",   "type": "savings",    "balance": 18000 },
+    { "id": "inv-1",   "name": "Broker (GIA)",    "type": "investment", "balance": 0 },
+    { "id": "loan-1",  "name": "Student Loan",    "type": "loan",       "balance": 11800 },
+    { "id": "cred-1",  "name": "Amex",            "type": "credit",     "balance": 750 },
+    { "id": "asset-1", "name": "Car (est.)",      "type": "asset",      "balance": 9000 }
+  ]
+}
+
+  

@@ -1,0 +1,16 @@
+# .gitignore (root)
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Env files (secrets)
+.env
+backend/.env
+frontend/.env
+.env.local
+.env.*.local
+
+# Uploads / generated
+uploads/
+backend/uploads/
+*.DS_Store

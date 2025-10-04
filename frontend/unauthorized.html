@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Unauthorized — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <script src="/js/head-include.js"></script>
+  <link rel="preload" href="/css/styles.css" as="style">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    :root { --hero-h: clamp(540px, 80vh, 860px); }
+    body{ background: var(--bg-body); color: var(--fg); }
+    .hero{ min-height: var(--hero-h); display:grid; place-items:center; position:relative; overflow:hidden; }
+    .panel{ max-width: 760px; width: 100%; padding: clamp(1.25rem, 2.5vw, 2rem); border:1px solid var(--bd-hairline);
+      background: var(--bg-surface); border-radius: 1.25rem; box-shadow: var(--shadow); text-align:center }
+    .eyebrow{ color: var(--fg-3); text-transform: uppercase; font-weight:600; letter-spacing:.12em }
+    h1{ font-size: clamp(1.75rem, 4.6vw, 2.6rem); line-height:1.1; margin:.35rem 0 .5rem }
+    p.lede{ color: var(--fg-2); max-width: 60ch; margin: 0 auto 1rem }
+    .actions{ display:flex; gap:.75rem; flex-wrap:wrap; justify-content:center; margin-top:1rem }
+    .scene{
+      position:absolute; inset:-10% -10% 0 -10%; pointer-events:none; z-index:-1;
+      background:
+        radial-gradient(1400px 700px at 15% 25%, color-mix(in oklab, var(--brand) 18%, transparent), transparent),
+        radial-gradient(1400px 700px at 85% 20%, color-mix(in oklab, var(--brand-hover) 18%, transparent), transparent),
+        radial-gradient(1400px 700px at 50% 80%, color-mix(in oklab, #7FDCCB 20%, transparent), transparent);
+      mask-image: radial-gradient(1200px 600px at 50% 45%, #000, transparent 70%);
+      opacity:.65;
+    }
+    .emoji{ font-size: 2.5rem; line-height: 1; }
+    .list{ text-align:left; margin:1rem auto 0; max-width: 52ch; color:var(--fg-2) }
+    .list li{ margin:.2rem 0 }
+  </style>
+</head>
+<body>
+  <main class="hero container">
+    <div class="scene" aria-hidden="true"></div>
+    <div class="panel">
+      <div class="emoji" aria-hidden="true">🔒</div>
+      <div class="eyebrow">Unauthorized</div>
+      <h1>You’ve reached a restricted area</h1>
+      <p class="lede">
+        This endpoint is protected. Please log in with a valid account that has p

@@ -1,0 +1,507 @@
+Here’s the summarised roadmap from “works locally” → “in production”, focusing on ease + economy:
+
+1. Hosting Choices
+
+Backend (Node.js + Express + MongoDB)
+
+Cheapest / easiest: Render
+, Railway
+, or [Heroku Free/Hobby tier]*
+
+More control, still simple: [DigitalOcean App Platform] or [Fly.io]
+
+Enterprise-ready, flexible: AWS/GCP/Azure, but more setup overhead.
+
+Frontend (static HTML/JS)
+
+Host for free on [Netlify], [Vercel], or GitHub Pages.
+
+Just build → push → auto-deploy.
+
+Database
+
+Use [MongoDB Atlas] free/shared cluster (already what you’re seeing).
+
+Make sure you set IP allowlists or VPC peering for security.
+
+2. Secrets & Config
+
+All your .env variables (JWT_SECRET, Mongo URI, OpenAI key, TrueLayer creds) go into the host’s “Environment Variables” panel.
+
+Never commit them to Git.
+
+3. Productionizing the Backend
+
+Add a Procfile or a start script:
+
+"scripts": {
+  "start": "node backend/index.js"
+}
+
+
+Ensure CORS is configured correctly so your frontend domain can call your backend API.
+
+Add a reverse proxy (if needed) for HTTPS → Node (most platforms handle this automatically).
+
+4. Domain & SSL
+
+Point a custom domain (cheap via Namecheap, Google Domains).
+
+Platforms like Vercel/Netlify/Render issue free SSL (Let’s Encrypt) automatically.
+
+5. Monitoring & Logs
+
+Use the free built-in dashboards/logs of Render/Heroku/Fly.io.
+
+At minimum: enable email alerts for downtime.
+
+6. Security Hardening (minimum viable)
+
+Use HTTPS everywhere.
+
+Rotate JWT secret when moving to prod.
+
+Configure strong DB user/passwords.
+
+Enable rate-limiting middleware on login & sensitive routes.
+
+Set CORS only to your frontend domain.
+
+7. Cost Snapshot
+
+MongoDB Atlas free/shared cluster (0–$9/mo).
+
+Backend on Render/Railway free to ~$7/mo for hobby dyno/container.
+
+Frontend on Netlify/Vercel free.
+
+Domain: ~$12/year.
+
+👉 So you can realistically run the whole stack in production for under $20/month.
+
+⚡ Summary Path for You
+
+Put backend on Render/Railway (link GitHub → auto-deploy).
+
+Put frontend on Netlify (link GitHub → auto-deploy).
+
+Use MongoDB Atlas free tier.
+
+Configure .env secrets in the host dashboards.
+
+Point your domain → done.
+
+
+What the app should visualise (at a glance)
+
+Take-home today vs. gross: a waterfall from gross income → tax → NI → student loan → pension → other deductions → net pay.
+
+Effective marginal tax rate (EMTR): a curve showing how the next £1 is taxed (highlights cliffs like personal allowance taper, child benefit charge, dividend/CGT allowance usage, etc.).
+
+Allowance meters: dynamic gauges for personal allowance, dividend allowance, CGT annual exempt amount, pension annual allowance/carry-forward, ISA usage, gift allowances.
+
+“Life events” timeline: salary changes, RSU vests, option exercises, bonuses, gifts, inheritances, property buys/sells, grants, job moves—shown as dated tiles with tax impact.
+
+Capital gains & base costs: lots/holdings with real-time unrealised vs realised gains and remaining CGT allowance.
+
+Equity compensation lens: RSU/ESPP/EMI/CSOP vests vs sells—what was taxed as income vs what’s CGT later.
+
+Household picture: combined net income, shared allowances (e.g., marriage allowance), child benefits, childcare costs/reliefs.
+
+Forecast scenarios: sliders for salary, pension %, RSU price, selling shares, moving to Scotland, having a child, buying a home → projected net, taxes, and allowances over 1–5 years.
+
+Cashflow calendar: upcoming HMRC deadlines, payments on account, RSU vests, option expiries, grant/benefit renewals.
+
+The most comprehensive feature set
+1) Onboarding & Profile
+
+Guided setup: residency, employment status, student loan plan(s), pension setup (workplace/SIPP), marital status, dependants, benefits claimed, council tax band, typical expenses.
+
+Tax identity: NI number, UTR (if registered for SA), tax code tracking with change history.
+
+Household linking: optional partner linkage for tax planning (marriage allowance, child benefit high income charge).
+
+Jurisdiction: England/Wales vs Scotland (different bands), non-resident rules toggle, Statutory Residence Test helper.
+
+2) Data ingestion (automate everything)
+
+Open Banking (e.g., TrueLayer): ingest & categorise transactions; map to income, interest, dividends, expenses, rent, donations.
+
+Payroll & employment: upload/parse P60, P45, P11D, payslips; detect benefits-in-kind; reconcile to bank pay.
+
+Investments & brokers: CSV/PDF/OCR imports for trades, dividend vouchers, interest statements; optional APIs for popular platforms.
+
+Equity comp: import RSU/ESPP/EMI/CSOP schedules from providers (Equiniti/Computershare/etc.) or CSV; parse vest/exercise/sale events.
+
+Property: rental statements, agent summaries, mortgage interest breakdowns.
+
+Crypto: trade history import, disposals, pool cost basis, staking/airdrops classification.
+
+Documents vault with OCR + auto-tagging: receipts, grant letters, award agreements, inheritance paperwork, gift records, pension statements, ISA statements.
+
+3) Income, benefits & deductions modelling
+
+Employment (salary, bonus, commission), self-employment, dividends, interest, rental income, grants/awards, gifts received, state benefits.
+
+Deductions: pension (net pay/relief at source), salary sacrifice, charitable donations (Gift Aid), student loan, childcare, professional fees.
+
+Benefits-in-kind & expense claims (mileage, WFH, P87 helper).
+
+4) Equity & investments centre
+
+Awards: RSU/ESPP/EMI/CSOP tracking with vest/exercise windows, disqualifying events, sell-to-cover modelling.
+
+Tax split: income tax/NI at vest vs CGT upon sale; automatic acquisition cost updates (FMV at vest).
+
+Capital gains engine: section 104 pooling, bed & ISA/SIPP modelling, allowance utilisation, tax-lot selection (“minimise tax”, “realise gains”, “harvest losses”).
+
+Dividend/interest ledger with withholding recognition and UK tax interaction.
+
+5) Assets, liabilities & net worth
+
+Real-time net worth: cash, ISAs, GIAs, pensions, property, vehicles, crypto; liabilities: mortgages, loans, student loans.
+
+Goal tracking: house deposit, emergency fund, retirement target; tie contributions to tax-efficient wrappers.
+
+6) UK tax engine (data-driven rules)
+
+Annual rules config for bands/allowances/thresholds by region; NI (employment & self-employed), student loans, child benefit charge, personal allowance taper, high-income savings rules, dividend & CGT rules.
+
+Return prep: SA100 pack generation with schedules (employment, dividends, interest, property, CGT, foreign, partnership).
+
+Payments: payments on account calculation, reminders, amount summaries.
+
+Explainability: plain-English “why you owe this” with line-item drill-downs + citations (when connected).
+
+7) Scenario planning (“What if?”)
+
+Sliders/inputs for: salary change, bonus, pension %, RSU price + vest cadence, selling X shares, moving region, adding a child, receiving a gift, inheritance, buying/selling property, switching to contracting, starting side-business.
+
+Outputs: new take-home, EMTR chart, allowance usage deltas, benefits impact, payments on account changes, next-year projections.
+
+Playbooks: “Keep net pay above £Y”, “Reduce HICBC”, “Restore personal allowance”, “Tax-efficient bonus timing”, “Harvest CGT”.
+
+8) Gifts & inheritance (IHT centre)
+
+Gift log with categories (annual exemption, small gifts, wedding gifts, normal expenditure out of income) and 7-year timeline with taper relief tracker.
+
+Estates & inheritances: record assets received, probate values, potential IHT interactions, base cost for future CGT.
+
+Recommendations: when to document gifts, how to structure to stay within allowances (education-only, no advice—guidance with links).
+
+9) Documents & tasks
+
+Doc checklist by situation (employee, landlord, investor, parent, self-employed).
+
+Smart tasks: “Upload P60 by 31 Jan”, “Confirm RSU vest price”, “Add broker statement Q4”.
+
+Workflow states: To-Do → Needs Info → Ready → Filed; attach evidence to computations.
+
+10) Insights & nudges (non-regulated guidance)
+
+“You’re £X away from using your CGT allowance.”
+
+“Increasing pension by 1% saves ~£X tax and restores £Y of child benefit.”
+
+“Consider selling Z shares before 5 April to use this year’s allowance.”
+
+“Your EMTR between £100k–£125,140 is very high—here are levers.”
+
+“Payments on account will increase next year by ~£X—set aside now.”
+
+11) Compliance & filing (UK)
+
+Self Assessment pack export (mapped boxes, computations, attachments).
+
+HMRC MTD-compatible bridge (when relevant) and API submission (phase-gated).
+
+CGT real-time report helper for residential disposals.
+
+Employer expenses (P87) helper wizard.
+
+12) Calendar & notifications
+
+Filing/payment deadlines (31 Jan/31 Jul, PAYE codes, RTI notices), RSU vests, option expiries, ISA subscription year-end, dividend pay dates.
+
+Push/email in plain English with links to the exact page to act.
+
+13) Security, privacy & audit
+
+Secure vault with OCR on-device or server-side (configurable), encryption at rest/in transit, granular data permissions, export/delete-all.
+
+Full calculation audit trail: inputs → ruleset → outputs; versioned tax logic.
+
+14) Help & explainers
+
+Built-in glossary (plain English), worked examples (salary rise, RSU vest & sale, property sale with PRR/lettings relief considerations), and HMRC guidance links.
+
+Chat Q&A pinned to the current screen with context (“If my salary goes from £X to £Y, what’s my new take-home and EMTR? Will I trigger HICBC? Should I adjust pension?”).
+
+Core screens (UX you can build now)
+
+Home Dashboard: waterfall to net, EMTR curve, allowance gauges, key tasks, upcoming events.
+
+Income Explorer: employer(s), payslips, benefits-in-kind, student loan & pension effects; “change salary” what-if.
+
+Equity Centre: vest/exercise/sell timeline, tax split, “sell X now” simulation, allowance usage.
+
+Investments & CGT: lots, realised/unrealised, disposal planner, allowance meter, recommended lots to sell.
+
+Gifts & IHT: gift log with 7-year timeline, exemption meters, inheritance record.
+
+Property & Rent: yields, allowable expenses, mortgage interest, CGT on sale scenarios.
+
+Scenario Lab: sliders + results panel, save/share scenarios.
+
+Tax Year Cockpit: SA status, payments on account, documents checklist, ready-to-file pack.
+
+Document Vault: smart folders (Employment, Investments, Property, Gifts, Pensions, HMRC), OCR, “stale” flags.
+
+Events the app should understand (and auto-model)
+
+Salary/bonus changes, new job, redundancy.
+
+RSU/ESPP/EMI/CSOP: grant, vest, exercise, sale, expiry.
+
+Dividends/interest paid, fund distributions.
+
+Buy/sell property; remortgage.
+
+Start/stop self-employment or side-hustle.
+
+Gifts made/received; inheritance events.
+
+Marriage/civil partnership, child born, moving region/country.
+
+Pension contributions/transfers; ISA funding.
+
+Grants/awards (scholarships, research, bursaries where relevant).
+
+Common questions it should answer—instantly
+
+“If my salary goes to £X, what’s my new monthly net? What’s my EMTR across bands?”
+
+“I have RSUs vesting worth ~£X—how much is sold to cover? What CGT later if I sell at £Y?”
+
+“How much can I contribute to pension this year without tax charges? What’s the impact on HICBC/personal allowance?”
+
+“Should I sell shares before 5 April or after? How much CGT either way?”
+
+“If I gift £X to a family member, any tax now? How does it affect IHT if I pass within 7 years?”
+
+“What documents do I need this year? What’s missing?”
+
+“How much do I owe on 31 Jan / 31 Jul? Why?”
+
+Technical notes to build it right (brief)
+
+Rules as data: externalised tax configs per tax year & region; deterministic calculators with unit tests.
+
+Ledger-first: normalised transactions, tagged to sources (payroll, broker, bank).
+
+Event engine: typed events (vest, sell, gift…) trigger calculators & visual updates.
+
+Explainers: every figure has a “?” popover with formula + inputs.
+
+Scenario engine: pure functions + snapshot state; save/compare scenarios.
+
+Integrations: Open Banking (TrueLayer), file/OCR pipeline, broker CSV mappers.
+
+Accessibility: plain English, large tap targets, colour-blind-safe charts.
+
+If you want, I can turn this into a product requirements document with acceptance criteria and a first sprint backlog (e.g., Dashboard v1, Income Explorer v1 with salary what-if, Document Vault + “stale” flags).
+
+You said:
+Yes please, generate this document alongside the perfect query to have this developed out alongside my current codebase (so the query should mention that this should be built out ontop of the existing code and features. I want GPT 5o to develop this out perfectly, so whatever is needed, a document, a query or whatever else... help me generate this
+ChatGPT said:
+Thought for 55s
+
+Awesome — here’s a tight, implementation-ready PRD you can drop into your repo, plus a “perfect prompt” you can paste into a fresh GPT-5o chat to have it implement this on top of your current codebase.
+
+Personal Accountant App — Product Requirements (PRD v0.1)
+
+Date: 26 Aug 2025
+Repo: premiceman/ai_accountant_app (branch: test)
+Scope: UK personal finance & tax planning (employee/side-hustle/landlord/investor), with equity compensation and gifts/IHT tracking.
+Assumptions: Node/Express backend, React frontend, JWT auth present; MongoDB (or compatible) for persistence; Open Banking via TrueLayer; HMRC integration later.
+
+1) Goals & Non-Goals
+
+Goals
+
+Replace a personal accountant for day-to-day clarity: income → deductions → tax → take-home → future impact.
+
+Model salary/bonus changes, equity comp, investments/CGT, gifts & inheritance, and key HMRC deadlines.
+
+Provide explainable calculations with audit trails and supporting documents.
+
+Non-Goals (v0)
+
+Regulated financial advice; enterprise bookkeeping; multi-jurisdiction tax filing.
+
+2) Primary Personas
+
+Full-time employee (may have RSUs/ESPP).
+
+Household (partner + children; marriage allowance; HICBC).
+
+Investor/Landlord (ISA/GIA/pensions; CGT).
+
+Side-hustler (basic self-employment income & expenses).
+
+3) Success Metrics
+
+T-60s Time-to-clarity: user sees net pay waterfall & EMTR within 60s of onboarding.
+
+≥85% document completeness by 31 Jan (Self Assessment deadline).
+
+≥90% task completion rate for deadline nudges.
+
+<1% discrepancy rate between computed and verified payroll/CGT figures.
+
+4) High-Level Features (v1 focus)
+
+Home Dashboard
+
+Waterfall: Gross → Tax → NI → Student Loan → Pension → Net.
+
+EMTR curve (incl. personal allowance taper, HICBC).
+
+Allowance gauges (Personal, Dividend, CGT, Pension, ISA).
+
+Upcoming events: RSU vests, payments on account, 5 April year-end.
+
+Income Explorer (Employee)
+
+Profile: salary, bonus cadence, tax code, pension type & %.
+
+“Change salary” what-if → net pay & EMTR deltas.
+
+Student loan plan effects; benefits-in-kind placeholder.
+
+Document Vault
+
+Smart folders: Employment, Investments, Property, Gifts, Pensions, HMRC.
+
+Upload (PDF/JPG/CSV), OCR stub, auto-tag, stale flags (e.g., “P60 missing”).
+
+Equity & CGT Core (foundations)
+
+Record RSU/Option grants & vest schedule (manual input v1).
+
+Capital gains engine (Section 104 pooling, basic disposal calc).
+
+CGT allowance meter; realised vs unrealised view.
+
+Scenario Lab (v1)
+
+Sliders: salary, pension %, sell X shares, move Scotland toggle.
+
+Outputs: take-home, EMTR, allowances used, estimated tax due.
+
+Gifts & IHT Log (v1)
+
+Gift entries with exemption type; 7-year timeline skeleton.
+
+Calendar & Tasks
+
+Pre-seeded UK dates (31 Jan/31 Jul, 5 April, ISA cutoff), RSU vests, doc tasks.
+
+5) System Requirements
+Functional — Acceptance Criteria (sample)
+
+Home Dashboard
+
+AC1: Given saved profile + at least one income source, the waterfall renders current tax year figures on page load.
+
+AC2: EMTR line chart displays marginal rate for £0–£200k, showing visible cliffs (100k taper, HICBC threshold).
+
+AC3: Gauges show % usage of Personal/Dividend/CGT/Pension/ISA.
+
+AC4: “View why” expands to show computation inputs & bands.
+
+Income Explorer
+
+AC1: User can set salary, bonus schedule, pension (net pay/relief-at-source/sacrifice), tax code.
+
+AC2: “What if salary = £X” recomputes take-home & EMTR instantly (no page reload).
+
+AC3: Save scenario → appears in Scenario Lab list.
+
+Document Vault
+
+AC1: Upload accepts PDF/JPG/PNG/CSV up to 10MB; stored with metadata (type, year, tags).
+
+AC2: Files auto-routed to a smart folder by type; user can retag.
+
+AC3: “Stale” flags appear when expected docs for the current tax year are missing (e.g., P60 after April 6).
+
+AC4: Clicking a stale flag opens the relevant upload dialog.
+
+Equity & CGT Core
+
+AC1: User can record RSU grant (ticker, units, vest schedule, FMV placeholder).
+
+AC2: Disposal calculator computes gain/loss using Section 104 pool; shows allowance remaining.
+
+AC3: “Recommend lots” button (stub) selects optimal lots to stay within allowance.
+
+Scenario Lab
+
+AC1: Adjusting sliders updates summary KPIs in <300ms.
+
+AC2: “Save” stores snapshot with inputs/outputs & readable title.
+
+AC3: Compare two scenarios side-by-side (table).
+
+Gifts & IHT Log
+
+AC1: Create gift with date, recipient, amount, exemption type; timeline shows 7-year window.
+
+AC2: Tally of “Potentially Exempt Transfers” vs exempt gifts.
+
+Non-Functional
+
+Privacy & security: JWT auth already present; add per-user row-level access checks on every API. Encrypt files at rest (bucket or GridFS), signed URLs on download.
+
+Auditability: Every calculation endpoint returns inputs, rules_version, outputs, explain.
+
+Performance: P95 < 400ms for compute endpoints; P95 < 150ms for cached reads.
+
+Testing: 80%+ coverage on core calculators; integration tests for auth + upload.
+
+6) Data Model (v1 draft collections)
+
+User (profile, residency, student loan plan, household link, tax code history).
+
+IncomeEvent (employment: salary/bonus; self-employment).
+
+EquityAward (type, ticker, grant/vest schedule, FMV at vest).
+
+HoldingLot/Pool (ticker, pool qty & cost, adjustments).
+
+Disposal (date, qty, proceeds, fees, gain).
+
+Gift (date, amount, recipient, exemption type).
+
+Document (path, type, tags, year, status).
+
+Task (title, due_date, state).
+
+Scenario (inputs, outputs snapshot, label).
+
+TaxYearSnapshot (bands, allowances computed per user, cached).
+
+7) Key Screens (UI contracts)
+
+Dashboard: /dashboard → GET /api/summary/current-year, charts: waterfall, EMTR, gauges, events list.
+
+Income Explorer: /income → GET/PUT /api/income/profile, POST /api/income/what-if.
+
+Document Vault: /documents → POST /api/docs, GET /api/docs?year=, stale status: GET /api/docs/expected.
+
+Equity & CGT: /equity → POST /api/equity/grants, GET /api/equity/pool, POST /api/equity/dispose/calc.
+
+Scenario Lab: /scenarios → POST /api/scenarios, GET /api/scenarios.
+
+Gifts & IHT: /gifts → POST/GET /api/gifts.

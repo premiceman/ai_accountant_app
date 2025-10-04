@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script src="/js/head-include.js"></script>
+</head>
+<body>
+  <!--navbar elements-->
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
+  <main class="container py-4">
+    <h1 class="page-title" data-page-title>Billing & Plans</h1>
+
+    <!-- Modern pill toggle (keeps same IDs for your JS) -->
+    <div class="billing-toggle my-2">
+      <input type="radio" class="btn-check" name="billing-cycle" id="cycle-monthly" value="monthly" checked>
+      <input type="radio" class="btn-check" name="billing-cycle" id="cycle-yearly" value="yearly">
+
+      <div class="billing-toggle__inner" role="tablist" aria-label="Billing period">
+        <label class="billing-toggle__option opt-month" for="cycle-monthly" role="tab">Monthly</label>
+        <label class="billing-toggle__option opt-year" for="cycle-yearly" role="tab">
+          Yearly <span class="save">Save 10–15%</span>
+        </label>
+        <span class="billing-toggle__knob" aria-hidden="true"></span>
+      </div>
+    </div>
+
+    <!-- Plans -->
+    <section class="mb-5">
+      <h5 class="mb-3">Choose your plan</h5>
+      <div id="plans-row" class="row g-3"></div>
+    </section>
+
+
+    <!-- Payment Methods -->
+    <section>
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h5 class="mb-0">Payment methods</h5>
+        <small class="text-muted">
+          Demo mode — any details accepted; only masked metadata is stored. <!-- TODO: swap to Stripe in production -->
+        </small>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12 col-lg-6">
+          <div class="card pm-card shadow-sm h-100">
+            <div class="card-body">
+              <h6 class="card-title">Your cards</h6>
+              <div id="pm-list"></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="card pm-card shadow-sm h-100">
+            <div class="card-body">
+              <h6 class="card-title">Add a new card</h6>
+              <form id="pm-form">
+                <div class="mb-2">
+                  <label class="form-label">Cardholder name</label>
+                  <input type="text" name="holder" class="form-control" required>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label">Card number</label>
+                  <input type="text" name="cardNumber" inputmode="numeric" class="form-control" placeholder="4242 4242 4242 4242" required>
+                </div>
+                <div class="row g-2">
+                  <div class="col-4">
+                    <label class="form-label">Exp. month</label>
+                    <input type="number" name="expMonth" class="form-control" min="1" max="12" required>
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">Exp. year</label>
+                    <input type="number" name="expYear" class="form-control" min="2024" max="2100" required>
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">CVC</label>
+                    <input type="password" name="cvc" class="form-control" inputmode="numeric" required>
+                  </div>
+                </div>
+                <button class="btn btn-primary mt-3" type="submit">Add card</button>
+              </form>
+              <div id="pm-form-msg" class="small text-muted mt-2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="billing-msg" class="small text-muted mt-4"></div>
+  </main>
+
+  <script src="./js/nav.js"></script>
+<script src="./js/config.js"></script>
+<script src="./js/auth.js"></script>
+<script>Auth.enforce();</script>
+<script src="./js/billing.js"></script>
+<script src="/js/mobile-sidebar.js"></script>
+
+</body>
+</html>

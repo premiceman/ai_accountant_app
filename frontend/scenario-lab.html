@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Scenario Lab — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <script src="/js/head-include.js"></script>
+
+  <style>
+    :root{
+      --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
+      --card-radius: 18px;
+      --muted: #6b7280;
+      --assistant-bg: #f8fafc;
+      --user-bg: #eef2ff;
+      --mint: #10a37f;              /* ChatGPT mint */
+      --mint-ghost: rgba(16,163,127,.12);
+      --input-bg: #ffffff;
+      --input-brd: rgba(0,0,0,.08);
+      --input-brd-focus: rgba(16,163,127,.45);
+    }
+
+    .lab-hero{ padding: 16px 0 6px; }
+    .lab-hero .eyebrow{ font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase }
+
+    .chat-wrap{
+      display:grid;
+      grid-template-columns: 1fr 380px;
+      gap: 16px;
+    }
+    @media (max-width: 1199.98px){ .chat-wrap{ grid-template-columns: 1fr; } }
+
+    .chat-card{
+      border: 1px solid rgba(0,0,0,.06);
+      border-radius: var(--card-radius);
+      box-shadow: var(--tile-shadow);
+      background: #fff;
+      display:flex; flex-direction:column;
+      min-height: 70vh; max-height: calc(100vh - 200px);
+      overflow:hidden;
+      position: relative;
+    }
+
+    .chat-body{
+      padding: 14px 14px 100px;   /* bottom space for the composer */
+      overflow: auto;
+      flex: 1 1 auto;
+      scroll-behavior: smooth;
+    }
+
+    /* Sticky composer (not floating) at bottom of the panel */
+    .chat-composer{
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 12px 14px 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0), #fff 35%);
+      border-top: 1px solid rgba(0,0,0,.05);
+    }
+
+    .composer-inner{
+      display:flex; align-items:flex-end; gap: 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--input-brd);
+      border-radius: 22px;
+      padding: 8px 8px 8px 12px;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .composer-inner:focus-within{
+      border-color: var(--input-brd-focus);
+      box-shadow: 0 0 0 4px rgba(16,163,127,.08);
+    }
+
+    .composer-text{
+      flex: 1 1 auto;
+      min-height: 28px; max-height: 180px;
+      resize: none; overflow-y: auto;
+      border: 0; outline: 0; background: transparent;
+      padding: 6px 0 4px;
+    }
+    .composer-text::placeholder{ color: #9aa3af; }
+
+    .btn-icon{
+      display:inline-flex; align-items:center; justify-content:center;
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 1px solid rgba(0,0,0,.08); background: #fff; cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease, background .12s ease, border-color .12s ease;
+    }
+    .btn-icon[disabled]{ opacity:.5; cursor:not-allowed; }
+    .btn-icon:hover{ transform: translateY(-1px); box-shadow: 0 6px 14px rgba(0,0,0,.08) }
+
+    /* Dynamic states for send button */
+    .btn-send{ border-color: rgba(0,0,0,.08); }
+    .btn-send svg{ width:18px; height:18px; display:block; }
+    .composer--empty .btn-send{ opacity:.55; }
+    .composer--ready .btn-send{ border-color: var(--mint); background: var(--mint-ghost); }
+    .composer--ready .btn-send svg{ color: var(--mint); }
+    .composer--streaming .btn-send{ opacity:.35; }
+
+    /* Stop button: black pill-like icon */
+    .btn-stop{
+      border-color: #000; background:#000; color:#fff; width: 36px; height: 36px;
+    }
+    .btn-stop svg{ width:14px; height:14px; display:block; }
+
+    /* New Chat small */
+    .btn-new{ border-radius: 999px; }
+
+    .msg{ display: flex; gap: 10px; margin-bottom: 12px; }
+    .msg .bubble{
+      padding: 10px 12px; border-radius: 14px; max-width: 920px; white-space: pre-wrap; word-wrap: break-word;
+      border: 1px solid rgba(0,0,0,.06);
+    }
+    .msg.assistant .bubble{ background: var(--assistant-bg); }
+    .msg.user .bubble{ background: var(--user-bg); margin-left: auto; }
+
+    .side-card{
+      border: 1px solid rgba(0,0,0,.06);
+      border-radius: var(--card-radius);
+      box-shadow: var(--tile-shadow);
+      background: #fff;
+    }
+    .side-card .card-body{ padding: 14px; }
+    .example-btn{
+      display:block; width:100%; text-align:left;
+      border: 1px dashed rgba(0,0,0,.12);
+      padding: 10px 12px; border-radius: 12px; background:#fff;
+    }
+
+    .disclaimer { color: var(--muted); font-size: .8rem; }
+
+    /* skeleton for first tokens */
+    .skeleton{ position: relative; overflow:hidden; background:#f5f5f5; border-radius:8px; height: 14px; margin: 6px 0; }
+    .skeleton::after{ content:""; position:absolute; inset:0; transform:translateX(-100%);
+      background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.6), rgba(255,255,255,0));
+      animation: shimmer 1.2s infinite; }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+  </style>
+</head>
+<body>
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
+  <main class="container py-4">
+    <section class="lab-hero">
+      <div class="eyebrow">Labs</div>
+      <h1 class="page-title" data-page-title>Scenario Lab</h1>
+      <div class="mt-1">
+        <span class="badge text-bg-light border">OpenAI</span>
+        <span class="disclaimer ms-2">Responses are generated. No chat memory is kept after you leave this page.</span>
+      </div>
+    </section>
+
+    <section class="chat-wrap mt-3">
+      <!-- Chat -->
+      <div class="chat-card">
+        <div id="chat-body" class="chat-body"></div>
+
+        <!-- Composer (sticky, curved, dynamic) -->
+        <div class="chat-composer">
+          <form id="chat-form" class="composer-inner composer--empty" autocomplete="off">
+            <textarea id="chat-text" class="composer-text" rows="1" placeholder="Send a message…" required></textarea>
+
+            <!-- Send (dynamic: grey -> mint arrow) -->
+            <button id="btn-send" class="btn-icon btn-send" type="submit" disabled title="Send">
+              <!-- Arrow (mint via CSS when ready) -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14"></path>
+                <path d="M12 5l7 7-7 7"></path>
+              </svg>
+            </button>
+
+            <!-- Stop (black) -->
+            <button id="btn-stop" class="btn-icon btn-stop ms-1" type="button" title="Stop" disabled>
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+
+            <!-- New chat (small) -->
+            <button id="btn-new" class="btn btn-outline-secondary btn-sm ms-1" type="button">New chat</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Side panel -->
+      <div class="side-card">
+        <div class="card-body">
+          <h6 class="mb-2">Examples</h6>
+          <button class="example-btn mb-2" data-example="What tax implications should I consider when selling vested RSUs in the UK?">Tax implications for RSUs (UK)</button>
+          <button class="example-btn mb-2" data-example="Help me explore scenarios to reduce my capital gains tax if I rebalance my portfolio this year.">CGT scenario planning</button>
+          <button class="example-btn mb-2" data-example="Explain how to categorize transactions from multiple bank accounts for budgeting and analytics.">Transaction categorisation</button>
+          <hr class="my-3" />
+          <div class="small text-muted">Tip: Hold <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/mobile-sidebar.js"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>Auth.enforce();</script>
+  <script src="/js/scenario-lab.js"></script>
+</body>
+</html>

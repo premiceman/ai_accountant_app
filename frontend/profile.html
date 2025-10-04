@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Profile — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="/js/head-include.js"></script>
+
+  <style>
+    :root{
+      --tile-gap: 14px;
+      --tile-radius: 16px;
+      --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
+      --tile-bg: var(--bs-body-bg, #fff);
+      --muted: #6b7280;
+      --ok: #16a34a;
+      --warn: #ca8a04;
+      --bad: #dc2626;
+      --brand: var(--bs-primary, #6f42c1);
+      --chip-bg: rgba(111,66,193,.08);
+      --chip-fg: var(--brand);
+    }
+
+    body{ background: var(--bg-body, #0b0c10); color: var(--fg, #111) }
+
+    .hero{
+      position: relative;
+      padding: 18px 0 6px;
+    }
+    .hero-title{
+      display:flex; align-items:center; gap:.75rem;
+    }
+    .hero-title .eyebrow{
+      font-size:.78rem; color:var(--muted); letter-spacing:.08em; text-transform:uppercase
+    }
+
+    .tile-grid{
+      display:grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: var(--tile-gap);
+      margin-top: 14px;
+    }
+    @media (max-width: 1199.98px){ .tile-grid{ grid-template-columns: repeat(8, 1fr); } }
+    @media (max-width: 767.98px){ .tile-grid{ grid-template-columns: repeat(4, 1fr); } }
+
+    .tile{
+      grid-column: span 3;
+      background: var(--tile-bg);
+      border-radius: var(--tile-radius);
+      box-shadow: var(--tile-shadow);
+      padding: 16px;
+      transition: transform .2s ease, box-shadow .2s ease;
+      will-change: transform;
+      border: 1px solid rgba(0,0,0,.06);
+    }
+    .tile:hover{ transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0,0,0,.10), 0 4px 12px rgba(0,0,0,.06); }
+    .tile .k{ font-size: .78rem; color: var(--muted); margin-bottom: 6px; }
+    .tile .v{ font-size: 1.65rem; font-weight: 700; display:flex; align-items:baseline; gap:.5rem; }
+    .tile .delta{ font-size:.85rem; padding:.15rem .5rem; border-radius:999px; background:var(--chip-bg); color:var(--chip-fg) }
+    .delta.up{ color: var(--ok); background: rgba(22,163,74,.08) }
+    .delta.down{ color: var(--bad); background: rgba(220,38,38,.08) }
+
+    .card-elev{
+      border-radius: 18px;
+      border: 1px solid rgba(0,0,0,.06);
+      box-shadow: var(--tile-shadow);
+      overflow: clip;
+    }
+    .section-hd{
+      display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:.35rem;
+    }
+    .section-hd h5{ margin:0; }
+    .muted{ color: var(--muted); }
+
+    .profile-fields .form-control[readonly],
+    .profile-fields .form-select[readonly]{
+      background-color: rgba(0,0,0,.03);
+      border-color: rgba(0,0,0,.08);
+      color: inherit;
+    }
+    .profile-fields .row+.row{ margin-top:.5rem }
+
+    .edit-actions{ display:none; gap:.5rem }
+    .editing .edit-actions{ display:flex }
+    .editing .profile-fields [data-editable="true"] input{ background:#fff !important }
+
+    .icon-btn{
+      display:inline-flex; align-items:center; justify-content:center;
+      width:36px; height:36px; border-radius:10px;
+      border:1px solid rgba(0,0,0,.08); background:#fff; cursor:pointer;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .icon-btn:hover{ transform: translateY(-2px); box-shadow: 0 8px 18px rgba(0,0,0,.08) }
+    .icon-btn svg{ width:18px; height:18px }
+
+    .pm-card .method{
+      border: 1px dashed rgba(0,0,0,.1);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display:flex; align-items:center; justify-content:space-between;
+      background: #fff;
+    }
+    .badge-default{ background: var(--chip-bg); color: var(--chip-fg); }
+
+    .benefit-list{ margin: 0; padding-left: 1.1rem; }
+    .benefit-list li{ margin: .25rem 0; }
+
+    .notes-box{
+      width:100%; min-height: 120px; resize: vertical;
+    }
+
+    .link-muted{ color: var(--muted); text-decoration: none; }
+    .link-muted:hover{ text-decoration: underline; }
+
+    /* subtle section separators inside cards */
+    .subtle-hr{ border:0; height:1px; background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.02), rgba(0,0,0,.06)); margin:.75rem 0; }
+  </style>
+</head>
+<body>
+  <!-- navbar + sidebar -->
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
+  <main class="container py-4">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-title">
+        <div>
+          <div class="eyebrow">Account</div>
+          <h1 class="page-title" data-page-title>Profile</h1>
+        </div>
+      </div>
+
+      <div class="tile-grid" id="stat-tiles">
+        <!-- Tiles are injected by profile.js -->
+      </div>
+    </section>
+
+    <!-- PROFILE + BILLING -->
+    <section class="mt-4">
+      <div class="row g-3">
+        <!-- Left: Profile -->
+        <div class="col-12 col-xl-7">
+          <div class="card card-elev" id="profile-card">
+            <div class="card-body">
+              <div class="section-hd">
+                <div>
+                  <h5>Profile</h5>
+                  <div class="muted small">View your details. Nothing is editable until you click the pencil.</div>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                  <button class="icon-btn" id="btn-edit" title="Edit">
+                    <!-- pencil (inline SVG for portability) -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="profile-fields">
+                <div class="row">
+                  <div class="col-md-6" data-editable="true"><label class="form-label">First name</label><input id="f-first" class="form-control" type="text" readonly></div>
+                  <div class="col-md-6" data-editable="true"><label class="form-label">Last name</label><input id="f-last"  class="form-control" type="text" readonly></div>
+                </div>
+                <div class="row">
+                  <div class="col-md-6" data-editable="true"><label class="form-label">Username</label><input id="f-username" class="form-control" type="text" readonly></div>
+                  <div class="col-md-6" data-editable="true"><label class="form-label">Email</label><input id="f-email"    class="form-control" type="email" readonly></div>
+                </div>
+                <div class="row">
+                  <div class="col-md-6"><label class="form-label">Date of Birth</label><input id="f-dob" class="form-control" type="text" readonly></div>
+                  <div class="col-md-6"><label class="form-label">Billing Tier</label><input id="f-tier" class="form-control" type="text" readonly></div>
+                </div>
+                <div class="row">
+                  <div class="col-md-6"><label class="form-label">EULA Version</label><input id="f-eula-ver" class="form-control" type="text" readonly></div>
+                  <div class="col-md-6"><label class="form-label">EULA Accepted</label><input id="f-eula-at" class="form-control" type="text" readonly></div>
+                </div>
+                <div class="row">
+                  <div class="col-md-6"><label class="form-label">Created</label><input id="f-created" class="form-control" type="text" readonly></div>
+                  <div class="col-md-6"><label class="form-label">Last Updated</label><input id="f-updated" class="form-control" type="text" readonly></div>
+                </div>
+
+                <div class="d-flex justify-content-end mt-3 edit-actions">
+                  <button id="btn-cancel" class="btn btn-outline-secondary">Cancel</button>
+                  <button id="btn-save"   class="btn btn-primary">Save</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Notes & Goals -->
+          <div class="card card-elev mt-3">
+            <div class="card-body">
+              <div class="section-hd">
+                <h5>Notes &amp; Goals</h5>
+                <small class="muted">Free-form space for reminders, ideas, and plans.</small>
+              </div>
+              <textarea id="notes-box" class="form-control notes-box" placeholder="Use me for general notes, goals, reminders or thoughts!"></textarea>
+              <div class="d-flex justify-content-end mt-2">
+                <button id="btn-notes-save" class="btn btn-outline-primary btn-sm">Save notes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Billing -->
+        <div class="col-12 col-xl-5">
+          <div class="card card-elev">
+            <div class="card-body">
+              <div class="section-hd">
+                <h5>Billing</h5>
+                <a class="link-muted small" href="/billing.html">Manage in Billing →</a>
+              </div>
+
+              <div class="mb-2">
+                <div class="muted small">Current subscription</div>
+                <div id="sub-summary" class="fw-semibold">—</div>
+                <div id="sub-price"   class="small muted">—</div>
+              </div>
+
+              <hr class="subtle-hr" />
+
+              <div class="mb-2">
+                <div class="muted small">Benefits</div>
+                <ul id="benefit-list" class="benefit-list small"></ul>
+              </div>
+
+              <hr class="subtle-hr" />
+
+              <div class="pm-card">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <h6 class="mb-0">Payment methods</h6>
+                  <a class="link-muted small" href="/billing.html#pm">Add or change →</a>
+                </div>
+                <div id="pm-list" class="d-flex flex-column gap-2"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- End User Agreement -->
+          <div class="card card-elev mt-3">
+            <div class="card-body">
+              <div class="section-hd">
+                <h5>End User Agreement</h5>
+              </div>
+              <div class="small">
+                <div>Version: <span id="eula-version">—</span></div>
+                <div>Accepted: <span id="eula-date">—</span></div>
+              </div>
+              <div class="mt-2">
+                <a class="link-muted" href="/eula.html" target="_blank" rel="noopener">View EULA</a> ·
+                <a class="link-muted" href="/terms.html" target="_blank" rel="noopener">View Terms</a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>Auth.enforce();</script>
+  <script src="/js/profile.js"></script>
+  <script src="/js/mobile-sidebar.js"></script>
+
+</body>
+</html>

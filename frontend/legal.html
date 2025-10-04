@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Legal — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <link href="./css/bootstrap.min.css" rel="stylesheet"/>
+  <link href="./css/styles.css" rel="stylesheet"/>
+
+  <style>
+    /* On-theme legal layout (Glacier Mint) — uses your design tokens */
+    .legal-hero{background:var(--bg-surface);border:1px solid var(--bd-hairline);box-shadow:var(--shadow);border-radius:var(--radius);padding:24px}
+    .legal-toc{position:sticky;top:calc(var(--topbar-h,56px) + 12px);background:var(--bg-surface);border:1px solid var(--bd-hairline);box-shadow:var(--shadow);border-radius:var(--radius);padding:16px}
+    .legal-toc a{display:block;color:var(--fg-2);text-decoration:none;padding:6px 0;border-radius:8px}
+    .legal-toc a:hover{color:var(--fg);background:var(--bg-surface-2)}
+    .legal-card{background:var(--bg-surface);border:1px solid var(--bd-hairline);box-shadow:var(--shadow);border-radius:var(--radius);padding:24px;margin-bottom:18px}
+    .legal-card h2{margin-top:0}
+    .legal-updated{color:var(--fg-2)}
+    .callout{background:var(--bg-surface-2);border:1px solid var(--bd-hairline);border-radius:12px;padding:12px 14px}
+    .muted{color:var(--fg-2)!important}
+    .badge-law{background:color-mix(in oklab, var(--brand) 15%, white);color:var(--fg);border-radius:999px;padding:.25rem .5rem;font-size:.75rem;font-weight:700}
+    .section-sep{height:1px;background:var(--bd-hairline);margin:18px 0;border-radius:1px}
+    /* print */
+    @media print {
+      .legal-toc, .app-topbar, .app-sidebar { display:none !important; }
+      body { padding: 0 !important; }
+      a[href]:after { content: " (" attr(href) ")"; font-size: .85em; color: var(--fg-2); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Optional: if your app renders a fixed topbar/sidebar, they’ll inherit your theme classes -->
+  <main class="container py-4 py-lg-5">
+
+    <div class="row g-4">
+      <div class="col-12 col-lg-8">
+        <div class="legal-hero">
+          <h1 class="h3 mb-1">Legal Center</h1>
+          <p class="mb-2 legal-updated">Last updated: <strong><!-- set manually --> 15 September 2025</strong></p>
+          <div class="callout">
+            <span class="badge-law me-2">Important</span>
+            These documents are provided for general information only and do not constitute legal advice. Certain exclusions and limitations may not be enforceable in some jurisdictions (including the UK/EU for consumers). Please review with your legal counsel.
+          </div>
+          <div class="mt-2 small muted">References to “we”, “us”, and “our” mean <strong>[[Company Name]]</strong> (registered in [[Jurisdiction]]) with registered office at [[Registered Address]]. Contact: <a href="mailto:[[Contact Email]]">[[Contact Email]]</a>.</div>
+        </div>
+
+        <!-- ===== Terms of Service ===== -->
+        <section id="tos" class="legal-card">
+          <h2>Terms of Service</h2>
+          <p class="muted">These Terms govern use of the AI Accountant website, apps, and services (the “Service”). By creating an account, accessing, or using the Service, you agree to these Terms.</p>
+
+          <h5>1. Accounts & Eligibility</h5>
+          <ol>
+            <li><strong>Age.</strong> You must be at least <strong>16</strong> years old (or the age required by your jurisdiction) to use the Service.</li>
+            <li><strong>Accurate info.</strong> You must provide accurate information and keep it up to date. You are responsible for safeguarding your credentials and all activity under your account.</li>
+            <li><strong>Customer types.</strong> Where you create an account on behalf of a business, you represent that you have authority to bind that entity, and “you” includes the entity.</li>
+          </ol>
+
+          <h5>2. Subscriptions, Fees & Taxes</h5>
+          <ol>
+            <li><strong>Plans.</strong> Paid plans, features, limits, and pricing are described at checkout or within the app. Unless stated otherwise, subscriptions renew automatically for the same term.</li>
+            <li><strong>Billing.</strong> You authorize us to charge the payment method on file. Fees are non-refundable except where required by law or expressly stated.</li>
+            <li><strong>Taxes.</strong> Fees are exclusive of all taxes. You are responsible for any applicable taxes, duties, or levies associated with your purchase or use.</li>
+          </ol>
+
+          <h5>3. Your Content & Data</h5>
+          <ol>
+            <li><strong>Ownership.</strong> You retain all rights in your content and data. You grant us a worldwide, non-exclusive license to host, process, and display your content solely to provide and improve the Service.</li>
+            <li><strong>Responsibility.</strong> You are solely responsible for the accuracy, quality, and legality of your content (including financial data and uploaded documents) and for obtaining all necessary rights and consents.</li>
+            <li><strong>Backups.</strong> You are responsible for maintaining appropriate backups of your data.</li>
+          </ol>
+
+          <h5>4. Professional, Tax & Investment Disclaimers</h5>
+          <div class="callout">
+            The Service provides informational tools and automation only. <strong>We are not providing tax, accounting, legal, investment, or financial advice</strong>, do not act as your accountant, tax agent, or fiduciary, and do not file, submit, or pay taxes on your behalf. Outputs may be incomplete or inaccurate. You must seek advice from appropriately qualified professionals and verify all outputs before relying on them.
+          </div>
+
+          <h5>5. Acceptable Use</h5>
+          <p>Your use must comply with our <a href="#aup">Acceptable Use Policy</a>. We may suspend or terminate accounts that violate these Terms or the AUP.</p>
+
+          <h5>6. Beta & AI Features</h5>
+          <ol>
+            <li><strong>Experimental.</strong> Some features (including AI-generated outputs) are experimental, provided “as is”, and may change, break, or be withdrawn.</li>
+            <li><strong>Human review required.</strong> You are responsible for reviewing AI outputs and ensuring compliance with applicable laws and regulations.</li>
+          </ol>
+
+          <h5>7. Third-Party Services</h5>
+          <p>The Service may interoperate with third-party products (e.g., storage, payment, analytics). We are not responsible for third-party services; their terms govern your use of them.</p>
+
+          <h5>8. Intellectual Property</h5>
+          <ol>
+            <li><strong>Ours.</strong> We and our licensors retain all rights in the Service and related IP. No rights are granted except as expressly stated.</li>
+            <li><strong>Yours.</strong> See Section 3 for rights you grant us to operate the Service.</li>
+          </ol>
+
+          <h5>9. Warranties & Disclaimers</h5>
+          <p>To the fullest extent permitted by law, the Service is provided <strong>“as is” and “as available”</strong> without warranties of any kind, whether express, implied, or statutory, including warranties of accuracy, merchantability, fitness for a particular purpose, non-infringement, and that use of the Service will be uninterrupted or error-free.</p>
+
+          <h5>10. Limitation of Liability</h5>
+          <p>To the fullest extent permitted by law, we will not be liable for any indirect, incidental, special, consequential, exemplary, or punitive damages, or for loss of profits, revenues, savings, business, goodwill, data, or use, even if advised of the possibility. Our aggregate liability for all claims relating to the Service shall not exceed the <strong>greater of £100 or the amounts paid by you to us for the Service in the 12 months</strong> before the event giving rise to liability. Nothing in these Terms excludes or limits liability that cannot legally be excluded (e.g., fraud, fraudulent misrepresentation, or death/personal injury caused by negligence).</p>
+
+          <h5>11. Indemnity</h5>
+          <p>You will defend, indemnify, and hold us harmless from and against any claims, losses, and expenses (including reasonable legal fees) arising from or relating to (a) your content; (b) your use of the Service in breach of these Terms or applicable law; or (c) your violation of rights of a third party.</p>
+
+          <h5>12. Suspension & Termination</h5>
+          <p>We may suspend or terminate your access if you breach these Terms, the AUP, or if needed to protect the Service, users, or comply with law. Upon termination, your right to use the Service ends.</p>
+
+          <h5>13. Changes to the Service or Terms</h5>
+          <p>We may modify the Service and these Terms. If changes are material, we will provide reasonable notice (e.g., in-app or email). Continued use after the effective date constitutes acceptance.</p>
+
+          <h5>14. Governing Law & Disputes</h5>
+          <p>These Terms are governed by the laws of <strong>England and Wales</strong> (without regard to conflicts of law). The courts of England and Wales have exclusive jurisdiction, except that consumers resident in the UK/EU may have mandatory rights to bring claims in their home forum.</p>
+
+          <h5>15. Contact</h5>
+          <p>Questions? Email <a href="mailto:[[Contact Email]]">[[Contact Email]]</a>.</p>
+        </section>
+
+        <!-- ===== EULA ===== -->
+        <section id="eula" class="legal-card">
+          <h2>End-User License Agreement (EULA)</h2>
+          <p>This EULA applies to any downloadable components, mobile apps, desktop apps, or SDKs we provide (the “Software”).</p>
+          <ol>
+            <li><strong>License.</strong> We grant you a revocable, non-exclusive, non-transferable, non-sublicensable license to install and use the Software solely to access the Service, in accordance with these terms.</li>
+            <li><strong>Restrictions.</strong> You may not: (a) reverse engineer, decompile, or attempt to access source code except to the extent permitted by law; (b) remove proprietary notices; (c) rent, lease, sell, or sublicense; (d) circumvent technical protections.</li>
+            <li><strong>Updates.</strong> We may deliver updates automatically. Some updates may be required to continue using the Software.</li>
+            <li><strong>Open Source.</strong> Some components may be provided under separate open-source licenses; those licenses govern those components.</li>
+            <li><strong>Termination.</strong> This license ends when your subscription ends or if you breach this EULA.</li>
+          </ol>
+        </section>
+
+        <!-- ===== Acceptable Use Policy ===== -->
+        <section id="aup" class="legal-card">
+          <h2>Acceptable Use Policy</h2>
+          <p>You will not use the Service to:</p>
+          <ul>
+            <li>break the law or infringe others’ rights (including IP and privacy rights);</li>
+            <li>upload unlawful, harmful, deceptive, defamatory, or obscene content;</li>
+            <li>attempt unauthorized access, security testing, or interfere with the Service;</li>
+            <li>transmit malware, spam, or engage in data scraping not permitted by us;</li>
+            <li>process special category personal data without a lawful basis and appropriate safeguards;</li>
+            <li>use outputs to make automated decisions with legal or similarly significant effects without appropriate human review.</li>
+          </ul>
+          <p>We may investigate and suspend or remove content or accounts that violate this AUP.</p>
+        </section>
+
+        <!-- ===== Professional / Financial Disclaimers ===== -->
+        <section id="disclaimer" class="legal-card">
+          <h2>Professional & Financial Disclaimers</h2>
+          <ul>
+            <li><strong>No tax, accounting, or legal advice.</strong> The Service is not a substitute for professional advice. You are responsible for your filings, payments, and compliance with HMRC and other authorities.</li>
+            <li><strong>No investment advice.</strong> We do not recommend or endorse securities or investment strategies. You bear all risks from financial decisions.</li>
+            <li><strong>Accuracy not guaranteed.</strong> Calculations, rates, thresholds, or rules may be outdated or incorrect. Always verify with primary sources and advisors.</li>
+          </ul>
+        </section>
+
+        <!-- ===== Privacy Policy (UK GDPR / GDPR aligned) ===== -->
+        <section id="privacy" class="legal-card">
+          <h2>Privacy Policy</h2>
+          <p>This Privacy Policy explains how <strong>[[Company Name]]</strong> (“we”) collects and uses personal data when you use the Service.</p>
+
+          <h5>Data Controller</h5>
+          <p>For most processing, we act as the <strong>controller</strong>. Contact: <a href="mailto:[[Contact Email]]">[[Contact Email]]</a>. If applicable, our Data Protection Officer is [[DPO Contact]].</p>
+
+          <h5>Personal Data We Process</h5>
+          <ul>
+            <li>Account data (name, email, username, date of birth, settings)</li>
+            <li>Usage and device data (logs, diagnostics, cookies/SDK events)</li>
+            <li>Content you upload (documents, financial information you provide)</li>
+            <li>Billing data (payment method metadata via our PSP; we do not store full card PAN/CVC)</li>
+          </ul>
+
+          <h5>Purposes & Legal Bases</h5>
+          <ul>
+            <li><strong>Provide the Service</strong> (contract performance)</li>
+            <li><strong>Security & abuse prevention</strong> (legitimate interests; compliance with law)</li>
+            <li><strong>Analytics & improvement</strong> (legitimate interests; consent where required)</li>
+            <li><strong>Communications</strong> (contract; legitimate interests; consent for marketing)</li>
+          </ul>
+
+          <h5>Sharing</h5>
+          <p>We may share data with service providers (hosting, storage, analytics, support, payment), strictly under contract. We may disclose if required by law or to protect rights, users, or the Service.</p>
+
+          <h5>International Transfers</h5>
+          <p>Where we transfer data outside the UK/EEA, we rely on adequacy decisions or Standard Contractual Clauses plus supplementary measures.</p>
+
+          <h5>Retention</h5>
+          <p>We keep data only as long as necessary for the purposes above, then delete or anonymize it.</p>
+
+          <h5>Your Rights</h5>
+          <p>Depending on your location, you may have rights of access, rectification, erasure, restriction, objection, portability, and to withdraw consent. To exercise, email <a href="mailto:[[Contact Email]]">[[Contact Email]]</a>. You may also complain to your local supervisory authority (e.g., the UK ICO).</p>
+
+          <h5>Children</h5>
+          <p>The Service is not intended for children under 16. We do not knowingly collect such data.</p>
+
+          <h5>Contact</h5>
+          <p>Questions about privacy? <a href="mailto:[[Contact Email]]">[[Contact Email]]</a>.</p>
+        </section>
+
+        <!-- ===== Cookie Policy ===== -->
+        <section id="cookies" class="legal-card">
+          <h2>Cookie Policy</h2>
+          <p>We use cookies and similar technologies to operate the Service, remember preferences, measure performance, and personalize content. Where required, we will request your consent (and you can withdraw it at any time).</p>
+          <h5>Types</h5>
+          <ul>
+            <li><strong>Strictly necessary</strong> — essential for login, security, and core features</li>
+            <li><strong>Performance</strong> — analytics and diagnostics</li>
+            <li><strong>Functional</strong> — preferences and UI settings</li>
+            <li><strong>Advertising</strong> — if used, for measurement and personalization (consent-based)</li>
+          </ul>
+          <p>You can control cookies in your browser and via our cookie settings (where available).</p>
+        </section>
+
+        <!-- ===== Data Processing Addendum (for B2B) ===== -->
+        <section id="dpa" class="legal-card">
+          <h2>Data Processing Addendum (DPA)</h2>
+          <p>This DPA applies where we process personal data on your behalf as a <strong>processor</strong>. If you are a business customer and require a signed DPA, contact <a href="mailto:[[Contact Email]]">[[Contact Email]]</a>.</p>
+          <h5>1. Roles</h5>
+          <p>You are the controller and appoint us as processor to process Customer Personal Data to provide the Service.</p>
+          <h5>2. Processor Obligations</h5>
+          <ul>
+            <li>process only on documented instructions;</li>
+            <li>ensure confidentiality and appropriate security (Article 32 GDPR);</li>
+            <li>assist with data subject requests and DPIAs where applicable;</li>
+            <li>use sub-processors under written contracts ensuring equivalent protections;</li>
+            <li>notify you without undue delay of personal data breaches;</li>
+            <li>delete or return data upon termination (subject to legal obligations);</li>
+            <li>make information available to demonstrate compliance and allow audits (subject to confidentiality and reasonable limits).</li>
+          </ul>
+          <h5>3. International Transfers</h5>
+          <p>Where transfers occur, we implement UK/EU Standard Contractual Clauses plus supplementary measures.</p>
+          <h5>4. Sub-processors</h5>
+          <p>We may engage sub-processors; current lists are available on request. You may subscribe to change notifications.</p>
+        </section>
+
+        <section class="legal-card">
+          <p class="small muted mb-0">
+            If these documents conflict, the order of precedence is: (1) a signed Order Form or MSLA; (2) the DPA (for processing); (3) the Terms of Service; (4) the EULA; (5) the AUP; (6) policies (Privacy, Cookies).
+          </p>
+        </section>
+      </div>
+
+      <!-- Right rail TOC -->
+      <aside class="col-12 col-lg-4">
+        <nav class="legal-toc">
+          <div class="mb-1 fw-bold">Jump to</div>
+          <a href="#tos">Terms of Service</a>
+          <a href="#eula">EULA</a>
+          <a href="#aup">Acceptable Use Policy</a>
+          <a href="#disclaimer">Professional & Financial Disclaimers</a>
+          <a href="#privacy">Privacy Policy</a>
+          <a href="#cookies">Cookie Policy</a>
+          <a href="#dpa">Data Processing Addendum</a>
+        </nav>
+      </aside>
+    </div>
+
+    <div class="mt-4 text-center small muted">
+      © <span id="legal-year"></span> [[Company Name]]. All rights reserved.
+    </div>
+  </main>
+
+  <script>
+    // Tiny enhancement: set footer year
+    document.getElementById('legal-year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

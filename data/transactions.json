@@ -1,0 +1,91 @@
+{
+  "transactions": [
+    { "date": "2024-09-01", "amount": 4000,  "category": "Salary",          "accountId": "cash-1", "description": "Employer Ltd" },
+    { "date": "2024-09-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2024-09-08", "amount": -320,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2024-09-12", "amount": -180,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2024-09-18", "amount": -110,  "category": "Insurance",        "accountId": "cash-1" },
+    { "date": "2024-09-22", "amount": -140,  "category": "Transport",        "accountId": "cash-1" },
+    { "date": "2024-09-28", "amount": -220,  "category": "Shopping",         "accountId": "cash-1" },
+
+    { "date": "2024-10-01", "amount": 4000,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2024-10-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2024-10-08", "amount": -340,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2024-10-14", "amount": -190,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2024-10-17", "amount": -120,  "category": "Transport",        "accountId": "cash-1" },
+    { "date": "2024-10-20", "amount": -260,  "category": "Shopping",         "accountId": "cash-1" },
+    { "date": "2024-10-28", "amount":  200,  "category": "Dividends",        "accountId": "cash-1" },
+
+    { "date": "2024-11-01", "amount": 4050,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2024-11-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2024-11-08", "amount": -360,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2024-11-12", "amount": -185,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2024-11-18", "amount": -130,  "category": "Transport",        "accountId": "cash-1" },
+    { "date": "2024-11-21", "amount": -280,  "category": "Shopping",         "accountId": "cash-1" },
+    { "date": "2024-11-28", "amount":  180,  "category": "Dividends",        "accountId": "cash-1" },
+
+    { "date": "2024-12-01", "amount": 4050,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2024-12-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2024-12-08", "amount": -380,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2024-12-12", "amount": -190,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2024-12-20", "amount": -450,  "category": "Gifts",            "accountId": "cash-1" },
+    { "date": "2024-12-22", "amount": -310,  "category": "Entertainment",    "accountId": "cash-1" },
+
+    { "date": "2025-01-01", "amount": 4100,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-01-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-01-08", "amount": -355,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-01-12", "amount": -195,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-01-16", "amount": -160,  "category": "Transport",        "accountId": "cash-1" },
+    { "date": "2025-01-28", "amount":  220,  "category": "Dividends",        "accountId": "cash-1" },
+
+    { "date": "2025-02-01", "amount": 4100,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-02-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-02-08", "amount": -370,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-02-12", "amount": -195,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-02-17", "amount": -210,  "category": "Transport",        "accountId": "cash-1" },
+    { "date": "2025-02-20", "amount": -260,  "category": "Shopping",         "accountId": "cash-1" },
+
+    { "date": "2025-03-01", "amount": 4150,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-03-05", "amount": -1500, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-03-08", "amount": -360,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-03-12", "amount": -200,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-03-19", "amount": -180,  "category": "Insurance",        "accountId": "cash-1" },
+    { "date": "2025-03-28", "amount":  250,  "category": "Dividends",        "accountId": "cash-1" },
+
+    { "date": "2025-04-01", "amount": 4150,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-04-05", "amount": -1520, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-04-08", "amount": -370,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-04-12", "amount": -205,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-04-20", "amount": -420,  "category": "Travel",           "accountId": "cash-1" },
+
+    { "date": "2025-05-01", "amount": 4200,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-05-05", "amount": -1520, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-05-08", "amount": -380,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-05-12", "amount": -205,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-05-18", "amount": -240,  "category": "Shopping",         "accountId": "cash-1" },
+    { "date": "2025-05-28", "amount":  230,  "category": "Dividends",        "accountId": "cash-1" },
+
+    { "date": "2025-06-01", "amount": 4200,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-06-05", "amount": -1520, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-06-08", "amount": -365,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-06-12", "amount": -210,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-06-16", "amount": -150,  "category": "Transport",        "accountId": "cash-1" },
+
+    { "date": "2025-07-01", "amount": 4250,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-07-05", "amount": -1520, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-07-08", "amount": -375,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-07-12", "amount": -210,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-07-20", "amount": -480,  "category": "Travel",           "accountId": "cash-1" },
+    { "date": "2025-07-28", "amount":  240,  "category": "Dividends",        "accountId": "cash-1" },
+
+    { "date": "2025-08-01", "amount": 4250,  "category": "Salary",          "accountId": "cash-1" },
+    { "date": "2025-08-05", "amount": -1520, "category": "Rent/Mortgage",    "accountId": "cash-1" },
+    { "date": "2025-08-08", "amount": -390,  "category": "Food & Groceries", "accountId": "cash-1" },
+    { "date": "2025-08-12", "amount": -215,  "category": "Utilities",        "accountId": "cash-1" },
+    { "date": "2025-08-18", "amount": -260,  "category": "Shopping",         "accountId": "cash-1" },
+    { "date": "2025-08-22", "amount": -160,  "category": "Transport",        "accountId": "cash-1" },
+    { "date": "2025-08-28", "amount":  260,  "category": "Dividends",        "accountId": "cash-1" }
+  ]
+}
+
+  
