@@ -60,6 +60,132 @@
   };
   const STATUS_ORDER = { connected: 0, pending: 1, error: 1, not_connected: 2 };
 
+  const TL_BANK_LIBRARY = [
+    {
+      id: 'santander',
+      name: 'Santander UK',
+      tagline: 'Current & savings accounts',
+      gradient: 'linear-gradient(140deg, rgba(236,0,0,.85), rgba(255,94,94,.85))',
+      icon: '🏦',
+      brandColor: '#d00000',
+      accentColor: '#ff6b6b',
+      accounts: [
+        { type: 'Current account', currency: 'GBP' },
+        { type: 'Savings account', currency: 'GBP' }
+      ]
+    },
+    {
+      id: 'monzo',
+      name: 'Monzo',
+      tagline: 'Personal & joint smart banking',
+      gradient: 'linear-gradient(140deg, rgba(255,82,119,.9), rgba(255,165,94,.85))',
+      icon: '💳',
+      brandColor: '#ff526d',
+      accentColor: '#ffa55e',
+      accounts: [
+        { type: 'Personal current', currency: 'GBP' },
+        { type: 'Joint account', currency: 'GBP' }
+      ]
+    },
+    {
+      id: 'starling',
+      name: 'Starling Bank',
+      tagline: 'Award-winning current accounts',
+      gradient: 'linear-gradient(140deg, rgba(90,103,216,.9), rgba(14,116,144,.85))',
+      icon: '🪙',
+      brandColor: '#5a67d8',
+      accentColor: '#0e7490',
+      accounts: [
+        { type: 'Personal current', currency: 'GBP' },
+        { type: 'Business current', currency: 'GBP' }
+      ]
+    },
+    {
+      id: 'nationwide',
+      name: 'Nationwide Building Society',
+      tagline: 'Mortgages and savings',
+      gradient: 'linear-gradient(140deg, rgba(23,37,84,.92), rgba(99,102,241,.75))',
+      icon: '🏠',
+      brandColor: '#1e3a8a',
+      accentColor: '#6366f1',
+      accounts: [
+        { type: 'Mortgage', currency: 'GBP' },
+        { type: 'Savings account', currency: 'GBP' }
+      ]
+    },
+    {
+      id: 'lloyds',
+      name: 'Lloyds Bank',
+      tagline: 'Everyday banking & credit',
+      gradient: 'linear-gradient(140deg, rgba(16,185,129,.9), rgba(56,189,248,.7))',
+      icon: '🐎',
+      brandColor: '#10b981',
+      accentColor: '#38bdf8',
+      accounts: [
+        { type: 'Current account', currency: 'GBP' },
+        { type: 'Credit card', currency: 'GBP' }
+      ]
+    },
+    {
+      id: 'other',
+      name: 'Another UK institution',
+      tagline: 'Easily add any supported bank',
+      gradient: 'linear-gradient(140deg, rgba(148,163,184,.85), rgba(100,116,139,.85))',
+      icon: '✨',
+      brandColor: '#64748b',
+      accentColor: '#94a3b8',
+      accounts: [
+        { type: 'Custom account', currency: 'GBP' }
+      ]
+    }
+  ];
+
+  const STATUS_TEXT = {
+    connected: 'Active',
+    not_connected: 'Inactive',
+    error: 'Attention required',
+    pending: 'Action required'
+  };
+
+  const isBankConnection = (integration) => (integration?.metadata?.type === 'bank_connection');
+  const providerFrom = (integration) => normaliseKey(integration?.metadata?.provider || integration?.metadata?.parentKey || integration?.key || '');
+
+  const bankById = (id) => TL_BANK_LIBRARY.find((bank) => bank.id === id);
+  const bankInitials = (name='') => {
+    const parts = String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2);
+    if (!parts.length) return '💷';
+    return parts.map((p) => p[0]?.toUpperCase() || '').join('');
+  };
+  const withAlpha = (hex, alpha=0.18) => {
+    if (!hex) return `rgba(67,56,202,${alpha})`;
+    let raw = hex.replace('#', '');
+    if (raw.length === 3) raw = raw.split('').map((c) => c + c).join('');
+    const bigint = parseInt(raw, 16);
+    if (Number.isNaN(bigint)) return `rgba(67,56,202,${alpha})`;
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+  const getConnectionsForProvider = (provider) => {
+    const norm = normaliseKey(provider);
+    return INTEGRATIONS.filter((integration) => isBankConnection(integration) && providerFrom(integration) === norm);
+  };
+  const statusForProvider = (integration, connections=[]) => {
+    if (connections.length) {
+      const connected = connections.filter((c) => c.status === 'connected').length;
+      const needsAction = connections.filter((c) => c.status === 'pending' || c.status === 'error').length;
+      if (connected) return 'connected';
+      if (needsAction) return 'pending';
+      return 'not_connected';
+    }
+    return integration.status || integration.defaultStatus || 'not_connected';
+  };
+  const accountsSummary = (accounts=[]) => {
+    if (!Array.isArray(accounts) || !accounts.length) return 'No accounts added yet';
+    return accounts.map((acct) => acct?.type || acct?.name || 'Account').join(' · ');
+  };
+
   function setTileGrid(stats) {
     const wrap = $('#stat-tiles');
     wrap.innerHTML = '';
@@ -182,18 +308,34 @@
   function updateIntegrationSummary() {
     const summary = $('#integration-summary');
     if (!summary) return;
-    if (!INTEGRATIONS.length) {
-      summary.textContent = 'No integrations available yet.';
+    if (!INTEGRATION_CATALOG.length) {
+      summary.textContent = 'Loading integration catalogue…';
       return;
     }
-    const connected = INTEGRATIONS.filter((i) => i.status === 'connected').length;
-    const pending = INTEGRATIONS.filter((i) => i.status === 'pending' || i.status === 'error').length;
-    let text = connected
-      ? `${connected} integration${connected === 1 ? '' : 's'} connected`
-      : 'No live integrations yet — connect to unlock automations.';
-    if (pending) {
-      text += ` · ${pending} pending action${pending === 1 ? '' : 's'}`;
+
+    const bankConnections = INTEGRATIONS.filter((item) => isBankConnection(item) && !item.comingSoon);
+    const connectedBanks = bankConnections.filter((item) => item.status === 'connected').length;
+    const pendingBanks = bankConnections.filter((item) => item.status === 'pending' || item.status === 'error').length;
+
+    const tlCatalog = INTEGRATION_CATALOG.find((item) => item.key === 'truelayer');
+    const hmrcCatalog = INTEGRATION_CATALOG.find((item) => item.key === 'hmrc');
+
+    let text = '';
+    if (connectedBanks) {
+      text = `${connectedBanks} bank connection${connectedBanks === 1 ? '' : 's'} active via TrueLayer`;
+      if (pendingBanks) text += ` · ${pendingBanks} awaiting renewal`;
+    } else if (bankConnections.length) {
+      text = 'Bank connections added — renew to activate sync.';
+    } else if (tlCatalog?.missingEnv?.length) {
+      text = `Add ${tlCatalog.missingEnv.join(', ')} in Render to launch TrueLayer.`;
+    } else {
+      text = 'No live integrations yet — connect your bank to unlock automations.';
     }
+
+    if (hmrcCatalog?.comingSoon) {
+      text += ' · HMRC Making Tax Digital coming soon';
+    }
+
     summary.textContent = text;
   }
 
@@ -203,47 +345,152 @@
     wrap.classList.remove('opacity-50');
     wrap.innerHTML = '';
 
-    if (!INTEGRATIONS.length) {
+    if (!INTEGRATIONS.length && !INTEGRATION_CATALOG.length) {
       wrap.innerHTML = '<div class="text-muted small">Integration catalogue is loading…</div>';
       updateIntegrationSummary();
       return;
     }
 
-    for (const integration of INTEGRATIONS) {
-      const statusMeta = STATUS_META[integration.status] || STATUS_META.not_connected;
+    const baseItems = INTEGRATIONS.filter((item) => !isBankConnection(item));
+    if (!baseItems.length) {
+      wrap.innerHTML = '<div class="text-muted small">Integration catalogue is loading…</div>';
+      updateIntegrationSummary();
+      return;
+    }
+
+    for (const integration of baseItems) {
+      const providerKey = normaliseKey(integration.key);
+      const connections = getConnectionsForProvider(providerKey);
+      const displayStatus = statusForProvider(integration, connections);
+      const statusMeta = STATUS_META[displayStatus] || STATUS_META.not_connected;
       const envMissing = Array.isArray(integration.missingEnv) && integration.missingEnv.length;
       const card = document.createElement('div');
       card.className = 'integration-card';
       card.dataset.key = integration.key;
-      card.dataset.status = integration.status;
+      card.dataset.status = displayStatus;
+      card.dataset.kind = 'provider';
+
+      const docsLink = integration.docsUrl ? `<a href="${integration.docsUrl}" target="_blank" rel="noopener">Docs</a>` : '';
+      const description = integration.description || (integration.comingSoon ? 'This connection is on the way — we will let you know as soon as it is ready.' : 'Connect to stream live financial data into your analytics.');
+      const connectionBadge = providerKey === 'truelayer'
+        ? `<span class="integration-badge">${connections.length ? `${connections.length} bank${connections.length === 1 ? '' : 's'} configured` : 'No banks linked yet'}</span>`
+        : '';
+
+      const metaParts = [statusMeta.label];
+      if (providerKey === 'truelayer' && connections.length) {
+        const connectedCount = connections.filter((c) => c.status === 'connected').length;
+        const inactiveCount = connections.length - connectedCount;
+        metaParts.push(`${connectedCount} active`);
+        if (inactiveCount > 0) metaParts.push(`${inactiveCount} inactive`);
+      }
+      if (integration.lastCheckedAt) metaParts.push(`Updated ${isoToNice(integration.lastCheckedAt)}`);
+      if (docsLink) metaParts.push(docsLink);
+
+      const actions = [];
+      if (integration.comingSoon) {
+        actions.push('<button class="btn btn-sm btn-secondary" type="button" disabled>Coming soon</button>');
+      } else if (providerKey === 'truelayer') {
+        const primaryLabel = connections.length ? 'Add another bank' : 'Connect bank';
+        const disabledAttr = envMissing ? ' disabled' : '';
+        actions.push(`<button class="btn btn-sm btn-primary" data-action="connect"${disabledAttr}>${primaryLabel}</button>`);
+        actions.push('<button class="btn btn-sm btn-outline-secondary" data-action="manage">Manage</button>');
+      } else if (!integration.isCatalog) {
+        actions.push(`<button class="btn btn-sm btn-primary" data-action="connect">${integration.status === 'connected' ? 'Manage connection' : 'Connect'}</button>`);
+        actions.push('<button class="btn btn-sm btn-outline-secondary" data-action="edit">Edit</button>');
+        actions.push('<button class="btn btn-sm btn-link text-danger" data-action="delete">Delete</button>');
+      } else {
+        actions.push('<button class="btn btn-sm btn-outline-secondary" data-action="manage">Manage</button>');
+      }
+
+      const envNotice = (!integration.comingSoon && envMissing)
+        ? `<div class="alert alert-warning border border-warning-subtle small mb-0">Set up pending — add ${integration.missingEnv.map((v) => `<code>${escapeHtml(v)}</code>`).join(', ')} in Render before launching.</div>`
+        : '';
+
       card.innerHTML = `
         <div class="integration-card-header">
           <span class="integration-status-dot ${statusMeta.dot}"></span>
           <div class="flex-grow-1">
             <div class="d-flex align-items-center gap-2 flex-wrap">
               <h6>${escapeHtml(integration.label)}</h6>
-              ${integration.comingSoon ? '<span class="badge-coming-soon">Coming soon</span>' : ''}
+              ${integration.comingSoon ? '<span class="badge-coming-soon">Coming soon</span>' : connectionBadge}
             </div>
             <div class="meta">${escapeHtml(integration.category || 'Data source')}</div>
           </div>
         </div>
-        <div class="text-muted small">${escapeHtml(integration.description || (integration.comingSoon ? 'This connection is on the way — we will let you know as soon as it is ready.' : 'Connect to stream live financial data into your analytics.'))}</div>
-        ${envMissing ? `<div class="alert alert-warning border border-warning-subtle small mb-0">Set up pending — add missing environment variables (${integration.missingEnv.map((v) => escapeHtml(v)).join(', ')}) before launching the flow.</div>` : ''}
+        <div class="text-muted small">${escapeHtml(description)}</div>
+        ${envNotice}
         <div class="integration-actions">
-          <button class="btn btn-sm btn-primary" data-action="connect">${integration.status === 'connected' ? 'Manage connection' : 'Connect'}</button>
-          <button class="btn btn-sm btn-outline-secondary" data-action="edit">Edit</button>
-          <button class="btn btn-sm btn-link text-danger" data-action="delete">Delete</button>
+          ${actions.join(' ')}
         </div>
         <div class="integration-meta">
-          <span>${statusMeta.label}</span>
-          ${integration.lastCheckedAt ? `<span>Updated ${isoToNice(integration.lastCheckedAt)}</span>` : ''}
-          ${integration.docsUrl ? `<a href="${integration.docsUrl}" target="_blank" rel="noopener">Docs</a>` : ''}
+          ${metaParts.map((part) => `<span>${part}</span>`).join('')}
         </div>
       `;
       wrap.appendChild(card);
+
+      if (connections.length) {
+        connections.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+        for (const connection of connections) {
+          wrap.appendChild(renderConnectionCard(connection));
+        }
+      }
     }
 
     updateIntegrationSummary();
+  }
+
+  function renderConnectionCard(connection) {
+    const statusMeta = STATUS_META[connection.status] || STATUS_META.not_connected;
+    const card = document.createElement('div');
+    card.className = 'integration-card';
+    card.dataset.key = connection.key;
+    card.dataset.status = connection.status;
+    card.dataset.kind = 'connection';
+
+    const institution = connection.metadata?.institution || {};
+    const bankMeta = bankById(institution.id) || {};
+    const brandColor = institution.brandColor || bankMeta.brandColor || '#4338ca';
+    const avatarContent = institution.icon || bankMeta.icon || bankInitials(institution.name || connection.label);
+    const statusText = STATUS_TEXT[connection.status] || (STATUS_META[connection.status]?.label ?? 'Status');
+    const accounts = Array.isArray(connection.metadata?.accounts) ? connection.metadata.accounts : [];
+    const accountSummaryText = accountsSummary(accounts);
+    const refreshed = connection.metadata?.lastRefreshedAt ? isoToNice(connection.metadata.lastRefreshedAt) : null;
+    const addedAt = connection.metadata?.addedAt ? isoToNice(connection.metadata.addedAt) : null;
+    const sandboxBadge = connection.metadata?.sandbox ? '<span class="connection-badge">Sandbox</span>' : '';
+
+    const metaPieces = [
+      `<span class="status-text">${escapeHtml(statusText)}</span>`,
+      `<span>${escapeHtml(accountSummaryText)}</span>`
+    ];
+    if (refreshed) metaPieces.push(`<span>Refreshed ${escapeHtml(refreshed)}</span>`);
+    else metaPieces.push('<span>Awaiting first sync</span>');
+    if (addedAt) metaPieces.push(`<span>Linked ${escapeHtml(addedAt)}</span>`);
+
+    card.innerHTML = `
+      <div class="integration-card-header">
+        <div class="connection-avatar" style="background:${brandColor}; box-shadow:0 12px 26px ${withAlpha(brandColor,0.35)};">
+          ${escapeHtml(avatarContent)}
+        </div>
+        <div class="flex-grow-1">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <h6>${escapeHtml(connection.label)}</h6>
+            <span class="connection-badge">via TrueLayer</span>
+            ${sandboxBadge}
+          </div>
+          <div class="meta">${escapeHtml(institution.tagline || accountSummaryText)}</div>
+        </div>
+        <span class="integration-status-dot ${statusMeta.dot}"></span>
+      </div>
+      <div class="integration-meta">
+        ${metaPieces.join('')}
+      </div>
+      <div class="integration-actions">
+        <button class="btn btn-sm btn-outline-secondary" data-action="edit">Edit</button>
+        <button class="btn btn-sm btn-primary" data-action="renew">Renew connection</button>
+        <button class="btn btn-sm btn-link text-danger" data-action="delete">Delete</button>
+      </div>
+    `;
+    return card;
   }
 
   function createBlankIntegration() {
@@ -272,17 +519,24 @@
       wrap.addEventListener('click', (event) => {
         const btn = event.target.closest('[data-action]');
         if (!btn) return;
+        if (btn.hasAttribute('disabled')) return;
         const card = btn.closest('[data-key]');
         if (!card) return;
         const integration = INTEGRATIONS.find((i) => i.key === card.dataset.key);
         if (!integration) return;
         const action = btn.dataset.action;
+        const kind = card.dataset.kind || (isBankConnection(integration) ? 'connection' : 'provider');
         if (action === 'delete') {
           deleteIntegration(integration);
         } else if (action === 'edit') {
           openIntegrationSheet(integration, 'edit');
+        } else if (action === 'manage') {
+          openIntegrationSheet(integration, 'manage');
+        } else if (action === 'renew') {
+          renewIntegration(integration);
         } else if (action === 'connect') {
-          openIntegrationSheet(integration, integration.status === 'connected' ? 'manage' : 'connect');
+          if (kind === 'provider') openIntegrationSheet(integration, 'connect');
+          else openIntegrationSheet(integration, integration.status === 'connected' ? 'manage' : 'connect');
         }
       });
     }
@@ -313,6 +567,19 @@
   }
 
   function openIntegrationSheet(integration, mode='edit') {
+    const providerKey = normaliseKey(integration?.key || '');
+    if (providerKey === 'truelayer' && mode !== 'create' && !isBankConnection(integration)) {
+      renderTruelayerProviderSheet(integration, mode);
+      return;
+    }
+    if (isBankConnection(integration) && providerFrom(integration) === 'truelayer') {
+      renderTruelayerConnectionSheet(integration, mode);
+      return;
+    }
+    renderGenericIntegrationSheet(integration, mode);
+  }
+
+  function renderGenericIntegrationSheet(integration, mode='edit') {
     const sheet = $('#integration-sheet');
     if (!sheet) return;
     ACTIVE_INTEGRATION = { ...integration, metadata: { ...(integration.metadata || {}) } };
@@ -407,6 +674,7 @@
 
     const saveBtn = $('#intg-sheet-save');
     if (saveBtn) {
+      saveBtn.style.display = '';
       if (integration.comingSoon) {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Coming soon';
@@ -419,13 +687,239 @@
     }
   }
 
+  function renderTruelayerProviderSheet(integration, mode='connect') {
+    const sheet = $('#integration-sheet');
+    if (!sheet) return;
+    ACTIVE_INTEGRATION = { ...integration, metadata: { ...(integration.metadata || {}) } };
+    SHEET_MODE = 'truelayer-connect';
+
+    const connections = getConnectionsForProvider('truelayer');
+    const displayStatus = statusForProvider(integration, connections);
+    const statusMeta = STATUS_META[displayStatus] || STATUS_META.not_connected;
+    const envMissing = Array.isArray(integration.missingEnv) && integration.missingEnv.length;
+
+    sheet.hidden = false;
+    requestAnimationFrame(() => sheet.classList.add('open'));
+
+    const title = $('#intg-sheet-title');
+    if (title) title.textContent = 'Link a bank via TrueLayer';
+    const subtitle = $('#intg-sheet-sub');
+    if (subtitle) subtitle.textContent = `${statusMeta.label} · Bank connections`;
+
+    const statusAlert = envMissing
+      ? `<div class="alert alert-warning border border-warning-subtle">TrueLayer credentials missing — add ${integration.missingEnv.map((v) => `<code>${escapeHtml(v)}</code>`).join(', ')} in Render to enable the flow.</div>`
+      : '<div class="alert alert-success border border-success-subtle">Credentials detected — launch the secure TrueLayer flow to connect your accounts.</div>';
+
+    const connectionSummary = connections.length
+      ? `<div class="small text-muted">Currently linked: ${connections.map((c) => escapeHtml(c.label)).join(', ')}.</div>`
+      : '<div class="small text-muted">No banks linked yet — choose an institution below to get started.</div>';
+
+    const cards = TL_BANK_LIBRARY.map((bank) => {
+      const gradient = bank.gradient || 'linear-gradient(140deg, rgba(99,102,241,.8), rgba(67,56,202,.65))';
+      const disabledAttr = envMissing ? ' aria-disabled="true"' : '';
+      const existing = connections.some((c) => (c.metadata?.institution?.id || '') === bank.id && c.status === 'connected');
+      const chipLabel = envMissing ? 'Awaiting setup' : (existing ? 'Add another' : 'Connect');
+      const iconSpan = bank.icon ? `<span>${escapeHtml(bank.icon)}</span>` : '';
+      return `
+        <div class="tl-bank-card" data-bank-id="${bank.id}" style="--bank-gradient:${gradient};"${disabledAttr}>
+          <div class="bank-name">${escapeHtml(bank.name)}</div>
+          <div class="bank-tagline">${escapeHtml(bank.tagline)}</div>
+          <div class="bank-chip">${iconSpan}<span>${escapeHtml(chipLabel)}</span></div>
+        </div>
+      `;
+    }).join('');
+
+    const body = $('#intg-sheet-body');
+    if (body) {
+      body.innerHTML = `
+        <div id="truelayer-status"></div>
+        <div class="tl-sheet-hero">
+          <div class="eyebrow">Open banking</div>
+          <h5>Connect your bank in seconds</h5>
+          <p>Phloat.io uses TrueLayer’s secure consent flow so you can link UK accounts with the same sleek experience you expect from modern fintech leaders.</p>
+        </div>
+        ${statusAlert}
+        ${connectionSummary}
+        <div class="tl-bank-grid mt-3">
+          ${cards}
+        </div>
+        <div class="tl-sheet-footnote mt-3">Selecting a bank launches the TrueLayer consent journey. We honour <code>TL_USE_SANDBOX</code> when configured so you can test safely before going live.</div>
+      `;
+    }
+
+    const foot = $('#intg-sheet-footnote');
+    if (foot) {
+      foot.innerHTML = '<a href="https://docs.truelayer.com/" target="_blank" rel="noopener">Review the TrueLayer documentation</a>';
+    }
+
+    const saveBtn = $('#intg-sheet-save');
+    if (saveBtn) {
+      saveBtn.style.display = 'none';
+      saveBtn.onclick = null;
+    }
+
+    sheet.querySelectorAll('[data-bank-id]').forEach((card) => {
+      card.addEventListener('click', () => {
+        if (card.getAttribute('aria-disabled') === 'true') return;
+        const bank = bankById(card.dataset.bankId);
+        if (!bank) return;
+        launchTruelayerConnection(bank, card);
+      });
+    });
+  }
+
+  function renderTruelayerConnectionSheet(integration, mode='edit') {
+    const sheet = $('#integration-sheet');
+    if (!sheet) return;
+    ACTIVE_INTEGRATION = { ...integration, metadata: { ...(integration.metadata || {}) } };
+    SHEET_MODE = mode;
+
+    const meta = STATUS_META[integration.status] || STATUS_META.not_connected;
+    const institution = integration.metadata?.institution || {};
+    const accounts = Array.isArray(integration.metadata?.accounts) ? integration.metadata.accounts : [];
+    const addedAt = integration.metadata?.addedAt ? isoToNice(integration.metadata.addedAt) : null;
+    const refreshed = integration.metadata?.lastRefreshedAt ? isoToNice(integration.metadata.lastRefreshedAt) : null;
+
+    sheet.hidden = false;
+    requestAnimationFrame(() => sheet.classList.add('open'));
+
+    const title = $('#intg-sheet-title');
+    if (title) title.textContent = integration.label || institution.name || 'Bank connection';
+    const subtitle = $('#intg-sheet-sub');
+    if (subtitle) subtitle.textContent = `TrueLayer · ${meta.label}`;
+
+    const accountItems = accounts.length
+      ? accounts.map((acct) => `<li>${escapeHtml(acct.type || acct.name || 'Account')}${acct.currency ? ` · ${escapeHtml(acct.currency)}` : ''}</li>`).join('')
+      : '<li>No account details captured yet.</li>';
+
+    const body = $('#intg-sheet-body');
+    if (body) {
+      body.innerHTML = `
+        <div class="alert alert-light border border-secondary-subtle d-flex flex-column gap-1">
+          <strong>${escapeHtml(institution.name || integration.label || 'Linked bank')}</strong>
+          <span>Connected via TrueLayer${addedAt ? ` · Linked ${escapeHtml(addedAt)}` : ''}${refreshed ? ` · Last refreshed ${escapeHtml(refreshed)}` : ''}</span>
+        </div>
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Display name</label>
+            <input type="text" class="form-control" id="intg-field-name" value="${escapeAttr(integration.metadata?.nickname || integration.label || institution.name || '')}" />
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Status</label>
+            <select class="form-select" id="intg-field-status">
+              ${Object.entries(STATUS_META).map(([value, m]) => `<option value="${value}" ${value === integration.status ? 'selected' : ''}>${m.label}</option>`).join('')}
+            </select>
+            <div class="form-text">Use “Inactive” if you want to pause sync without removing the connection.</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Accounts captured</label>
+            <ul class="env-list mt-2">${accountItems}</ul>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" id="intg-field-notes" rows="3" placeholder="Credentials, renewal cadence, anything the team should know.">${escapeHtml(integration.metadata?.notes || '')}</textarea>
+          </div>
+        </div>
+      `;
+    }
+
+    const foot = $('#intg-sheet-footnote');
+    if (foot) {
+      foot.innerHTML = 'Use “Renew connection” to refresh OAuth consent whenever the bank requires re-authentication.';
+    }
+
+    const saveBtn = $('#intg-sheet-save');
+    if (saveBtn) {
+      saveBtn.style.display = '';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save connection';
+      saveBtn.onclick = handleIntegrationSave;
+    }
+  }
+
+  async function launchTruelayerConnection(bank, cardEl=null) {
+    const statusBox = $('#truelayer-status');
+    if (cardEl) {
+      cardEl.setAttribute('aria-disabled', 'true');
+      cardEl.style.transition = 'opacity .3s ease';
+      cardEl.style.opacity = '0.6';
+    }
+    if (statusBox) {
+      statusBox.innerHTML = `<div class="alert alert-info border border-info-subtle">Launching the ${escapeHtml(bank.name)} consent flow…</div>`;
+    }
+
+    try {
+      const res = await Auth.fetch('/api/integrations/truelayer/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          institution: {
+            id: bank.id,
+            name: bank.name,
+            brandColor: bank.brandColor,
+            accentColor: bank.accentColor,
+            icon: bank.icon,
+            tagline: bank.tagline
+          },
+          accounts: bank.accounts
+        })
+      });
+      if (!res.ok) {
+        let message = 'Unable to launch the connection.';
+        try {
+          const err = await res.json();
+          if (err?.error) message = err.error;
+        } catch {}
+        throw new Error(message);
+      }
+
+      let payload = null;
+      try { payload = await res.json(); } catch {}
+      await loadIntegrations(payload);
+
+      const latest = INTEGRATIONS.find((item) => normaliseKey(item.key) === 'truelayer');
+      if (latest) ACTIVE_INTEGRATION = { ...latest, metadata: { ...(latest.metadata || {}) } };
+
+      if (statusBox) {
+        statusBox.innerHTML = `<div class="alert alert-success border border-success-subtle">Connected to ${escapeHtml(bank.name)} — we will begin syncing data immediately.</div>`;
+      }
+
+      const saveBtn = $('#intg-sheet-save');
+      if (saveBtn) {
+        saveBtn.style.display = '';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Done';
+        saveBtn.onclick = closeIntegrationSheet;
+      }
+    } catch (err) {
+      console.error('TrueLayer connection failed', err);
+      if (statusBox) {
+        statusBox.innerHTML = `<div class="alert alert-danger border border-danger-subtle">${escapeHtml(err.message || 'Connection failed.')}</div>`;
+      } else {
+        alert(err.message || 'Connection failed.');
+      }
+    } finally {
+      if (cardEl) {
+        cardEl.removeAttribute('aria-disabled');
+        cardEl.style.opacity = '';
+      }
+    }
+  }
+
   function closeIntegrationSheet() {
     const sheet = $('#integration-sheet');
     if (!sheet || sheet.hidden) return;
     sheet.classList.remove('open');
     const saveBtn = $('#intg-sheet-save');
-    if (saveBtn) saveBtn.onclick = null;
+    if (saveBtn) {
+      saveBtn.onclick = null;
+      saveBtn.style.display = '';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save changes';
+    }
     setTimeout(() => { sheet.hidden = true; }, 220);
+    const statusBox = $('#truelayer-status');
+    if (statusBox) statusBox.innerHTML = '';
     ACTIVE_INTEGRATION = null;
     SHEET_MODE = 'edit';
   }
@@ -450,6 +944,10 @@
     const metadata = { ...(ACTIVE_INTEGRATION.metadata || {}) };
     if (descEl) metadata.description = descEl.value.trim();
     if (notesEl) metadata.notes = notesEl.value.trim();
+    if (isBankConnection(ACTIVE_INTEGRATION)) {
+      if (nameEl) metadata.nickname = nameEl.value.trim();
+      metadata.lastManagedAt = new Date().toISOString();
+    }
 
     let key = ACTIVE_INTEGRATION.key;
     if (!key || mode === 'create') {
@@ -501,17 +999,64 @@
 
   async function deleteIntegration(integration) {
     if (!integration?.key) return;
+    const isBank = isBankConnection(integration);
     const confirmMsg = integration.status === 'connected'
-      ? `Disconnect ${integration.label}?`
+      ? `Disconnect ${integration.label}?${isBank ? ' This will pause live syncing.' : ''}`
       : `Remove ${integration.label}?`;
     if (!window.confirm(confirmMsg)) return;
     try {
       const res = await Auth.fetch(`/api/integrations/${encodeURIComponent(integration.key)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Unable to remove integration.');
-      await loadIntegrations();
+      if (!res.ok) {
+        let message = 'Unable to remove integration.';
+        try {
+          const err = await res.json();
+          if (err?.error) message = err.error;
+        } catch {}
+        throw new Error(message);
+      }
+      let payload = null;
+      try { payload = await res.json(); } catch {}
+      await loadIntegrations(payload);
     } catch (err) {
       console.error('Integration delete failed', err);
       alert(err.message || 'Failed to delete integration.');
+    }
+  }
+
+  async function renewIntegration(integration) {
+    if (!integration?.key) return;
+    try {
+      const res = await Auth.fetch(`/api/integrations/${encodeURIComponent(integration.key)}/renew`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) {
+        let message = 'Unable to renew connection.';
+        try {
+          const err = await res.json();
+          if (err?.error) message = err.error;
+        } catch {}
+        throw new Error(message);
+      }
+      let payload = null;
+      try { payload = await res.json(); } catch {}
+      await loadIntegrations(payload);
+
+      const wrap = $('#integration-list');
+      if (wrap) {
+        const note = document.createElement('div');
+        note.className = 'alert alert-success border border-success-subtle small';
+        note.textContent = `${integration.label || 'Connection'} renewed — we will refresh data shortly.`;
+        wrap.prepend(note);
+        setTimeout(() => {
+          note.style.transition = 'opacity .3s ease';
+          note.style.opacity = '0';
+          setTimeout(() => note.remove(), 320);
+        }, 2400);
+      }
+    } catch (err) {
+      console.error('Integration renew failed', err);
+      alert(err.message || 'Failed to renew connection.');
     }
   }
 
