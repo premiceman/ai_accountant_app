@@ -2,13 +2,29 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
 const User = require('../models/User');
+const PaymentMethod = require('../models/PaymentMethod');
+const Subscription = require('../models/Subscription');
+
+const { sendEmailVerification } = require('../services/mailer');
 
 const router = express.Router();
 
 const TOKEN_TTL  = process.env.JWT_EXPIRES_IN || '2h';
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me';
 const LEGAL_VERSION = process.env.LEGAL_VERSION || '2025-09-15';
+const TRIAL_DAYS    = Number(process.env.SIGNUP_TRIAL_DAYS || 30);
+const COUPON_LIFETIME_TIER = 'phloatadmin1998';
+
+const INTEGRATION_SEEDS = [
+  { key: 'hmrc',       label: 'HMRC Portal' },
+  { key: 'truelayer',  label: 'TrueLayer' },
+  { key: 'companies',  label: 'Companies House' },
+  { key: 'quickbooks', label: 'QuickBooks' },
+  { key: 'xero',       label: 'Xero' }
+];
 
 const issueToken = (userId) => jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 
@@ -23,6 +39,14 @@ function publicUser(u) {
     email: u.email || '',
     dateOfBirth: u.dateOfBirth || null,
     licenseTier: u.licenseTier || 'free',
+    roles: Array.isArray(u.roles) ? u.roles : ['user'],
+    country: u.country || 'uk',
+    emailVerified: !!u.emailVerified,
+    subscription: u.subscription || { tier: 'free', status: 'inactive' },
+    trial: u.trial || null,
+    preferences: u.preferences || {},
+    onboarding: u.onboarding || {},
+    usageStats: u.usageStats || {},
     eulaAcceptedAt: u.eulaAcceptedAt || null,
     eulaVersion: u.eulaVersion || null,
     createdAt: u.createdAt,
@@ -34,6 +58,45 @@ function normEmail(x) { return String(x || '').trim().toLowerCase(); }
 function normUsername(x) { return String(x || '').trim(); }
 function isValidEmail(x) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || ''));
+}
+
+function createVerificationToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function determinePlan(tierRaw, couponRaw) {
+  const tier = String(tierRaw || 'starter').toLowerCase();
+  const coupon = String(couponRaw || '').trim().toLowerCase();
+
+  if (coupon === COUPON_LIFETIME_TIER) {
+    return {
+      tier: 'premium',
+      status: 'active',
+      trial: { startedAt: new Date(), endsAt: null, coupon: couponRaw, requiresPaymentMethod: false }
+    };
+  }
+
+  const supported = ['starter','growth','premium'];
+  const resolvedTier = supported.includes(tier) ? tier : 'starter';
+  const now = new Date();
+  const ends = new Date(now.getTime() + TRIAL_DAYS * 86400 * 1000);
+
+  return {
+    tier: resolvedTier,
+    status: 'trial',
+    trial: { startedAt: now, endsAt: ends, coupon: couponRaw || null, requiresPaymentMethod: true },
+    renewsAt: ends
+  };
+}
+
+function seedIntegrations(existing = []) {
+  const byKey = new Map((existing || []).map((i) => [i.key, i]));
+  return INTEGRATION_SEEDS.map((seed) => ({
+    ...seed,
+    status: byKey.get(seed.key)?.status || 'not_connected',
+    lastCheckedAt: byKey.get(seed.key)?.lastCheckedAt || null,
+    metadata: byKey.get(seed.key)?.metadata || {}
+  }));
 }
 
 // GET /api/auth/check?email=&username=
@@ -67,7 +130,13 @@ router.post('/signup', async (req, res) => {
       password, passwordConfirm,
       dateOfBirth,
       agreeLegal,         // boolean
-      legalVersion        // optional override from client; we still set server-side
+      legalVersion,       // optional override from client; we still set server-side
+      planTier,
+      couponCode,
+      paymentMethod,
+      billingAddress,
+      selectedGoals,
+      country,
     } = req.body || {};
 
     // Required checks
@@ -105,6 +174,8 @@ router.post('/signup', async (req, res) => {
 
     // Create
     const hash = await bcrypt.hash(String(password), 10);
+    const plan = determinePlan(planTier, couponCode);
+
     const user = new User({
       firstName: String(firstName).trim(),
       lastName:  String(lastName).trim(),
@@ -114,12 +185,78 @@ router.post('/signup', async (req, res) => {
       dateOfBirth: dob,
       eulaAcceptedAt: new Date(),
       eulaVersion: String(legalVersion || LEGAL_VERSION),
+      licenseTier: plan.tier === 'premium' ? 'premium' : plan.tier,
+      roles: ['user'],
+      country: country === 'us' ? 'us' : 'uk',
+      subscription: {
+        tier: plan.tier,
+        status: plan.status || 'trial',
+        lastPlanChange: new Date(),
+        renewsAt: plan.renewsAt || plan.trial?.endsAt || null
+      },
+      trial: plan.trial || null,
+      onboarding: {
+        goals: Array.isArray(selectedGoals) ? selectedGoals.filter(Boolean) : [],
+        wizardCompletedAt: null,
+        tourCompletedAt: null,
+        lastPromptedAt: new Date()
+      },
+      integrations: seedIntegrations(),
+      usageStats: {
+        documentsUploaded: 0,
+        documentsRequiredMet: 0,
+        moneySavedEstimate: 0,
+        hmrcFilingsComplete: 0,
+        minutesActive: 0
+      },
       // uid auto-generates via schema default
     });
+    const verificationToken = createVerificationToken();
+    user.emailVerification = {
+      token: verificationToken,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      sentAt: new Date()
+    };
     await user.save();
 
-    const token = issueToken(user._id);
-    res.status(201).json({ token, user: publicUser(user) });
+    // Attach payment method (demo storage, PAN/CVV never persisted)
+    if (paymentMethod && paymentMethod.last4) {
+      const pm = new PaymentMethod({
+        userId: user._id,
+        brand: paymentMethod.brand || 'Card',
+        last4: String(paymentMethod.last4).slice(-4),
+        expMonth: paymentMethod.expMonth || null,
+        expYear: paymentMethod.expYear || null,
+        holder: paymentMethod.holder || `${user.firstName} ${user.lastName}`,
+        isDefault: true
+      });
+      await pm.save();
+    }
+
+    await Subscription.create({
+      userId: user._id,
+      plan: plan.tier,
+      interval: 'monthly',
+      price: 0,
+      currency: 'GBP',
+      status: plan.status === 'active' ? 'active' : 'active',
+      currentPeriodEnd: plan.renewsAt || plan.trial?.endsAt || null
+    });
+
+    try {
+      await sendEmailVerification({
+        to: user.email,
+        name: `${user.firstName} ${user.lastName}`.trim(),
+        token: verificationToken
+      });
+    } catch (emailErr) {
+      console.warn('Signup email dispatch failed:', emailErr);
+    }
+
+    res.status(201).json({
+      requiresEmailVerification: true,
+      user: publicUser(user)
+    });
   } catch (e) {
     console.error('Signup error:', e);
     if (e?.code === 11000) {
@@ -146,10 +283,40 @@ router.post('/login', async (req, res) => {
     const ok = await bcrypt.compare(String(password), user.password);
     if (!ok) return res.status(400).json({ error: 'Invalid credentials' });
 
+    if (!user.emailVerified) {
+      return res.status(403).json({ error: 'Please verify your email to continue.', needsVerification: true });
+    }
+
     const token = issueToken(user._id);
     res.json({ token, user: publicUser(user) });
   } catch (e) {
     console.error('Login error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/auth/verify-email
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+
+    const user = await User.findOne({ 'emailVerification.token': token });
+    if (!user) return res.status(400).json({ error: 'Invalid or expired token' });
+
+    const { expiresAt } = user.emailVerification || {};
+    if (expiresAt && expiresAt < new Date()) {
+      return res.status(400).json({ error: 'Token has expired' });
+    }
+
+    user.emailVerified = true;
+    user.emailVerification = { token: null, expiresAt: null, sentAt: null };
+    await user.save();
+
+    const jwtToken = issueToken(user._id);
+    res.json({ token: jwtToken, user: publicUser(user) });
+  } catch (e) {
+    console.error('Verify email error:', e);
     res.status(500).json({ error: 'Server error' });
   }
 });

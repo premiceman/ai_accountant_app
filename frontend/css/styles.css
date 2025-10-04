@@ -47,6 +47,18 @@
   
   /* cards */
   .card{background:var(--bg-surface); border:1px solid var(--bd-hairline); box-shadow:var(--shadow)}
+  .card.locked{filter:grayscale(.5); opacity:.6}
+
+  .locked-overlay{
+    position:absolute; inset:0;
+    background:rgba(8,16,32,0.68);
+    color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:2rem;
+  }
+  .locked-overlay__content{max-width:320px;}
+  [data-required-tier]{position:relative;}
+  [data-required-tier] .card{position:relative; overflow:hidden;}
   
   /* buttons */
   .btn,.btn-primary,.btn-secondary{

@@ -29,7 +29,10 @@
     if (input) { input.classList.remove('is-invalid','is-valid'); }
   }
   function clearAll() {
-    ['firstName','lastName','username','email','dateOfBirth','password','passwordConfirm','agreeLegal'].forEach(clearField);
+    [
+      'firstName','lastName','username','email','dateOfBirth','password','passwordConfirm','agreeLegal',
+      'couponCode','cardHolder','cardBrand','cardLast4','cardExpMonth','cardExpYear'
+    ].forEach(clearField);
   }
   function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || '')); }
 
@@ -100,6 +103,15 @@
       const password        = val('password');
       const passwordConfirm = val('passwordConfirm');
       const agreeLegal      = document.getElementById('agreeLegal')?.checked === true;
+      const couponCode      = val('couponCode');
+      const planTier        = document.querySelector('input[name="planTier"]:checked')?.value || 'starter';
+      const country         = $('#country')?.value || 'uk';
+      const goals           = Array.from(document.querySelectorAll('#goal-options input[type="checkbox"]:checked')).map((el) => el.value);
+      const cardHolder      = val('cardHolder');
+      const cardBrand       = $('#cardBrand')?.value || 'Card';
+      const cardLast4       = val('cardLast4');
+      const cardExpMonth    = val('cardExpMonth');
+      const cardExpYear     = val('cardExpYear');
 
       // Client-side validations
       if (!firstName) setErr('firstName','First name is required');
@@ -112,6 +124,14 @@
       if (!passwordConfirm) setErr('passwordConfirm','Please confirm your password');
       else if (password && passwordConfirm && password !== passwordConfirm) setErr('passwordConfirm','Passwords do not match');
       if (!agreeLegal) setErr('agreeLegal','You must agree to the Terms to create an account');
+
+      const couponUnlimited = couponCode.toLowerCase() === 'phloatadmin1998';
+      if (!couponUnlimited) {
+        if (!cardHolder) setErr('cardHolder','Card holder name is required');
+        if (!cardLast4 || cardLast4.length !== 4) setErr('cardLast4','Enter the last 4 digits');
+        if (!cardExpMonth || Number(cardExpMonth) < 1 || Number(cardExpMonth) > 12) setErr('cardExpMonth','Invalid month');
+        if (!cardExpYear || Number(cardExpYear) < new Date().getFullYear()) setErr('cardExpYear','Invalid year');
+      }
 
       if (document.querySelector('.is-invalid')) return;
 
@@ -137,7 +157,18 @@
             firstName, lastName, username, email, dateOfBirth,
             password, passwordConfirm,
             agreeLegal: true,
-            legalVersion: LEGAL_VERSION
+            legalVersion: LEGAL_VERSION,
+            planTier,
+            couponCode,
+            country,
+            selectedGoals: goals,
+            paymentMethod: couponUnlimited ? null : {
+              holder: cardHolder,
+              brand: cardBrand,
+              last4: cardLast4,
+              expMonth: cardExpMonth,
+              expYear: cardExpYear
+            }
           })
         });
         const data = await res.json().catch(() => ({}));
@@ -151,15 +182,24 @@
           else setErr('email', msg);
           return;
         }
+        if (data.requiresEmailVerification) {
+          form.innerHTML = `
+            <div class="text-center py-4">
+              <div class="mb-3"><i class="bi bi-envelope-check text-primary" style="font-size:2rem;"></i></div>
+              <h3 class="h5">Verify your email</h3>
+              <p class="text-muted">We have sent a confirmation link to <strong>${email}</strong>. Please verify your email to activate your trial.</p>
+              <p class="small text-muted">Once confirmed you can sign in and continue the onboarding wizard.</p>
+              <a class="btn btn-outline-primary mt-3" href="/login.html">Return to sign in</a>
+            </div>`;
+          return;
+        }
         if (data.token) Auth.setToken(data.token);
-        const params = new URLSearchParams(location.search);
-        const next = params.get('next');
-        location.replace(next && next.startsWith('/') ? next : './home.html');
+        location.replace('./home.html');
       } catch (err) {
         console.error('Signup POST error:', err);
         setErr('email','Network error — please try again');
       } finally {
-        if (btn) btn.textContent = original || 'Create account';
+        if (btn) btn.textContent = original || 'Start free trial';
         btn?.removeAttribute('disabled');
       }
     });

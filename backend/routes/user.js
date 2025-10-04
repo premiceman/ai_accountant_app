@@ -3,6 +3,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const PaymentMethod = require('../models/PaymentMethod');
 
 const router = express.Router();
 
@@ -17,6 +18,17 @@ function publicUser(u) {
     email: u.email || '',
     dateOfBirth: u.dateOfBirth || null,
     licenseTier: u.licenseTier || 'free',
+    roles: Array.isArray(u.roles) ? u.roles : ['user'],
+    country: u.country || 'uk',
+    emailVerified: !!u.emailVerified,
+    subscription: u.subscription || { tier: 'free', status: 'inactive' },
+    trial: u.trial || null,
+    onboarding: u.onboarding || {},
+    preferences: u.preferences || {},
+    usageStats: u.usageStats || {},
+    salaryNavigator: u.salaryNavigator || {},
+    wealthPlan: u.wealthPlan || {},
+    integrations: u.integrations || [],
     eulaAcceptedAt: u.eulaAcceptedAt || null,
     eulaVersion: u.eulaVersion || null,
     createdAt: u.createdAt,
@@ -33,7 +45,15 @@ router.get('/me', auth, async (req, res) => {
 
 // PUT /api/user/me  (update your own profile)
 router.put('/me', auth, async (req, res) => {
-  const { firstName, lastName, username, email } = req.body || {};
+  const {
+    firstName,
+    lastName,
+    username,
+    email,
+    country,
+    preferences,
+    onboarding
+  } = req.body || {};
   if (!firstName || !lastName || !email) {
     return res.status(400).json({ error: 'firstName, lastName and email are required' });
   }
@@ -49,8 +69,23 @@ router.put('/me', auth, async (req, res) => {
       if (existsU) return res.status(400).json({ error: 'Username already in use' });
     }
 
+    const existing = await User.findById(req.user.id);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
     const update = { firstName, lastName, email };
     if (typeof username === 'string') update.username = username;
+    if (country && ['uk','us'].includes(country)) update.country = country;
+    if (preferences && typeof preferences === 'object') {
+      update.preferences = {
+        ...(existing?.preferences?.toObject ? existing.preferences.toObject() : existing?.preferences || {}),
+        ...preferences
+      };
+    }
+    if (onboarding && typeof onboarding === 'object') {
+      update.onboarding = {
+        ...(existing?.onboarding?.toObject ? existing.onboarding.toObject() : existing?.onboarding || {}),
+        ...onboarding
+      };
+    }
 
     const updated = await User.findByIdAndUpdate(
       req.user.id,
@@ -60,6 +95,57 @@ router.put('/me', auth, async (req, res) => {
     res.json(publicUser(updated));
   } catch (e) {
     console.error('PUT /user/me error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/user/me/payment-methods
+router.get('/me/payment-methods', auth, async (req, res) => {
+  try {
+    const methods = await PaymentMethod.find({ userId: req.user.id }).sort({ createdAt: -1 }).lean();
+    res.json({ methods });
+  } catch (e) {
+    console.error('GET /user/me/payment-methods error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PATCH /api/user/preferences
+router.patch('/preferences', auth, async (req, res) => {
+  try {
+    const { deltaMode, analyticsRange } = req.body || {};
+    const update = {};
+    if (deltaMode && ['absolute','percent'].includes(deltaMode)) {
+      update['preferences.deltaMode'] = deltaMode;
+    }
+    if (analyticsRange && typeof analyticsRange === 'object') {
+      update['preferences.analyticsRange'] = {
+        preset: analyticsRange.preset || null,
+        start: analyticsRange.start ? new Date(analyticsRange.start) : null,
+        end: analyticsRange.end ? new Date(analyticsRange.end) : null
+      };
+    }
+    const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true });
+    res.json({ preferences: user.preferences });
+  } catch (e) {
+    console.error('PATCH /user/preferences error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PATCH /api/user/onboarding
+router.patch('/onboarding', auth, async (req, res) => {
+  try {
+    const { wizardCompleted, tourCompleted, goals } = req.body || {};
+    const update = {};
+    if (wizardCompleted) update['onboarding.wizardCompletedAt'] = new Date();
+    if (tourCompleted) update['onboarding.tourCompletedAt'] = new Date();
+    if (Array.isArray(goals)) update['onboarding.goals'] = goals.filter(Boolean);
+    update['onboarding.lastPromptedAt'] = new Date();
+    const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true });
+    res.json({ onboarding: user.onboarding });
+  } catch (e) {
+    console.error('PATCH /user/onboarding error:', e);
     res.status(500).json({ error: 'Server error' });
   }
 });
