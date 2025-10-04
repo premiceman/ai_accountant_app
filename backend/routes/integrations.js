@@ -1,5 +1,6 @@
 // backend/routes/integrations.js
 const express = require('express');
+const crypto = require('crypto');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 
@@ -12,46 +13,19 @@ const CATALOG = [
     key: 'truelayer',
     label: 'TrueLayer Open Banking',
     category: 'Bank connections',
-    description: 'Launch a Revolut-style open banking flow to sync balances, transactions and statements across UK institutions.',
-    env: ['TRUELAYER_CLIENT_ID', 'TRUELAYER_CLIENT_SECRET', 'TRUELAYER_REDIRECT_URI'],
+    description: 'Launch a Revolut-style flow that lets individuals securely link their UK bank accounts in seconds.',
+    env: ['TL_CLIENT_ID', 'TL_CLIENT_SECRET', 'TL_REDIRECT_URI'],
     docsUrl: 'https://docs.truelayer.com/',
-    help: 'Ensure your TrueLayer credentials are configured in Render. Once active, customers can launch the familiar bank selection flow to link accounts instantly.'
+    help: 'Set TL_CLIENT_ID, TL_CLIENT_SECRET, TL_REDIRECT_URI (and optionally TL_USE_SANDBOX) in Render. Once present, Phloat.io can open the familiar TrueLayer consent journey for instant account linking.'
   },
   {
     key: 'hmrc',
     label: 'HMRC Making Tax Digital',
     category: 'Government filings',
-    description: 'Connect to HMRC for Self Assessment, VAT and PAYE data in real time.',
+    description: 'Securely stream Self Assessment obligations and tax statements directly from HMRC.',
     comingSoon: true,
     docsUrl: 'https://developer.service.hmrc.gov.uk/',
-    help: 'HMRC APIs require production credentials and agent authorisation. We will guide you through the flow once the sandbox is approved.'
-  },
-  {
-    key: 'companies-house',
-    label: 'Companies House',
-    category: 'Compliance',
-    description: 'Pull filing deadlines, PSC registers and corporate data for UK companies.',
-    env: ['COMPANIES_HOUSE_API_KEY'],
-    docsUrl: 'https://developer.company-information.service.gov.uk/',
-    help: 'Generate an API key in the Companies House developer hub and add it to your Render environment variables to enable automatic filing insights.'
-  },
-  {
-    key: 'xero',
-    label: 'Xero Accounting',
-    category: 'Accounting platforms',
-    description: 'Synchronise journals, VAT returns and expense coding from Xero.',
-    env: ['XERO_CLIENT_ID', 'XERO_CLIENT_SECRET'],
-    docsUrl: 'https://developer.xero.com/documentation/api-guides/partner-app-setup',
-    help: 'Create an OAuth2 app within the Xero developer portal, then paste the client credentials into Render to unlock seamless ledger syncing.'
-  },
-  {
-    key: 'quickbooks',
-    label: 'QuickBooks Online',
-    category: 'Accounting platforms',
-    description: 'Bring invoices, payroll and expense data from QuickBooks Online.',
-    env: ['QBO_CLIENT_ID', 'QBO_CLIENT_SECRET'],
-    docsUrl: 'https://developer.intuit.com/app/developer/qbo/docs/get-started',
-    help: 'Set your Intuit app credentials in Render. Once present, launch the OAuth2 consent to connect your QuickBooks company.'
+    help: 'HMRC integrations require production approval and agent services enrolment. We will notify you as soon as the connection is ready to launch.'
   }
 ];
 
@@ -88,11 +62,128 @@ function cataloguePayload() {
   });
 }
 
+function ensureBaseIntegration(list, key, label) {
+  const idx = list.findIndex((i) => normaliseKey(i.key) === normaliseKey(key));
+  const existing = idx >= 0 ? list[idx] : null;
+  const payload = {
+    key: normaliseKey(key),
+    label: label || existing?.label || key,
+    status: 'connected',
+    lastCheckedAt: new Date(),
+    metadata: existing?.metadata || {}
+  };
+  if (idx >= 0) {
+    list[idx] = { ...list[idx], ...payload };
+  } else {
+    list.push(payload);
+  }
+}
+
+function sanitiseInstitution(raw = {}) {
+  return {
+    id: String(raw.id || '').toLowerCase(),
+    name: String(raw.name || '').trim(),
+    brandColor: raw.brandColor || null,
+    accentColor: raw.accentColor || null,
+    icon: raw.icon || null,
+    tagline: raw.tagline || null
+  };
+}
+
+function buildConnectionKey(provider, slug) {
+  return `${normaliseKey(provider)}:${String(slug).toLowerCase()}`;
+}
+
+function randomSuffix() {
+  return crypto.randomBytes(5).toString('hex');
+}
+
 // GET /api/integrations
 router.get('/', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({ integrations: user.integrations || [], catalog: cataloguePayload() });
+});
+
+// POST /api/integrations/:key/connections
+router.post('/:key/connections', auth, async (req, res) => {
+  const provider = normaliseKey(req.params.key);
+  if (provider !== 'truelayer') {
+    return res.status(404).json({ error: 'Unsupported integration provider' });
+  }
+
+  const user = await User.findById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const institution = sanitiseInstitution(req.body?.institution || {});
+  if (!institution.id || !institution.name) {
+    return res.status(400).json({ error: 'Institution details are required.' });
+  }
+
+  const accounts = Array.isArray(req.body?.accounts) ? req.body.accounts : [];
+  const connectionId = `${institution.id}-${randomSuffix()}`;
+  const key = buildConnectionKey(provider, connectionId);
+
+  const list = Array.isArray(user.integrations) ? [...user.integrations] : [];
+  ensureBaseIntegration(list, provider, 'TrueLayer Open Banking');
+
+  if (list.some((i) => normaliseKey(i.key) === key)) {
+    return res.status(400).json({ error: 'Connection already exists.' });
+  }
+
+  const payload = {
+    key,
+    label: institution.name,
+    status: 'connected',
+    lastCheckedAt: new Date(),
+    metadata: {
+      type: 'bank_connection',
+      provider,
+      connectionId,
+      institution,
+      accounts,
+      notes: req.body?.notes || '',
+      sandbox: process.env.TL_USE_SANDBOX === 'true',
+      addedAt: new Date(),
+      lastRefreshedAt: new Date(),
+    }
+  };
+
+  list.push(payload);
+  user.integrations = list;
+  await user.save();
+
+  res.json({ integration: payload, integrations: list, catalog: cataloguePayload() });
+});
+
+// POST /api/integrations/:key/renew
+router.post('/:key/renew', auth, async (req, res) => {
+  const integKey = normaliseKey(req.params.key);
+  const user = await User.findById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const list = Array.isArray(user.integrations) ? [...user.integrations] : [];
+  const idx = list.findIndex((i) => normaliseKey(i.key) === integKey);
+  if (idx < 0) return res.status(404).json({ error: 'Integration not found' });
+
+  const now = new Date();
+  const metadata = {
+    ...(list[idx].metadata || {}),
+    lastRefreshedAt: now,
+    lastRenewalNote: req.body?.note || 'Renewed via dashboard'
+  };
+
+  list[idx] = {
+    ...list[idx],
+    status: 'connected',
+    lastCheckedAt: now,
+    metadata
+  };
+
+  user.integrations = list;
+  await user.save();
+
+  res.json({ integration: list[idx], integrations: list, catalog: cataloguePayload() });
 });
 
 // PUT /api/integrations/:key
@@ -121,9 +212,17 @@ router.put('/:key', auth, async (req, res) => {
   if (idx >= 0) list[idx] = { ...list[idx], ...payload };
   else list.push(payload);
 
+  const targetIdx = idx >= 0 ? idx : list.length - 1;
+  if (integKey === 'truelayer') {
+    const hasConnections = list.some((i) => normaliseKey(i.key).startsWith('truelayer:'));
+    if (hasConnections) {
+      list[targetIdx] = { ...list[targetIdx], status: 'connected' };
+    }
+  }
+
   user.integrations = list;
   await user.save();
-  res.json({ integration: payload, integrations: list });
+  res.json({ integration: list[targetIdx], integrations: list });
 });
 
 // DELETE /api/integrations/:key
@@ -132,9 +231,30 @@ router.delete('/:key', auth, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const integKey = normaliseKey(req.params.key);
-  user.integrations = (user.integrations || []).filter((i) => normaliseKey(i.key) !== integKey);
+  const list = Array.isArray(user.integrations) ? [...user.integrations] : [];
+  const filtered = list.filter((i) => normaliseKey(i.key) !== integKey);
+
+  const removed = filtered.length !== list.length;
+  if (!removed) {
+    return res.status(404).json({ error: 'Integration not found' });
+  }
+
+  // If a TrueLayer bank connection was removed, ensure the root tile reflects remaining connections
+  if (integKey.startsWith('truelayer:')) {
+    const hasConnections = filtered.some((i) => normaliseKey(i.key).startsWith('truelayer:'));
+    const baseIdx = filtered.findIndex((i) => normaliseKey(i.key) === 'truelayer');
+    if (baseIdx >= 0) {
+      filtered[baseIdx] = {
+        ...filtered[baseIdx],
+        status: hasConnections ? filtered[baseIdx].status : 'not_connected',
+        lastCheckedAt: new Date()
+      };
+    }
+  }
+
+  user.integrations = filtered;
   await user.save();
-  res.json({ ok: true });
+  res.json({ ok: true, integrations: filtered, catalog: cataloguePayload() });
 });
 
 module.exports = router;
