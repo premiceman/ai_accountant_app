@@ -156,6 +156,7 @@
       return;
     }
 
+    toggleDashboardEmpty(data.hasData);
     updateRangeLabel(data.range);
     renderSuggestions(data);
     renderAccounting(data);
@@ -283,6 +284,13 @@
     }
 
     setText('fp-perf-ytd', fp.investments?.ytd != null ? `YTD ${Number(fp.investments.ytd).toFixed(1)}%` : 'YTD —%');
+  }
+
+  function toggleDashboardEmpty(hasData) {
+    const el = byId('dashboard-empty-state');
+    if (!el) return;
+    if (hasData) el.classList.add('d-none');
+    else el.classList.remove('d-none');
   }
 
   // ----- Charts -----
