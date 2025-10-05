@@ -9,6 +9,10 @@
   let INTEGRATION_CATALOG = [];
   let ACTIVE_INTEGRATION = null;
   let SHEET_MODE = 'edit';
+  let TL_PROVIDER_CATALOG = [];
+  let TL_PROVIDER_LOADING = false;
+  let TL_PROVIDER_ERROR = null;
+  let TL_PROVIDER_PROMISE = null;
 
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
@@ -63,6 +67,8 @@
   const TL_BANK_LIBRARY = [
     {
       id: 'santander',
+      providerId: 'uk-ob-santander-personal',
+      providers: ['uk-oauth-santander'],
       name: 'Santander UK',
       tagline: 'Current & savings accounts',
       gradient: 'linear-gradient(140deg, rgba(236,0,0,.85), rgba(255,94,94,.85))',
@@ -76,6 +82,8 @@
     },
     {
       id: 'monzo',
+      providerId: 'uk-ob-monzo',
+      providers: ['uk-oauth-monzo'],
       name: 'Monzo',
       tagline: 'Personal & joint smart banking',
       gradient: 'linear-gradient(140deg, rgba(255,82,119,.9), rgba(255,165,94,.85))',
@@ -89,6 +97,8 @@
     },
     {
       id: 'starling',
+      providerId: 'uk-ob-starling',
+      providers: ['uk-oauth-starling'],
       name: 'Starling Bank',
       tagline: 'Award-winning current accounts',
       gradient: 'linear-gradient(140deg, rgba(90,103,216,.9), rgba(14,116,144,.85))',
@@ -102,6 +112,8 @@
     },
     {
       id: 'nationwide',
+      providerId: 'uk-ob-nationwide',
+      providers: ['uk-oauth-nationwide'],
       name: 'Nationwide Building Society',
       tagline: 'Mortgages and savings',
       gradient: 'linear-gradient(140deg, rgba(23,37,84,.92), rgba(99,102,241,.75))',
@@ -115,6 +127,8 @@
     },
     {
       id: 'lloyds',
+      providerId: 'uk-ob-lloyds-personal',
+      providers: ['uk-oauth-lloyds'],
       name: 'Lloyds Bank',
       tagline: 'Everyday banking & credit',
       gradient: 'linear-gradient(140deg, rgba(16,185,129,.9), rgba(56,189,248,.7))',
@@ -151,6 +165,7 @@
   const providerFrom = (integration) => normaliseKey(integration?.metadata?.provider || integration?.metadata?.parentKey || integration?.key || '');
 
   const bankById = (id) => TL_BANK_LIBRARY.find((bank) => bank.id === id);
+  const providerByProviderId = (providerId='') => TL_PROVIDER_CATALOG.find((p) => p.providerId === providerId);
   const bankInitials = (name='') => {
     const parts = String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2);
     if (!parts.length) return '💷';
@@ -755,6 +770,12 @@
         <div class="tl-bank-grid mt-3">
           ${cards}
         </div>
+        <div class="tl-provider-picker mt-4">
+          <label class="form-label">Prefer a different provider?</label>
+          <div id="tl-provider-select-wrap" class="tl-provider-select-wrap">
+            <div class="text-muted small">Search the full TrueLayer directory or pick from the favourites above.</div>
+          </div>
+        </div>
         <div class="tl-sheet-footnote mt-3">Selecting a bank launches the TrueLayer consent journey. We honour <code>TL_USE_SANDBOX</code> when configured so you can test safely before going live.</div>
       `;
     }
@@ -775,9 +796,15 @@
         if (card.getAttribute('aria-disabled') === 'true') return;
         const bank = bankById(card.dataset.bankId);
         if (!bank) return;
+        if (bank.id === 'other') {
+          populateTruelayerProviderPicker(true);
+          return;
+        }
         launchTruelayerConnection(bank, card);
       });
     });
+
+    populateTruelayerProviderPicker();
   }
 
   function renderTruelayerConnectionSheet(integration, mode='edit') {
@@ -871,8 +898,11 @@
             brandColor: bank.brandColor,
             accentColor: bank.accentColor,
             icon: bank.icon,
-            tagline: bank.tagline
-          }
+            tagline: bank.tagline,
+            providerId: bank.providerId,
+            providers: bank.providers
+          },
+          providers: Array.isArray(bank.providers) ? bank.providers : []
         })
       });
 
@@ -1346,3 +1376,150 @@
 
   document.addEventListener('DOMContentLoaded', init);
 })();
+  async function ensureTruelayerProviderCatalogue() {
+    if (TL_PROVIDER_CATALOG.length) return TL_PROVIDER_CATALOG;
+    if (TL_PROVIDER_PROMISE) return TL_PROVIDER_PROMISE;
+
+    TL_PROVIDER_LOADING = true;
+    TL_PROVIDER_ERROR = null;
+    TL_PROVIDER_PROMISE = Auth.fetch('/api/integrations/truelayer/providers')
+      .then(async (res) => {
+        let payload = {};
+        try { payload = await res.json(); } catch (_) {}
+        if (!res.ok) {
+          throw new Error(payload?.error || 'Unable to load provider directory.');
+        }
+        return Array.isArray(payload?.providers) ? payload.providers : [];
+      })
+      .then((list) => {
+        TL_PROVIDER_CATALOG = list;
+        return list;
+      })
+      .catch((err) => {
+        TL_PROVIDER_ERROR = err?.message || 'Unable to load provider directory.';
+        console.error('TrueLayer provider fetch failed', err);
+        return [];
+      })
+      .finally(() => {
+        TL_PROVIDER_LOADING = false;
+        TL_PROVIDER_PROMISE = null;
+      });
+
+    return TL_PROVIDER_PROMISE;
+  }
+
+  function providerToBank(provider) {
+    if (!provider) return null;
+    const slug = provider.slug || slugify(provider.displayName || provider.providerId || 'provider');
+    const name = provider.displayName || provider.providerId || 'TrueLayer provider';
+    const tagline = provider.releaseStage
+      ? `${cap(provider.releaseStage)} · TrueLayer partner`
+      : 'Direct TrueLayer connection';
+
+    return {
+      id: slug || provider.providerId || `provider-${Math.random().toString(36).slice(2,8)}`,
+      providerId: provider.providerId,
+      providers: Array.isArray(provider.providers) ? provider.providers : [],
+      name,
+      tagline,
+      icon: '🏦',
+      brandColor: null,
+      accentColor: null
+    };
+  }
+
+  async function populateTruelayerProviderPicker(focus=false) {
+    const wrap = $('#tl-provider-select-wrap');
+    if (!wrap) return;
+
+    wrap.innerHTML = '<div class="text-muted small">Loading TrueLayer providers…</div>';
+    const providers = await ensureTruelayerProviderCatalogue();
+
+    if (TL_PROVIDER_ERROR) {
+      wrap.innerHTML = `
+        <div class="alert alert-warning border border-warning-subtle">${escapeHtml(TL_PROVIDER_ERROR)}</div>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="tl-provider-retry">Retry</button>
+      `;
+      const retry = $('#tl-provider-retry');
+      if (retry) {
+        retry.addEventListener('click', () => {
+          TL_PROVIDER_CATALOG = [];
+          TL_PROVIDER_ERROR = null;
+          populateTruelayerProviderPicker(focus);
+        });
+      }
+      return;
+    }
+
+    if (!providers.length) {
+      wrap.innerHTML = '<div class="alert alert-info border border-info-subtle">TrueLayer did not return any providers for your credentials.</div>';
+      return;
+    }
+
+    const ukProviders = providers.filter((provider) => {
+      const countries = Array.isArray(provider.countries) ? provider.countries : [];
+      if (!countries.length) return true;
+      return countries.some((code) => ['GB', 'UK', 'GBR', 'United Kingdom'].includes(String(code).toUpperCase()));
+    });
+
+    const options = ukProviders.length ? ukProviders : providers;
+
+    const select = document.createElement('select');
+    select.className = 'form-select';
+    select.id = 'tl-provider-select';
+    select.innerHTML = [
+      '<option value="">Choose a bank…</option>',
+      ...options.map((provider) => `<option value="${escapeAttr(provider.providerId)}">${escapeHtml(provider.displayName || provider.providerId)}</option>`)
+    ].join('');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-primary';
+    btn.id = 'tl-provider-select-btn';
+    btn.textContent = 'Connect';
+
+    const group = document.createElement('div');
+    group.className = 'input-group';
+    group.appendChild(select);
+    group.appendChild(btn);
+
+    wrap.innerHTML = '';
+    wrap.appendChild(group);
+    const helper = document.createElement('div');
+    helper.className = 'form-text';
+    helper.textContent = 'Powered by TrueLayer provider directory.';
+    wrap.appendChild(helper);
+
+    btn.addEventListener('click', async () => {
+      if (!select.value) {
+        select.focus();
+        return;
+      }
+      const provider = providerByProviderId(select.value);
+      if (!provider) {
+        alert('Provider not recognised.');
+        return;
+      }
+      const bank = providerToBank(provider);
+      if (!bank) {
+        alert('Unable to launch provider.');
+        return;
+      }
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Launching…';
+      try {
+        await launchTruelayerConnection(bank);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+
+    if (focus) {
+      setTimeout(() => {
+        if (select.scrollIntoView) select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        select.focus();
+      }, 120);
+    }
+  }

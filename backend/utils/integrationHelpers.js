@@ -29,8 +29,16 @@ function ensureBaseIntegration(list, key, label) {
 }
 
 function sanitiseInstitution(raw = {}) {
+  const id = String(raw.id || '').trim();
+  const providerId = String(raw.providerId || raw.provider_id || '').trim();
+  const providers = Array.isArray(raw.providers)
+    ? raw.providers.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+
   return {
-    id: String(raw.id || '').toLowerCase(),
+    id: id ? id.toLowerCase() : '',
+    providerId: providerId || (id.startsWith('uk-') ? id : ''),
+    providers,
     name: String(raw.name || '').trim(),
     brandColor: raw.brandColor || null,
     accentColor: raw.accentColor || null,
