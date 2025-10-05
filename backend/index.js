@@ -14,6 +14,7 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
 const aiRouter     = safeRequire('./routes/ai')                   || safeRequire('./src/routes/ai');
+const plaidRouter  = safeRequire('./routes/plaid')                || safeRequire('./src/routes/plaid');
 
 
 const docsRouter =
@@ -79,6 +80,7 @@ mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
+mount('/api/plaid', plaidRouter, 'plaid');
 
 
 
