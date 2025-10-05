@@ -41,167 +41,6 @@
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-  const STATUS_META = {
-    not_connected: {
-      label: 'Not connected',
-      dot: 'status-red',
-      summary: 'Red indicator — integration is not yet configured.'
-    },
-    pending: {
-      label: 'Action required',
-      dot: 'status-amber',
-      summary: 'Amber indicator — needs attention before data can sync.'
-    },
-    error: {
-      label: 'Attention needed',
-      dot: 'status-amber',
-      summary: 'Amber indicator — connection reported an error.'
-    },
-    connected: {
-      label: 'Connected',
-      dot: 'status-green',
-      summary: 'Green indicator — everything is syncing as expected.'
-    }
-  };
-  const STATUS_ORDER = { connected: 0, pending: 1, error: 1, not_connected: 2 };
-
-  const TL_BANK_LIBRARY = [
-    {
-      id: 'santander',
-      providerId: 'uk-ob-santander-personal',
-      providers: ['uk-oauth-santander'],
-      name: 'Santander UK',
-      tagline: 'Current & savings accounts',
-      gradient: 'linear-gradient(140deg, rgba(236,0,0,.85), rgba(255,94,94,.85))',
-      icon: '🏦',
-      brandColor: '#d00000',
-      accentColor: '#ff6b6b',
-      accounts: [
-        { type: 'Current account', currency: 'GBP' },
-        { type: 'Savings account', currency: 'GBP' }
-      ]
-    },
-    {
-      id: 'monzo',
-      providerId: 'uk-ob-monzo',
-      providers: ['uk-oauth-monzo'],
-      name: 'Monzo',
-      tagline: 'Personal & joint smart banking',
-      gradient: 'linear-gradient(140deg, rgba(255,82,119,.9), rgba(255,165,94,.85))',
-      icon: '💳',
-      brandColor: '#ff526d',
-      accentColor: '#ffa55e',
-      accounts: [
-        { type: 'Personal current', currency: 'GBP' },
-        { type: 'Joint account', currency: 'GBP' }
-      ]
-    },
-    {
-      id: 'starling',
-      providerId: 'uk-ob-starling',
-      providers: ['uk-oauth-starling'],
-      name: 'Starling Bank',
-      tagline: 'Award-winning current accounts',
-      gradient: 'linear-gradient(140deg, rgba(90,103,216,.9), rgba(14,116,144,.85))',
-      icon: '🪙',
-      brandColor: '#5a67d8',
-      accentColor: '#0e7490',
-      accounts: [
-        { type: 'Personal current', currency: 'GBP' },
-        { type: 'Business current', currency: 'GBP' }
-      ]
-    },
-    {
-      id: 'nationwide',
-      providerId: 'uk-ob-nationwide',
-      providers: ['uk-oauth-nationwide'],
-      name: 'Nationwide Building Society',
-      tagline: 'Mortgages and savings',
-      gradient: 'linear-gradient(140deg, rgba(23,37,84,.92), rgba(99,102,241,.75))',
-      icon: '🏠',
-      brandColor: '#1e3a8a',
-      accentColor: '#6366f1',
-      accounts: [
-        { type: 'Mortgage', currency: 'GBP' },
-        { type: 'Savings account', currency: 'GBP' }
-      ]
-    },
-    {
-      id: 'lloyds',
-      providerId: 'uk-ob-lloyds-personal',
-      providers: ['uk-oauth-lloyds'],
-      name: 'Lloyds Bank',
-      tagline: 'Everyday banking & credit',
-      gradient: 'linear-gradient(140deg, rgba(16,185,129,.9), rgba(56,189,248,.7))',
-      icon: '🐎',
-      brandColor: '#10b981',
-      accentColor: '#38bdf8',
-      accounts: [
-        { type: 'Current account', currency: 'GBP' },
-        { type: 'Credit card', currency: 'GBP' }
-      ]
-    },
-    {
-      id: 'other',
-      name: 'Another UK institution',
-      tagline: 'Easily add any supported bank',
-      gradient: 'linear-gradient(140deg, rgba(148,163,184,.85), rgba(100,116,139,.85))',
-      icon: '✨',
-      brandColor: '#64748b',
-      accentColor: '#94a3b8',
-      accounts: [
-        { type: 'Custom account', currency: 'GBP' }
-      ]
-    }
-  ];
-
-  const STATUS_TEXT = {
-    connected: 'Active',
-    not_connected: 'Inactive',
-    error: 'Attention required',
-    pending: 'Action required'
-  };
-
-  const isBankConnection = (integration) => (integration?.metadata?.type === 'bank_connection');
-  const providerFrom = (integration) => normaliseKey(integration?.metadata?.provider || integration?.metadata?.parentKey || integration?.key || '');
-
-  const bankById = (id) => TL_BANK_LIBRARY.find((bank) => bank.id === id);
-  const providerByProviderId = (providerId='') => TL_PROVIDER_CATALOG.find((p) => p.providerId === providerId);
-  const bankInitials = (name='') => {
-    const parts = String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2);
-    if (!parts.length) return '💷';
-    return parts.map((p) => p[0]?.toUpperCase() || '').join('');
-  };
-  const withAlpha = (hex, alpha=0.18) => {
-    if (!hex) return `rgba(67,56,202,${alpha})`;
-    let raw = hex.replace('#', '');
-    if (raw.length === 3) raw = raw.split('').map((c) => c + c).join('');
-    const bigint = parseInt(raw, 16);
-    if (Number.isNaN(bigint)) return `rgba(67,56,202,${alpha})`;
-    const r = (bigint >> 16) & 255;
-    const g = (bigint >> 8) & 255;
-    const b = bigint & 255;
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  };
-  const getConnectionsForProvider = (provider) => {
-    const norm = normaliseKey(provider);
-    return INTEGRATIONS.filter((integration) => isBankConnection(integration) && providerFrom(integration) === norm);
-  };
-  const statusForProvider = (integration, connections=[]) => {
-    if (connections.length) {
-      const connected = connections.filter((c) => c.status === 'connected').length;
-      const needsAction = connections.filter((c) => c.status === 'pending' || c.status === 'error').length;
-      if (connected) return 'connected';
-      if (needsAction) return 'pending';
-      return 'not_connected';
-    }
-    return integration.status || integration.defaultStatus || 'not_connected';
-  };
-  const accountsSummary = (accounts=[]) => {
-    if (!Array.isArray(accounts) || !accounts.length) return 'No accounts added yet';
-    return accounts.map((acct) => acct?.type || acct?.name || 'Account').join(' · ');
-  };
-
   function setTileGrid(stats) {
     const wrap = $('#stat-tiles');
     wrap.innerHTML = '';
@@ -1335,7 +1174,7 @@
     if (['healthy', 'ok', 'active'].includes(status)) {
       return { label: 'Healthy', tone: 'ok', detail: '' };
     }
-    if (['needs_reconnect', 'requires_reconnect', 'requires_login', 'reauth'].includes(status)) {
+    if (['needs_reconnect', 'requires_reconnect', 'requires_login', 'login_required', 'reauth'].includes(status)) {
       return { label: 'Action required', tone: 'warn', detail: lastError?.message || 'Reconnect via Plaid Link.' };
     }
     if (['error', 'disconnected', 'blocked'].includes(status)) {
@@ -1368,6 +1207,7 @@
       const status = deriveConnectionStatus(item);
       const lastSync = item?.lastSyncedAt || item?.lastSyncAt || item?.syncedAt || item?.updatedAt;
       const linkedAt = item?.createdAt || item?.linkedAt;
+      const connectedUntil = item?.connectedUntil || item?.consentExpirationTime;
 
       const accountsHtml = accounts.length
         ? accounts.map(ac => {
@@ -1399,6 +1239,9 @@
       }
       if (item?.status?.description) metaParts.push(escapeHtml(item.status.description));
       if (status.detail) metaParts.push(escapeHtml(status.detail));
+      const expiryBadge = connectedUntil
+        ? `<div class="connection-expiry">Connected until ${escapeHtml(isoToNice(connectedUntil))}</div>`
+        : '';
 
       const tile = document.createElement('div');
       tile.className = 'connection-tile';
@@ -1414,6 +1257,7 @@
           </div>
           <div class="connection-actions">
             <span class="badge-status ${status.tone}">${escapeHtml(status.label)}</span>
+            ${expiryBadge}
             <button class="btn btn-outline-primary btn-sm" type="button" data-action="renew">Renew</button>
             <button class="btn btn-outline-danger btn-sm" type="button" data-action="delete">Remove</button>
           </div>
