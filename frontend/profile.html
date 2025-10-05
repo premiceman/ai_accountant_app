@@ -164,6 +164,88 @@
     .tl-bank-card[aria-disabled="true"]::after{ opacity:.35; }
     .tl-bank-card[aria-disabled="true"]:hover{ transform:none; box-shadow:none; }
 
+    .tl-provider-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+      gap:14px;
+      margin-top:16px;
+    }
+    .tl-provider-card{
+      position:relative;
+      display:flex;
+      align-items:center;
+      gap:14px;
+      width:100%;
+      border-radius:18px;
+      padding:14px 16px;
+      border:1px solid rgba(148,163,184,.2);
+      background:linear-gradient(135deg, rgba(30,41,59,.92), rgba(15,23,42,.82));
+      color:#f8fafc;
+      cursor:pointer;
+      transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    .tl-provider-card:hover{
+      transform:translateY(-3px);
+      box-shadow:0 18px 36px rgba(15,23,42,.28);
+      border-color:rgba(99,102,241,.4);
+    }
+    .tl-provider-card[aria-disabled="true"]{
+      cursor:not-allowed;
+      opacity:.6;
+      box-shadow:none;
+    }
+    .tl-provider-card .tl-provider-logo{
+      width:44px;
+      height:44px;
+      border-radius:14px;
+      overflow:hidden;
+      flex-shrink:0;
+      box-shadow:0 10px 20px rgba(15,23,42,.4);
+      background:rgba(255,255,255,.1);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:600;
+      font-size:1.05rem;
+      color:#e0e7ff;
+    }
+    .tl-provider-card .tl-provider-logo img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+    .tl-provider-card .tl-provider-info{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+    .tl-provider-card .provider-name{
+      font-weight:600;
+      font-size:1rem;
+    }
+    .tl-provider-card .provider-meta{
+      font-size:.78rem;
+      opacity:.8;
+      display:flex;
+      flex-wrap:wrap;
+      gap:.5rem;
+    }
+    .tl-provider-card .provider-tagline{
+      font-size:.78rem;
+      opacity:.7;
+    }
+    .tl-provider-card .provider-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:.35rem;
+      font-size:.72rem;
+      padding:.2rem .55rem;
+      border-radius:999px;
+      background:rgba(15,23,42,.45);
+      box-shadow:inset 0 0 0 1px rgba(226,232,240,.18);
+    }
+    .tl-provider-card .provider-chip svg{ width:14px; height:14px; }
+
     .tl-sheet-hero{ display:flex; flex-direction:column; gap:.6rem; }
     .tl-sheet-hero .eyebrow{ font-size:.72rem; text-transform:uppercase; letter-spacing:.12em; color:#a5b4fc; }
     .tl-sheet-footnote{ font-size:.78rem; color:var(--muted); }
@@ -279,7 +361,6 @@
                   <h5 class="mb-0">Integrations</h5>
                   <div class="muted small">Control the live data sources that power your analytics.</div>
                 </div>
-                <button class="btn btn-sm btn-outline-primary" id="integration-add" type="button">Add custom</button>
               </div>
               <div id="integration-flash" class="mb-3"></div>
               <div id="integration-summary" class="small text-muted mb-3">Loading integration catalogue…</div>

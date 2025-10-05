@@ -520,25 +520,6 @@
     return card;
   }
 
-  function createBlankIntegration() {
-    return {
-      key: '',
-      label: '',
-      category: 'Custom data source',
-      description: '',
-      status: 'not_connected',
-      metadata: {},
-      requiredEnv: [],
-      missingEnv: [],
-      envReady: true,
-      comingSoon: false,
-      docsUrl: null,
-      help: 'Outline how this custom connection should be used so every teammate is aligned.',
-      lastCheckedAt: null,
-      isCatalog: false
-    };
-  }
-
   function bindIntegrationEvents() {
     const wrap = $('#integration-list');
     if (wrap && !wrap.dataset.bound) {
@@ -575,14 +556,6 @@
         if (ev.target === sheet) closeIntegrationSheet();
       });
       sheet.querySelectorAll('[data-close-sheet]').forEach((btn) => btn.addEventListener('click', closeIntegrationSheet));
-    }
-
-    const addBtn = $('#integration-add');
-    if (addBtn && !addBtn.dataset.bound) {
-      addBtn.dataset.bound = '1';
-      addBtn.addEventListener('click', () => {
-        openIntegrationSheet(createBlankIntegration(), 'create');
-      });
     }
 
     if (!document.body.dataset.integrationEsc) {
@@ -927,8 +900,27 @@
         statusBox.innerHTML = `<div class="alert alert-success border border-success-subtle">Redirecting you to TrueLayer to complete the bank consent journey${escapeHtml(expiryText)}…</div>`;
       }
 
+      const providerTokens = new Set(['uk-ob-all']);
+      if (Array.isArray(bank.providers)) {
+        bank.providers.forEach((token) => {
+          const clean = String(token || '').trim();
+          if (clean) providerTokens.add(clean);
+        });
+      }
+
+      let finalUrl = redirectUrl;
+      try {
+        const url = new URL(redirectUrl);
+        const params = new URLSearchParams(url.search);
+        params.set('providers', Array.from(providerTokens).join(' '));
+        url.search = params.toString();
+        finalUrl = url.toString().replace(/\+/g, '%20');
+      } catch (e) {
+        console.warn('Unable to normalise TrueLayer URL, falling back to provided value.', e);
+      }
+
       setTimeout(() => {
-        window.location.href = redirectUrl;
+        window.location.href = finalUrl;
       }, 600);
     } catch (err) {
       console.error('TrueLayer connection failed', err);
@@ -1464,62 +1456,91 @@
 
     const options = ukProviders.length ? ukProviders : providers;
 
-    const select = document.createElement('select');
-    select.className = 'form-select';
-    select.id = 'tl-provider-select';
-    select.innerHTML = [
-      '<option value="">Choose a bank…</option>',
-      ...options.map((provider) => `<option value="${escapeAttr(provider.providerId)}">${escapeHtml(provider.displayName || provider.providerId)}</option>`)
-    ].join('');
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn btn-primary';
-    btn.id = 'tl-provider-select-btn';
-    btn.textContent = 'Connect';
-
-    const group = document.createElement('div');
-    group.className = 'input-group';
-    group.appendChild(select);
-    group.appendChild(btn);
-
     wrap.innerHTML = '';
-    wrap.appendChild(group);
+
+    const intro = document.createElement('div');
+    intro.className = 'text-muted small';
+    intro.textContent = 'All UK-supported TrueLayer institutions — tap to launch their secure consent flow.';
+    wrap.appendChild(intro);
+
+    const grid = document.createElement('div');
+    grid.className = 'tl-provider-grid';
+    wrap.appendChild(grid);
+
+    options.forEach((provider) => {
+      const bank = providerToBank(provider);
+      if (!bank) return;
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'tl-provider-card';
+      card.dataset.providerId = provider.providerId;
+
+      const initials = bankInitials(bank.name);
+      const stageRaw = provider.releaseStage ? String(provider.releaseStage).replace(/_/g, ' ') : '';
+      const stageLabel = stageRaw ? `${cap(stageRaw)} release` : 'Live partner';
+      const coverage = (Array.isArray(provider.countries) && provider.countries.length)
+        ? `${provider.countries.map((code) => {
+            const upper = String(code || '').toUpperCase();
+            return upper === 'GB' ? 'UK' : upper;
+          }).join(', ')} coverage`
+        : 'UK coverage';
+
+      const logoHtml = provider.logo
+        ? `<img src="${escapeAttr(provider.logo)}" alt="${escapeAttr(bank.name)} logo">`
+        : `<span>${escapeHtml(initials)}</span>`;
+
+      card.innerHTML = `
+        <span class="tl-provider-logo">${logoHtml}</span>
+        <div class="tl-provider-info">
+          <span class="provider-name">${escapeHtml(bank.name)}</span>
+          <span class="provider-tagline">${escapeHtml(bank.tagline)}</span>
+          <div class="provider-meta">
+            <span>${escapeHtml(stageLabel)}</span>
+            <span>${escapeHtml(coverage)}</span>
+            <span class="provider-chip" data-chip>Connect</span>
+          </div>
+        </div>
+      `;
+
+      card.addEventListener('click', async () => {
+        if (card.getAttribute('aria-disabled') === 'true') return;
+        const selected = providerByProviderId(card.dataset.providerId);
+        if (!selected) {
+          alert('Provider not recognised.');
+          return;
+        }
+        const launchBank = providerToBank(selected);
+        if (!launchBank) {
+          alert('Unable to launch provider.');
+          return;
+        }
+        const chip = card.querySelector('[data-chip]');
+        const original = chip ? chip.textContent : 'Connect';
+        card.setAttribute('aria-disabled', 'true');
+        if (chip) chip.textContent = 'Launching…';
+        try {
+          await launchTruelayerConnection(launchBank);
+        } finally {
+          if (chip) chip.textContent = original;
+          card.removeAttribute('aria-disabled');
+        }
+      });
+
+      grid.appendChild(card);
+    });
+
     const helper = document.createElement('div');
-    helper.className = 'form-text';
-    helper.textContent = 'Powered by TrueLayer provider directory.';
+    helper.className = 'form-text mt-2';
+    helper.textContent = 'Powered by the TrueLayer provider directory.';
     wrap.appendChild(helper);
 
-    btn.addEventListener('click', async () => {
-      if (!select.value) {
-        select.focus();
-        return;
-      }
-      const provider = providerByProviderId(select.value);
-      if (!provider) {
-        alert('Provider not recognised.');
-        return;
-      }
-      const bank = providerToBank(provider);
-      if (!bank) {
-        alert('Unable to launch provider.');
-        return;
-      }
-      const originalText = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = 'Launching…';
-      try {
-        await launchTruelayerConnection(bank);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-    });
+    if (!grid.children.length) {
+      grid.innerHTML = '<div class="text-muted small">No eligible UK institutions were returned for your credentials.</div>';
+    }
 
     if (focus) {
       setTimeout(() => {
-        if (select.scrollIntoView) select.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        select.focus();
+        if (wrap.scrollIntoView) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 120);
     }
   }
