@@ -5,9 +5,8 @@ const SubscriptionSchema = new mongoose.Schema(
   {
     userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, required: true },
 
-    // Plan stored in DB must match your enum (free/basic/premium).
-    // Your routes should already map UI 'professional' -> 'premium' before saving.
-    plan:    { type: String, enum: ['free','basic','premium'], required: true },
+    // Supported plans align with updated licensing model.
+    plan:    { type: String, enum: ['free','starter','growth','premium'], required: true },
 
     // Store the billing interval so 'yearly' doesn't get lost.
     interval: { type: String, enum: ['monthly','yearly'], default: 'monthly', index: true },

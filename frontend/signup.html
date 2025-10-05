@@ -129,14 +129,70 @@
         <!-- Card side -->
         <section class="reveal">
           <div class="auth-card">
-            <h2 class="h5 mb-2 text-center">Sign up</h2>
+            <h2 class="h5 mb-2 text-center">Start your 30 day free trial</h2>
 
-            <!-- Visual parity block -->
-            <div class="phloat-lockup">PHLOAT</div>
-            <div class="divider small text-muted text-center"><span>or</span></div>
+            <div class="alert alert-light border small">
+              Choose a tier to preview every capability. Payment details are required to activate the trial. Cancel anytime within 30 days.
+            </div>
 
-            <!-- FORM: all fields/IDs/dynamics unchanged -->
-            <form id="signupForm" class="" novalidate>
+            <form id="signupForm" novalidate>
+              <div class="mb-3">
+                <label class="form-label">Choose your plan</label>
+                <div class="row g-2" id="plan-options">
+                  <div class="col-12">
+                    <label class="form-check card border rounded-4 p-3 w-100">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                          <input class="form-check-input" type="radio" name="planTier" value="starter" checked>
+                          <span class="ms-2 fw-semibold">Starter</span>
+                          <div class="text-muted small">Compliance essentials, smart document vault, HMRC sync.</div>
+                        </div>
+                        <span class="badge text-bg-primary">£29/mo after trial</span>
+                      </div>
+                    </label>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-check card border rounded-4 p-3 w-100">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                          <input class="form-check-input" type="radio" name="planTier" value="growth">
+                          <span class="ms-2 fw-semibold">Growth</span>
+                          <div class="text-muted small">Automations, AI accountant suggestions, multi-entity management.</div>
+                        </div>
+                        <span class="badge text-bg-primary">£59/mo after trial</span>
+                      </div>
+                    </label>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-check card border rounded-4 p-3 w-100">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                          <input class="form-check-input" type="radio" name="planTier" value="premium">
+                          <span class="ms-2 fw-semibold">Premium</span>
+                          <div class="text-muted small">Scenario lab, salary navigator and wealth strategy lab.</div>
+                        </div>
+                        <span class="badge text-bg-primary">£119/mo after trial</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row g-2 mb-3">
+                <div class="col-8">
+                  <label class="form-label">Coupon code</label>
+                  <input id="couponCode" class="form-control" placeholder="Optional">
+                  <div class="form-text">Use <strong>phloatadmin1998</strong> for unlimited premium testing.</div>
+                </div>
+                <div class="col-4">
+                  <label class="form-label">Country</label>
+                  <select id="country" class="form-select">
+                    <option value="uk" selected>United Kingdom</option>
+                    <option value="us" disabled>United States (coming soon)</option>
+                  </select>
+                </div>
+              </div>
+
               <div class="mb-3">
                 <label class="form-label">First name</label>
                 <input id="firstName" name="firstName" class="form-control" autocomplete="given-name" required>
@@ -181,7 +237,55 @@
                 <div class="form-text error text-danger small" data-error-for="passwordConfirm"></div>
               </div>
 
-              <!-- Required legal acceptance -->
+              <div class="mb-3">
+                <label class="form-label">Trial goals</label>
+                <div class="d-flex flex-wrap gap-2" id="goal-options">
+                  <label class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" value="saving">
+                    <span class="form-check-label">Saving</span>
+                  </label>
+                  <label class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" value="growing">
+                    <span class="form-check-label">Growing</span>
+                  </label>
+                  <label class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" value="analysing">
+                    <span class="form-check-label">Analysing</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="mt-3 mb-3">
+                <h3 class="h6">Payment details</h3>
+                <div class="row g-2">
+                  <div class="col-12">
+                    <label class="form-label">Card holder name</label>
+                    <input id="cardHolder" class="form-control" placeholder="Name as shown on card" required>
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label">Card brand</label>
+                    <select id="cardBrand" class="form-select" required>
+                      <option value="Visa">Visa</option>
+                      <option value="Mastercard">Mastercard</option>
+                      <option value="American Express">American Express</option>
+                      <option value="Card">Other</option>
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label">Last 4 digits</label>
+                    <input id="cardLast4" class="form-control" maxlength="4" pattern="\d{4}" placeholder="1234" required>
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label">Expiry month</label>
+                    <input id="cardExpMonth" type="number" min="1" max="12" class="form-control" placeholder="MM" required>
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label">Expiry year</label>
+                    <input id="cardExpYear" type="number" min="2024" class="form-control" placeholder="YYYY" required>
+                  </div>
+                </div>
+              </div>
+
               <div class="col-12 mb-3">
                 <div class="form-check">
                   <input class="form-check-input" type="checkbox" id="agreeLegal" required>
@@ -192,10 +296,9 @@
                 <div class="form-text error" data-error-for="agreeLegal"></div>
               </div>
 
-              <!-- General error (kept) -->
               <div id="signup-error" class="text-danger small d-none mb-2"></div>
 
-              <button id="signupBtn" class="btn btn-primary w-100" type="submit">Create account</button>
+              <button id="signupBtn" class="btn btn-primary w-100" type="submit">Start free trial</button>
             </form>
 
             <p class="small text-center mt-2 text-secondary mb-0">
