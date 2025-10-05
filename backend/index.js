@@ -28,6 +28,7 @@ const billingRouter = safeRequire('./routes/billing')               || safeRequi
 const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
+const truelayerRouter  = safeRequire('./routes/truelayer')          || safeRequire('./src/routes/truelayer');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -83,6 +84,7 @@ mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
 mount('/api/integrations', integrationsRouter, 'integrations');
 mount('/api/analytics', analyticsRouter, 'analytics');
+mount('/api/truelayer', truelayerRouter, 'truelayer');
 
 
 

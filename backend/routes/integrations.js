@@ -3,10 +3,23 @@ const express = require('express');
 const crypto = require('crypto');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const {
+  VALID_STATUSES,
+  normaliseKey,
+  normaliseStatus,
+  ensureBaseIntegration,
+  sanitiseInstitution,
+  buildConnectionKey,
+  randomSuffix,
+  pruneSessions
+} = require('../utils/integrationHelpers');
+const {
+  createCodeVerifier,
+  createCodeChallenge,
+  buildAuthUrl
+} = require('../services/truelayer');
 
 const router = express.Router();
-
-const VALID_STATUSES = ['not_connected','pending','error','connected'];
 
 const CATALOG = [
   {
@@ -29,17 +42,8 @@ const CATALOG = [
   }
 ];
 
-function normaliseKey(key) {
-  return String(key || '').toLowerCase();
-}
-
 function findCatalogItem(key) {
   return CATALOG.find((item) => normaliseKey(item.key) === normaliseKey(key));
-}
-
-function normaliseStatus(status) {
-  const val = normaliseKey(status);
-  return VALID_STATUSES.includes(val) ? val : null;
 }
 
 function cataloguePayload() {
@@ -62,47 +66,117 @@ function cataloguePayload() {
   });
 }
 
-function ensureBaseIntegration(list, key, label) {
-  const idx = list.findIndex((i) => normaliseKey(i.key) === normaliseKey(key));
-  const existing = idx >= 0 ? list[idx] : null;
-  const payload = {
-    key: normaliseKey(key),
-    label: label || existing?.label || key,
-    status: 'connected',
-    lastCheckedAt: new Date(),
-    metadata: existing?.metadata || {}
-  };
-  if (idx >= 0) {
-    list[idx] = { ...list[idx], ...payload };
-  } else {
-    list.push(payload);
+function redactIntegration(integration) {
+  if (!integration) return integration;
+  const clone = { ...integration };
+  if (integration.metadata) {
+    clone.metadata = { ...integration.metadata };
+    if (integration.metadata.credentials) {
+      const creds = integration.metadata.credentials;
+      clone.metadata.credentials = {
+        tokenType: creds.tokenType || creds.token_type || 'Bearer',
+        expiresAt: creds.expiresAt || creds.expires_at || null,
+        refreshable: Boolean(creds.refreshToken || creds.refresh_token)
+      };
+    }
   }
-}
-
-function sanitiseInstitution(raw = {}) {
-  return {
-    id: String(raw.id || '').toLowerCase(),
-    name: String(raw.name || '').trim(),
-    brandColor: raw.brandColor || null,
-    accentColor: raw.accentColor || null,
-    icon: raw.icon || null,
-    tagline: raw.tagline || null
-  };
-}
-
-function buildConnectionKey(provider, slug) {
-  return `${normaliseKey(provider)}:${String(slug).toLowerCase()}`;
-}
-
-function randomSuffix() {
-  return crypto.randomBytes(5).toString('hex');
+  return clone;
 }
 
 // GET /api/integrations
 router.get('/', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ integrations: user.integrations || [], catalog: cataloguePayload() });
+  const integrations = Array.isArray(user.integrations) ? user.integrations.map(redactIntegration) : [];
+  res.json({ integrations, catalog: cataloguePayload() });
+});
+
+// POST /api/integrations/truelayer/launch
+router.post('/truelayer/launch', auth, async (req, res) => {
+  const requiredEnv = ['TL_CLIENT_ID', 'TL_CLIENT_SECRET', 'TL_REDIRECT_URI'];
+  const missingEnv = requiredEnv.filter((name) => !process.env[name]);
+  if (missingEnv.length) {
+    return res.status(400).json({
+      error: 'TrueLayer credentials missing',
+      missingEnv
+    });
+  }
+
+  const redirectUri = process.env.TL_REDIRECT_URI;
+  const user = await User.findById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const institution = sanitiseInstitution(req.body?.institution || {});
+  const scopesInput = Array.isArray(req.body?.scopes) ? req.body.scopes : [];
+  const scopes = scopesInput
+    .map((scope) => String(scope || '').trim())
+    .filter(Boolean);
+  if (!scopes.length) {
+    scopes.push('accounts');
+    scopes.push('balance');
+    scopes.push('transactions');
+    scopes.push('info');
+    scopes.push('offline_access');
+  }
+
+  const codeVerifier = createCodeVerifier();
+  const codeChallenge = createCodeChallenge(codeVerifier);
+  const stateToken = crypto.randomBytes(18).toString('hex');
+  const state = `${user.uid}.${stateToken}`;
+
+  const params = {
+    response_type: 'code',
+    client_id: process.env.TL_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: Array.from(new Set(scopes)).join(' '),
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    providers: 'uk-ob-all'
+  };
+
+  if (institution.id) params.provider_id = institution.id;
+  if (process.env.TL_USE_SANDBOX === 'true') params.enable_mock = 'true';
+
+  const authUrl = buildAuthUrl(params);
+  const expiresAt = new Date(Date.now() + (1000 * 60 * 15));
+
+  const sessions = pruneSessions(Array.isArray(user.integrationSessions) ? user.integrationSessions : []);
+  sessions.push({
+    provider: 'truelayer',
+    state: stateToken,
+    codeVerifier,
+    institution,
+    scopes: Array.from(new Set(scopes)),
+    createdAt: new Date(),
+    metadata: {
+      sandbox: process.env.TL_USE_SANDBOX === 'true',
+      expiresAt,
+      returnTo: req.body?.returnTo || null
+    }
+  });
+  user.integrationSessions = sessions;
+
+  const list = Array.isArray(user.integrations) ? [...user.integrations] : [];
+  ensureBaseIntegration(list, 'truelayer', 'TrueLayer Open Banking');
+  const idx = list.findIndex((i) => normaliseKey(i.key) === 'truelayer');
+  if (idx >= 0) {
+    list[idx] = {
+      ...list[idx],
+      status: 'pending',
+      lastCheckedAt: new Date(),
+      metadata: {
+        ...(list[idx].metadata || {}),
+        lastLaunchAt: new Date(),
+        sandbox: process.env.TL_USE_SANDBOX === 'true'
+      }
+    };
+  }
+  user.integrations = list;
+
+  await user.save();
+
+  res.json({ authUrl, expiresAt });
 });
 
 // POST /api/integrations/:key/connections
@@ -153,7 +227,11 @@ router.post('/:key/connections', auth, async (req, res) => {
   user.integrations = list;
   await user.save();
 
-  res.json({ integration: payload, integrations: list, catalog: cataloguePayload() });
+  res.json({
+    integration: redactIntegration(payload),
+    integrations: list.map(redactIntegration),
+    catalog: cataloguePayload()
+  });
 });
 
 // POST /api/integrations/:key/renew
@@ -183,7 +261,11 @@ router.post('/:key/renew', auth, async (req, res) => {
   user.integrations = list;
   await user.save();
 
-  res.json({ integration: list[idx], integrations: list, catalog: cataloguePayload() });
+  res.json({
+    integration: redactIntegration(list[idx]),
+    integrations: list.map(redactIntegration),
+    catalog: cataloguePayload()
+  });
 });
 
 // PUT /api/integrations/:key
@@ -222,7 +304,10 @@ router.put('/:key', auth, async (req, res) => {
 
   user.integrations = list;
   await user.save();
-  res.json({ integration: list[targetIdx], integrations: list });
+  res.json({
+    integration: redactIntegration(list[targetIdx]),
+    integrations: list.map(redactIntegration)
+  });
 });
 
 // DELETE /api/integrations/:key
@@ -254,7 +339,11 @@ router.delete('/:key', auth, async (req, res) => {
 
   user.integrations = filtered;
   await user.save();
-  res.json({ ok: true, integrations: filtered, catalog: cataloguePayload() });
+  res.json({
+    ok: true,
+    integrations: filtered.map(redactIntegration),
+    catalog: cataloguePayload()
+  });
 });
 
 module.exports = router;

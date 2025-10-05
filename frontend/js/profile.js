@@ -339,6 +339,18 @@
     summary.textContent = text;
   }
 
+  function showIntegrationFlash(type, message='') {
+    const flash = $('#integration-flash');
+    if (!flash) return;
+    if (!type) {
+      flash.innerHTML = '';
+      return;
+    }
+    const map = { success: 'success', error: 'danger', warning: 'warning', info: 'info' };
+    const variant = map[type] || 'info';
+    flash.innerHTML = `<div class="alert alert-${variant} border border-${variant}-subtle">${escapeHtml(message)}</div>`;
+  }
+
   function renderIntegrations() {
     const wrap = $('#integration-list');
     if (!wrap) return;
@@ -708,7 +720,7 @@
 
     const statusAlert = envMissing
       ? `<div class="alert alert-warning border border-warning-subtle">TrueLayer credentials missing — add ${integration.missingEnv.map((v) => `<code>${escapeHtml(v)}</code>`).join(', ')} in Render to enable the flow.</div>`
-      : '<div class="alert alert-success border border-success-subtle">Credentials detected — launch the secure TrueLayer flow to connect your accounts.</div>';
+      : '<div class="alert alert-success border border-success-subtle">Credentials detected — you will be redirected to TrueLayer\'s secure consent journey to complete the connection.</div>';
 
     const connectionSummary = connections.length
       ? `<div class="small text-muted">Currently linked: ${connections.map((c) => escapeHtml(c.label)).join(', ')}.</div>`
@@ -845,11 +857,11 @@
       cardEl.style.opacity = '0.6';
     }
     if (statusBox) {
-      statusBox.innerHTML = `<div class="alert alert-info border border-info-subtle">Launching the ${escapeHtml(bank.name)} consent flow…</div>`;
+      statusBox.innerHTML = `<div class="alert alert-info border border-info-subtle">Preparing the ${escapeHtml(bank.name)} consent flow…</div>`;
     }
 
     try {
-      const res = await Auth.fetch('/api/integrations/truelayer/connections', {
+      const res = await Auth.fetch('/api/integrations/truelayer/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -860,37 +872,34 @@
             accentColor: bank.accentColor,
             icon: bank.icon,
             tagline: bank.tagline
-          },
-          accounts: bank.accounts
+          }
         })
       });
+
+      let payload = {};
+      try { payload = await res.json(); } catch {}
+
       if (!res.ok) {
-        let message = 'Unable to launch the connection.';
-        try {
-          const err = await res.json();
-          if (err?.error) message = err.error;
-        } catch {}
+        let message = payload?.error || 'Unable to launch the connection.';
+        if (payload?.missingEnv?.length) {
+          message = `Add ${payload.missingEnv.map((v) => `\u201c${escapeHtml(v)}\u201d`).join(', ')} in Render to enable this flow.`;
+        }
         throw new Error(message);
       }
 
-      let payload = null;
-      try { payload = await res.json(); } catch {}
-      await loadIntegrations(payload);
-
-      const latest = INTEGRATIONS.find((item) => normaliseKey(item.key) === 'truelayer');
-      if (latest) ACTIVE_INTEGRATION = { ...latest, metadata: { ...(latest.metadata || {}) } };
+      const redirectUrl = payload?.authUrl;
+      if (!redirectUrl) {
+        throw new Error('Missing authorization URL from TrueLayer.');
+      }
 
       if (statusBox) {
-        statusBox.innerHTML = `<div class="alert alert-success border border-success-subtle">Connected to ${escapeHtml(bank.name)} — we will begin syncing data immediately.</div>`;
+        const expiryText = payload?.expiresAt ? ` before ${new Date(payload.expiresAt).toLocaleTimeString()}` : '';
+        statusBox.innerHTML = `<div class="alert alert-success border border-success-subtle">Redirecting you to TrueLayer to complete the bank consent journey${escapeHtml(expiryText)}…</div>`;
       }
 
-      const saveBtn = $('#intg-sheet-save');
-      if (saveBtn) {
-        saveBtn.style.display = '';
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Done';
-        saveBtn.onclick = closeIntegrationSheet;
-      }
+      setTimeout(() => {
+        window.location.href = redirectUrl;
+      }, 600);
     } catch (err) {
       console.error('TrueLayer connection failed', err);
       if (statusBox) {
@@ -1071,11 +1080,49 @@
       INTEGRATION_CATALOG = (payload.catalog || []).map(normaliseCatalogItem);
       INTEGRATIONS = mergeIntegrations(INTEGRATION_CATALOG, payload.integrations || []);
       renderIntegrations();
+      handleIntegrationReturnNotice();
     } catch (err) {
       console.error('Failed to load integrations', err);
       const summary = $('#integration-summary');
       if (summary) summary.textContent = 'Unable to load integrations right now.';
       $('#integration-list')?.classList.add('opacity-50');
+    }
+  }
+
+  function handleIntegrationReturnNotice() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const flag = params.get('integrations');
+      if (!flag || !flag.startsWith('truelayer')) {
+        showIntegrationFlash(null);
+        return;
+      }
+
+      if (flag === 'truelayer-success') {
+        const connectionKey = params.get('connection');
+        let label = 'Your bank';
+        if (connectionKey) {
+          const found = INTEGRATIONS.find((item) => item.key === connectionKey);
+          if (found?.label) label = found.label;
+        }
+        showIntegrationFlash('success', `${label} is now connected via TrueLayer. We will start syncing data shortly.`);
+      } else {
+        const reasonParam = params.get('reason');
+        let reason = 'The TrueLayer consent journey did not complete.';
+        if (reasonParam) {
+          try { reason = decodeURIComponent(reasonParam); } catch {}
+        }
+        showIntegrationFlash('error', reason.replace(/_/g, ' '));
+      }
+
+      params.delete('integrations');
+      params.delete('reason');
+      params.delete('connection');
+      const newQuery = params.toString();
+      const newUrl = `${window.location.pathname}${newQuery ? `?${newQuery}` : ''}${window.location.hash}`;
+      window.history.replaceState({}, '', newUrl);
+    } catch (err) {
+      console.warn('Integration flash handling failed', err);
     }
   }
 
