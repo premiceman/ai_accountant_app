@@ -112,6 +112,89 @@
     .link-muted{ color: var(--muted); text-decoration: none; }
     .link-muted:hover{ text-decoration: underline; }
 
+    .integration-card{
+      display:flex;
+      flex-direction:column;
+      gap:1rem;
+    }
+    .integration-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:1rem;
+      flex-wrap:wrap;
+    }
+    .integration-actions{ display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+    .connection-grid{ display:flex; flex-direction:column; gap:12px; }
+    .connection-tile{
+      display:flex;
+      flex-direction:column;
+      gap:.75rem;
+      padding:16px;
+      border-radius:14px;
+      border:1px solid rgba(0,0,0,.08);
+      background: var(--tile-bg);
+      box-shadow: 0 6px 20px rgba(15,23,42,.06);
+    }
+    .connection-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:1rem;
+      flex-wrap:wrap;
+    }
+    .connection-bank{
+      display:flex;
+      align-items:center;
+      gap:.75rem;
+    }
+    .connection-bank img{
+      width:42px;
+      height:42px;
+      border-radius:12px;
+      object-fit:contain;
+      background:#fff;
+      border:1px solid rgba(0,0,0,.05);
+      padding:6px;
+    }
+    .connection-bank .logo-fallback{
+      width:42px;
+      height:42px;
+      border-radius:12px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:600;
+      color:var(--brand);
+      background: rgba(79,70,229,.12);
+    }
+    .badge-status{
+      font-size:.75rem;
+      border-radius:999px;
+      padding:.15rem .6rem;
+      background:var(--chip-bg);
+      color:var(--chip-fg);
+    }
+    .badge-status.ok{ background: rgba(22,163,74,.12); color:#15803d; }
+    .badge-status.warn{ background: rgba(202,138,4,.12); color:#b45309; }
+    .badge-status.bad{ background: rgba(220,38,38,.12); color:#b91c1c; }
+    .badge-status.muted{ background: rgba(107,114,128,.12); color:#4b5563; }
+    .connection-meta{ font-size:.8rem; color:var(--muted); }
+    .connection-actions{ display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+    .connection-actions button{ font-size:.8rem; }
+    .account-list{ display:flex; flex-direction:column; gap:.35rem; margin:0; padding:0; list-style:none; }
+    .account-line{ display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; font-size:.85rem; }
+    .account-line strong{ font-size:.9rem; }
+    .account-line span.mask{ font-family:'IBM Plex Mono', monospace; font-size:.75rem; color:var(--muted); }
+    .empty-connections{
+      border:1px dashed rgba(148,163,184,.6);
+      border-radius:14px;
+      padding:18px;
+      text-align:center;
+      color:var(--muted);
+      font-size:.9rem;
+    }
+
     /* subtle section separators inside cards */
     .subtle-hr{ border:0; height:1px; background: linear-gradient(90deg, rgba(0,0,0,.06), rgba(0,0,0,.02), rgba(0,0,0,.06)); margin:.75rem 0; }
   </style>
@@ -200,6 +283,26 @@
               <div class="d-flex justify-content-end mt-2">
                 <button id="btn-notes-save" class="btn btn-outline-primary btn-sm">Save notes</button>
               </div>
+            </div>
+          </div>
+
+          <!-- Plaid integrations -->
+          <div class="card card-elev mt-3">
+            <div class="card-body integration-card">
+              <div class="integration-header">
+                <div>
+                  <h5 class="mb-0">Bank connections via Plaid</h5>
+                  <div class="small muted">Securely link bank and credit accounts powered by Plaid Link.</div>
+                </div>
+                <div class="integration-actions">
+                  <button id="btn-connect-plaid" class="btn btn-primary btn-sm" type="button">Connect with Plaid</button>
+                  <button id="btn-refresh-plaid" class="btn btn-outline-secondary btn-sm" type="button">Refresh</button>
+                </div>
+              </div>
+              <div id="plaid-empty" class="empty-connections" hidden>
+                No Plaid connections yet. Link an institution to start syncing balances into your dashboards.
+              </div>
+              <div id="plaid-connection-list" class="connection-grid"></div>
             </div>
           </div>
         </div>

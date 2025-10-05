@@ -5,6 +5,9 @@
   let PLANS = [];
   let PLAN_BY_ID = {};
   let PAYMENT_METHODS = [];
+  let PLAID_ITEMS = [];
+  let PLAID_BINDINGS_READY = false;
+  let PLAID_SCRIPT_PROMISE = null;
 
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
@@ -21,6 +24,12 @@
     return Math.floor(ms / (1000*60*60*24));
   };
   const cap = (s) => String(s || '').slice(0,1).toUpperCase() + String(s || '').slice(1);
+  const escapeHtml = (s='') => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
   function setTileGrid(stats) {
     const wrap = $('#stat-tiles');
@@ -240,6 +249,295 @@
     });
   }
 
+  function formatPlaidBalance(acct) {
+    const balances = acct?.balances || {};
+    const currency = balances.isoCurrencyCode || balances.iso_currency_code || acct?.currency || 'GBP';
+    const amount = balances.current ?? balances.available ?? null;
+    if (amount === null || typeof amount === 'undefined') return '—';
+    return fmtMoney(Number(amount), currency);
+  }
+
+  function deriveConnectionStatus(item) {
+    const statusRaw = (item?.status && typeof item.status === 'string') ? item.status
+      : (typeof item?.status?.code === 'string' ? item.status.code
+      : (item?.connectionStatus || item?.status?.stage || item?.health));
+    const status = String(statusRaw || '').toLowerCase();
+    const lastError = item?.status?.lastError || item?.lastError || null;
+
+    if (!status) return { label: 'Unknown', tone: 'muted', detail: lastError?.message || '' };
+    if (['healthy', 'ok', 'active'].includes(status)) {
+      return { label: 'Healthy', tone: 'ok', detail: '' };
+    }
+    if (['needs_reconnect', 'requires_reconnect', 'requires_login', 'reauth'].includes(status)) {
+      return { label: 'Action required', tone: 'warn', detail: lastError?.message || 'Reconnect via Plaid Link.' };
+    }
+    if (['error', 'disconnected', 'blocked'].includes(status)) {
+      return { label: 'Disconnected', tone: 'bad', detail: lastError?.message || '' };
+    }
+    if (['pending', 'connecting', 'creating', 'processing'].includes(status)) {
+      return { label: cap(status), tone: 'muted', detail: '' };
+    }
+    return { label: cap(status), tone: 'muted', detail: lastError?.message || '' };
+  }
+
+  function renderPlaidConnections() {
+    const list = $('#plaid-connection-list');
+    const empty = $('#plaid-empty');
+    if (!list || !empty) return;
+
+    list.innerHTML = '';
+    if (!PLAID_ITEMS.length) {
+      empty.hidden = false;
+      return;
+    }
+
+    empty.hidden = true;
+    for (const item of PLAID_ITEMS) {
+      const accounts = Array.isArray(item?.accounts) ? item.accounts : [];
+      const institution = item?.institution || {};
+      const instName = institution.name || item?.institutionName || 'Institution';
+      const logo = institution.logo || item?.institutionLogo || '';
+      const shortName = instName.slice(0, 2).toUpperCase();
+      const status = deriveConnectionStatus(item);
+      const lastSync = item?.lastSyncedAt || item?.lastSyncAt || item?.syncedAt || item?.updatedAt;
+      const linkedAt = item?.createdAt || item?.linkedAt;
+
+      const accountsHtml = accounts.length
+        ? accounts.map(ac => {
+            const mask = ac?.mask || ac?.accountMask || ac?.last4 || '';
+            const maskDisplay = mask ? `•••• ${String(mask).slice(-4)}` : '••••';
+            const subtype = ac?.subtype || ac?.accountSubtype || ac?.type || '';
+            const name = ac?.name || ac?.officialName || ac?.accountName || subtype || 'Account';
+            const balance = formatPlaidBalance(ac);
+            const available = ac?.balances?.available ?? ac?.balances?.availableBalance;
+            const availableText = (available !== null && typeof available !== 'undefined' && available !== '')
+              ? ` · Avail ${fmtMoney(Number(available), ac?.balances?.isoCurrencyCode || ac?.balances?.iso_currency_code || ac?.currency || 'GBP')}`
+              : '';
+            const subtypeText = subtype ? ` · ${escapeHtml(cap(subtype))}` : '';
+            return `<li class="account-line">
+              <div><strong>${escapeHtml(name)}</strong> <span class="mask">${escapeHtml(maskDisplay)}</span>${subtypeText}</div>
+              <div>${balance}${availableText}</div>
+            </li>`;
+          }).join('')
+        : '<li class="account-line"><span class="text-muted">No accounts returned yet.</span></li>';
+
+      const metaParts = [];
+      if (linkedAt) {
+        const nice = isoToNice(linkedAt);
+        if (nice && nice !== '—') metaParts.push(`Linked ${nice}`);
+      }
+      if (lastSync) {
+        const nice = isoToNice(lastSync);
+        if (nice && nice !== '—') metaParts.push(`Last sync ${nice}`);
+      }
+      if (item?.status?.description) metaParts.push(escapeHtml(item.status.description));
+      if (status.detail) metaParts.push(escapeHtml(status.detail));
+
+      const tile = document.createElement('div');
+      tile.className = 'connection-tile';
+      tile.dataset.connectionId = item?.id || item?.itemId || item?.plaidItemId || '';
+      tile.innerHTML = `
+        <div class="connection-head">
+          <div class="connection-bank">
+            ${logo ? `<img src="${logo}" alt="${escapeHtml(instName)} logo" loading="lazy">` : `<div class="logo-fallback">${escapeHtml(shortName)}</div>`}
+            <div>
+              <div class="fw-semibold">${escapeHtml(instName)}</div>
+              <div class="connection-meta">${metaParts.join(' · ')}</div>
+            </div>
+          </div>
+          <div class="connection-actions">
+            <span class="badge-status ${status.tone}">${escapeHtml(status.label)}</span>
+            <button class="btn btn-outline-primary btn-sm" type="button" data-action="renew">Renew</button>
+            <button class="btn btn-outline-danger btn-sm" type="button" data-action="delete">Remove</button>
+          </div>
+        </div>
+        <ul class="account-list">${accountsHtml}</ul>
+      `;
+
+      list.appendChild(tile);
+    }
+  }
+
+  async function refreshPlaidConnections({ silent=false } = {}) {
+    const list = $('#plaid-connection-list');
+    if (!list) return;
+    if (!silent) list.dataset.loading = 'true';
+    try {
+      const res = await Auth.fetch('/api/plaid/items?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to load Plaid items');
+      const payload = await res.json();
+      PLAID_ITEMS = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      console.error('Failed to load Plaid connections', err);
+      PLAID_ITEMS = [];
+    } finally {
+      if (list.dataset.loading) delete list.dataset.loading;
+      renderPlaidConnections();
+    }
+  }
+
+  function ensurePlaidScript() {
+    if (window.Plaid) return Promise.resolve(window.Plaid);
+    if (PLAID_SCRIPT_PROMISE) return PLAID_SCRIPT_PROMISE;
+    PLAID_SCRIPT_PROMISE = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-plaid-link-script]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.Plaid));
+        existing.addEventListener('error', () => reject(new Error('Plaid Link failed to load.')));
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+      script.async = true;
+      script.dataset.plaidLinkScript = 'true';
+      script.onload = () => {
+        if (window.Plaid) resolve(window.Plaid);
+        else reject(new Error('Plaid Link unavailable after load.'));
+      };
+      script.onerror = () => reject(new Error('Plaid Link script failed to load.'));
+      document.head.appendChild(script);
+    });
+    return PLAID_SCRIPT_PROMISE;
+  }
+
+  async function handlePlaidLinkSuccess({ publicToken, metadata, mode, itemId }) {
+    try {
+      const res = await Auth.fetch('/api/plaid/link/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicToken, metadata, mode, itemId })
+      });
+      if (!res.ok) {
+        let errText = 'Unable to save Plaid connection.';
+        try {
+          const errJson = await res.json();
+          if (errJson?.error) errText = errJson.error;
+        } catch {}
+        throw new Error(errText);
+      }
+      await refreshPlaidConnections({ silent: true });
+    } catch (err) {
+      console.error('Plaid exchange failed', err);
+      alert(err.message || 'Plaid connection failed.');
+    }
+  }
+
+  async function launchPlaidLink({ mode = 'create', itemId = null, button = null } = {}) {
+    const btn = button;
+    const resetBtn = () => {
+      if (!btn) return;
+      btn.disabled = false;
+      if (btn.dataset.origLabel) btn.textContent = btn.dataset.origLabel;
+    };
+
+    try {
+      if (btn) {
+        btn.dataset.origLabel = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = mode === 'update' ? 'Opening…' : 'Connecting…';
+      }
+      const plaid = await ensurePlaidScript();
+      const res = await Auth.fetch('/api/plaid/link/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, itemId })
+      });
+      if (!res.ok) throw new Error('Unable to get Plaid link token.');
+      const payload = await res.json();
+      const token = payload?.token || payload?.link_token;
+      if (!token) throw new Error('Plaid token missing.');
+
+      const handler = plaid.create({
+        token,
+        onSuccess: async (public_token, metadata) => {
+          await handlePlaidLinkSuccess({ publicToken: public_token, metadata, mode, itemId });
+        },
+        onExit: (err, metadata) => {
+          if (err) console.warn('Plaid Link exited with error', err, metadata);
+        }
+      });
+      handler.open();
+    } catch (err) {
+      console.error('Plaid Link launch failed', err);
+      alert(err.message || 'Unable to open Plaid Link.');
+    } finally {
+      resetBtn();
+    }
+  }
+
+  function setupPlaidIntegration() {
+    if (PLAID_BINDINGS_READY) return;
+    PLAID_BINDINGS_READY = true;
+
+    const connectBtn = $('#btn-connect-plaid');
+    if (connectBtn) {
+      connectBtn.addEventListener('click', () => launchPlaidLink({ mode: 'create', button: connectBtn }));
+    }
+
+    const refreshBtn = $('#btn-refresh-plaid');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        const orig = refreshBtn.textContent;
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Refreshing…';
+        try {
+          await refreshPlaidConnections();
+        } finally {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = orig;
+        }
+      });
+    }
+
+    const list = $('#plaid-connection-list');
+    if (list) {
+      list.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-action]');
+        if (!btn) return;
+        const tile = btn.closest('[data-connection-id]');
+        if (!tile) return;
+        const id = tile.dataset.connectionId;
+        const action = btn.dataset.action;
+        if (!id) {
+          alert('Missing connection identifier.');
+          return;
+        }
+        if (action === 'renew') {
+          launchPlaidLink({ mode: 'update', itemId: id, button: btn });
+        } else if (action === 'delete') {
+          deletePlaidConnection(id, btn);
+        }
+      });
+    }
+
+    ensurePlaidScript().catch((err) => console.warn('Plaid script pre-load failed', err));
+  }
+
+  async function deletePlaidConnection(id, btn) {
+    if (!confirm('Remove this Plaid connection?')) return;
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Removing…';
+    try {
+      const res = await Auth.fetch(`/api/plaid/items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        let msg = 'Failed to remove connection.';
+        try {
+          const j = await res.json();
+          if (j?.error) msg = j.error;
+        } catch {}
+        throw new Error(msg);
+      }
+      await refreshPlaidConnections({ silent: true });
+    } catch (err) {
+      console.error('Delete connection failed', err);
+      alert(err.message || 'Unable to remove connection.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  }
+
   function loadNotes() {
     try {
       const k = 'profile_notes';
@@ -281,6 +579,8 @@
       computeStats();
       bindEditControls();
       loadNotes();
+      setupPlaidIntegration();
+      await refreshPlaidConnections({ silent: true });
     } catch (e) {
       console.error('Profile init error:', e);
     }
