@@ -15,6 +15,16 @@ const IntegrationSchema = new mongoose.Schema({
   metadata:     { type: mongoose.Schema.Types.Mixed, default: {} },
 }, { _id: false });
 
+const IntegrationSessionSchema = new mongoose.Schema({
+  provider:   { type: String, required: true },
+  state:      { type: String, required: true },
+  codeVerifier:{ type: String, required: true },
+  institution:{ type: mongoose.Schema.Types.Mixed, default: {} },
+  scopes:     { type: [String], default: [] },
+  createdAt:  { type: Date, default: Date.now },
+  metadata:   { type: mongoose.Schema.Types.Mixed, default: {} }
+}, { _id: false });
+
 const SalaryNavigatorSchema = new mongoose.Schema({
   targetSalary:      { type: Number, default: null },
   currentSalary:     { type: Number, default: null },
@@ -100,6 +110,7 @@ const UserSchema = new mongoose.Schema({
   },
 
   integrations: { type: [IntegrationSchema], default: [] },
+  integrationSessions: { type: [IntegrationSessionSchema], default: [] },
 
   onboarding: {
     wizardCompletedAt: { type: Date, default: null },
