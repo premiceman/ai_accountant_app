@@ -27,6 +27,9 @@ const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequi
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
 const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
+const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
+const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
+const truelayerRouter  = safeRequire('./routes/truelayer')          || safeRequire('./src/routes/truelayer');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };

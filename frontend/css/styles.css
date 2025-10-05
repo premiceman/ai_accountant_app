@@ -47,6 +47,34 @@
   
   /* cards */
   .card{background:var(--bg-surface); border:1px solid var(--bd-hairline); box-shadow:var(--shadow)}
+  .gradient-card{position:relative; overflow:hidden;}
+  .gradient-card::before{
+    content:""; position:absolute; inset:-40% -20% auto; height:70%;
+    background:radial-gradient(circle at top left, color-mix(in oklab, var(--brand) 45%, white) 0%, transparent 65%);
+    opacity:.65; pointer-events:none;
+  }
+  .gradient-card::after{
+    content:""; position:absolute; inset:auto -30% -40%; height:70%;
+    background:radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand-hover) 45%, white) 0%, transparent 65%);
+    opacity:.55; pointer-events:none;
+  }
+  .gradient-card.gradient-card--wealth::before{background:radial-gradient(circle at top left, color-mix(in oklab, var(--success) 38%, white) 0%, transparent 68%);}
+  .gradient-card.gradient-card--wealth::after{background:radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand) 30%, white) 0%, transparent 70%);}
+  .gradient-card.gradient-card--comp::before{background:radial-gradient(circle at top left, color-mix(in oklab, var(--brand) 45%, white) 0%, transparent 68%);}
+  .gradient-card.gradient-card--comp::after{background:radial-gradient(circle at bottom right, color-mix(in oklab, #6c63ff 45%, white) 0%, transparent 70%);}
+  .gradient-card .card-body{position:relative; z-index:1;}
+  .card.locked{filter:grayscale(.5); opacity:.6}
+
+  .locked-overlay{
+    position:absolute; inset:0;
+    background:rgba(8,16,32,0.68);
+    color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:2rem;
+  }
+  .locked-overlay__content{max-width:320px;}
+  [data-required-tier]{position:relative;}
+  [data-required-tier] .card{position:relative; overflow:hidden;}
   
   /* buttons */
   .btn,.btn-primary,.btn-secondary{
@@ -94,6 +122,13 @@
   /* progress */
   .progress{background:var(--bg-surface-2); border:1px solid var(--bd-hairline)}
   .progress-bar{background:var(--brand)}
+
+  /* timelines */
+  .timeline{list-style:none;padding:0;margin:0;position:relative;}
+  .timeline::before{content:"";position:absolute;left:14px;top:0;bottom:0;width:2px;background:var(--bd-hairline);}
+  .timeline-item{position:relative;padding-left:44px;margin-bottom:1.5rem;}
+  .timeline-point{position:absolute;left:6px;top:2px;width:16px;height:16px;border-radius:999px;background:var(--brand);box-shadow:0 0 0 4px color-mix(in oklab,var(--brand) 20%,transparent);}
+  .timeline-content{background:var(--bg-surface);border:1px solid var(--bd-hairline);border-radius:14px;padding:12px 16px;box-shadow:var(--shadow);}
   
   /* modals/tooltips */
   .modal-content{background:var(--bg-surface); border:1px solid var(--bd-hairline); box-shadow:var(--shadow)}

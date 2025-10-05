@@ -23,6 +23,7 @@
     }
     try { localStorage.removeItem(USER_CACHE_KEY); } catch {}
     try { sessionStorage.removeItem(USER_CACHE_KEY); } catch {}
+    window.__ME__ = null;
   }
 
   // ---------- JWT decode & basic expiry check ----------
@@ -55,14 +56,39 @@
 
   // ---------- Tolerant user load (keeps your current behaviour) ----------
   // Used by dashboard etc. We don't hard-fail UI here.
+  async function loadUser(force = false) {
+    if (!force && window.__ME__) return window.__ME__;
+    const cached = (() => {
+      try { return JSON.parse(localStorage.getItem(USER_CACHE_KEY) || sessionStorage.getItem(USER_CACHE_KEY) || 'null'); } catch {
+        return null;
+      }
+    })();
+    if (!force && cached) {
+      window.__ME__ = cached;
+      return cached;
+    }
+
+    const t = getToken();
+    if (!t) return null;
+    try {
+      const res = await fetch((window.API ? window.API.url('/api/user/me') : '/api/user/me'), {
+        headers: { Authorization: `Bearer ${t}` },
+        cache: 'no-store'
+      });
+      if (!res.ok) return null;
+      const me = await res.json();
+      window.__ME__ = me;
+      try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+      return me;
+    } catch {
+      return null;
+    }
+  }
+
   async function requireAuth() {
     const t = getToken();
     try {
-      const res = await fetch((window.API ? window.API.url('/api/user/me') : '/api/user/me'), {
-        headers: t ? { Authorization: `Bearer ${t}` } : {},
-        cache: 'no-store'
-      });
-      const me = res.ok ? await res.json() : { firstName: 'Guest' };
+      const me = await loadUser(true) || { firstName: 'Guest' };
       window.__ME__ = me;
       const g = document.getElementById('greeting-name');
       if (g && me?.firstName) g.textContent = me.firstName;
@@ -161,12 +187,25 @@
     if (g && name) g.textContent = name;
   }
 
+  function signOut() {
+    clearTokens();
+    location.href = './login.html';
+  }
+
+  async function getCurrentUser({ force = false } = {}) {
+    const me = await loadUser(force);
+    return me;
+  }
+
   // Public API (names preserved)
   window.Auth = {
     getToken, setToken, clearTokens,
     requireAuth,
     fetch: fetchWithAuth,
     enforce,
-    setBannerTitle
+    setBannerTitle,
+    signOut,
+    getCurrentUser,
+    get me() { return window.__ME__; }
   };
 })();
