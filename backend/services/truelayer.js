@@ -9,6 +9,23 @@ const API_BASE = process.env.TL_USE_SANDBOX === 'true'
   ? 'https://api.truelayer-sandbox.com'
   : 'https://api.truelayer.com';
 
+function normaliseProviderToken(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/[^a-z0-9\- _]/gi, '')
+    .trim();
+}
+
+function defaultProviderTokens(custom = []) {
+  const tokens = new Set(['uk-ob-all']);
+  custom.forEach((token) => {
+    const normalised = normaliseProviderToken(token);
+    if (normalised) tokens.add(normalised);
+  });
+  return Array.from(tokens);
+}
+
 function createCodeVerifier() {
   return crypto.randomBytes(32).toString('base64url');
 }
@@ -30,6 +47,41 @@ function buildAuthUrl(params) {
   const base = getAuthBase();
   const query = new URLSearchParams(params);
   return `${base}/?${query.toString()}`;
+}
+
+async function fetchProviderCatalog() {
+  if (!process.env.TL_CLIENT_ID) {
+    throw new Error('TL_CLIENT_ID missing');
+  }
+
+  const url = new URL('/api/providers', getAuthBase());
+  url.searchParams.set('client_id', process.env.TL_CLIENT_ID);
+
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`TrueLayer provider fetch failed (${res.status}): ${text}`);
+  }
+
+  const payload = await res.json();
+  const providers = Array.isArray(payload?.results) ? payload.results : [];
+  return providers.map((provider) => {
+    const providerId = provider.provider_id || provider.id || '';
+    const slug = provider.slug || providerId.replace(/^uk-ob-/, '').replace(/-personal|-business|-retail|-corporate/g, '');
+    const tokens = defaultProviderTokens([
+      provider.oauth_provider || (slug ? `uk-oauth-${slug}` : null)
+    ].filter(Boolean));
+
+    return {
+      providerId,
+      displayName: provider.display_name || provider.name || provider.provider_name || providerId,
+      logo: provider.logo_uri || provider.logo || null,
+      countries: provider.country_code ? [provider.country_code] : (provider.country_codes || []),
+      releaseStage: provider.release_stage || provider.stage || null,
+      slug,
+      providers: tokens
+    };
+  });
 }
 
 async function exchangeCodeForToken({ code, redirectUri, codeVerifier }) {
@@ -86,6 +138,8 @@ module.exports = {
   getAuthBase,
   getApiBase,
   buildAuthUrl,
+  defaultProviderTokens,
+  fetchProviderCatalog,
   exchangeCodeForToken,
   fetchAccounts,
   fetchInfo

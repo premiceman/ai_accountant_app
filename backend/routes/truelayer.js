@@ -118,10 +118,16 @@ router.get('/callback', async (req, res) => {
     const firstAccount = accounts[0] || {};
     const providerInfo = firstAccount.provider || info?.provider || {};
 
+    const providerTokens = Array.isArray(session.metadata?.providerTokens)
+      ? session.metadata.providerTokens
+      : [];
+
     const institution = {
       ...institutionFromSession,
       id: institutionFromSession.id || providerInfo.provider_id || firstAccount.account_id || crypto.randomBytes(8).toString('hex'),
       name: institutionFromSession.name || providerInfo.display_name || firstAccount.display_name || 'TrueLayer connection',
+      providerId: institutionFromSession.providerId || providerInfo.provider_id || null,
+      providers: institutionFromSession.providers?.length ? institutionFromSession.providers : providerTokens,
       brandColor: institutionFromSession.brandColor || providerInfo.colour || null,
       accentColor: institutionFromSession.accentColor || null,
       icon: institutionFromSession.icon || providerInfo.logo_uri || null,
@@ -171,7 +177,8 @@ router.get('/callback', async (req, res) => {
         addedAt: new Date(),
         lastRefreshedAt: new Date(),
         info,
-        scopes: session.scopes || []
+        scopes: session.scopes || [],
+        providerTokens
       }
     };
 

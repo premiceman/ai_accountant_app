@@ -16,10 +16,17 @@ const {
 const {
   createCodeVerifier,
   createCodeChallenge,
-  buildAuthUrl
+  buildAuthUrl,
+  defaultProviderTokens,
+  fetchProviderCatalog
 } = require('../services/truelayer');
 
 const router = express.Router();
+
+let providerCache = {
+  expiresAt: 0,
+  payload: null
+};
 
 const CATALOG = [
   {
@@ -91,6 +98,31 @@ router.get('/', auth, async (req, res) => {
   res.json({ integrations, catalog: cataloguePayload() });
 });
 
+// GET /api/integrations/truelayer/providers
+router.get('/truelayer/providers', auth, async (req, res) => {
+  const requiredEnv = ['TL_CLIENT_ID'];
+  const missingEnv = requiredEnv.filter((name) => !process.env[name]);
+  if (missingEnv.length) {
+    return res.status(400).json({ error: 'TrueLayer credentials missing', missingEnv });
+  }
+
+  try {
+    const now = Date.now();
+    if (!providerCache.payload || providerCache.expiresAt < now) {
+      const providers = await fetchProviderCatalog();
+      providerCache = {
+        payload: providers,
+        expiresAt: now + (1000 * 60 * 10) // 10 minutes cache
+      };
+    }
+
+    res.json({ providers: providerCache.payload });
+  } catch (err) {
+    console.error('TrueLayer provider list failed:', err);
+    res.status(502).json({ error: 'Unable to fetch provider catalogue' });
+  }
+});
+
 // POST /api/integrations/truelayer/launch
 router.post('/truelayer/launch', auth, async (req, res) => {
   const requiredEnv = ['TL_CLIENT_ID', 'TL_CLIENT_SECRET', 'TL_REDIRECT_URI'];
@@ -124,6 +156,12 @@ router.post('/truelayer/launch', auth, async (req, res) => {
   const stateToken = crypto.randomBytes(18).toString('hex');
   const state = `${user.uid}.${stateToken}`;
 
+  const providerTokens = defaultProviderTokens(
+    Array.isArray(req.body?.providers)
+      ? req.body.providers
+      : (institution.providers || [])
+  );
+
   const params = {
     response_type: 'code',
     client_id: process.env.TL_CLIENT_ID,
@@ -132,10 +170,10 @@ router.post('/truelayer/launch', auth, async (req, res) => {
     state,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
-    providers: 'uk-ob-all'
+    providers: providerTokens.join(' ')
   };
 
-  if (institution.id) params.provider_id = institution.id;
+  if (institution.providerId) params.provider_id = institution.providerId;
   if (process.env.TL_USE_SANDBOX === 'true') params.enable_mock = 'true';
 
   const authUrl = buildAuthUrl(params);
@@ -152,7 +190,8 @@ router.post('/truelayer/launch', auth, async (req, res) => {
     metadata: {
       sandbox: process.env.TL_USE_SANDBOX === 'true',
       expiresAt,
-      returnTo: req.body?.returnTo || null
+      returnTo: req.body?.returnTo || null,
+      providerTokens
     }
   });
   user.integrationSessions = sessions;
@@ -168,7 +207,8 @@ router.post('/truelayer/launch', auth, async (req, res) => {
       metadata: {
         ...(list[idx].metadata || {}),
         lastLaunchAt: new Date(),
-        sandbox: process.env.TL_USE_SANDBOX === 'true'
+        sandbox: process.env.TL_USE_SANDBOX === 'true',
+        lastProviderTokens: providerTokens
       }
     };
   }
