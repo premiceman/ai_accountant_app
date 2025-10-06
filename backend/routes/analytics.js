@@ -169,6 +169,206 @@ async function computeUsageStats(userId, range) {
   }
 }
 
+function toDate(value) {
+  if (!value) return null;
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct;
+  const match = String(value).match(/(\d{4}-\d{2}-\d{2})/);
+  if (match) {
+    const iso = `${match[1]}T00:00:00Z`;
+    const coerced = new Date(iso);
+    return Number.isNaN(coerced.getTime()) ? null : coerced;
+  }
+  return null;
+}
+
+function withinRange(value, range) {
+  const date = toDate(value);
+  if (!date) return false;
+  return date >= range.start && date <= range.end;
+}
+
+function groupSourcesByBase(sources = {}) {
+  const grouped = {};
+  for (const entry of Object.values(sources)) {
+    if (!entry) continue;
+    const baseKey = entry.baseKey || entry.key;
+    if (!baseKey) continue;
+    if (!grouped[baseKey]) grouped[baseKey] = [];
+    grouped[baseKey].push(entry);
+  }
+  return grouped;
+}
+
+function summariseStatementRange(entries = [], range) {
+  const accounts = new Map();
+  const transactions = [];
+  entries.forEach((entry) => {
+    const meta = entry.metadata || {};
+    const accountId = meta.accountId || entry.key;
+    const accountName = meta.accountName || 'Account';
+    const accountSummary = accounts.get(accountId) || {
+      accountId,
+      accountName,
+      bankName: meta.bankName || null,
+      accountType: meta.accountType || null,
+      accountNumberMasked: meta.accountNumberMasked || null,
+      period: meta.period || entry.period || null,
+      totals: { income: 0, spend: 0 },
+    };
+    accounts.set(accountId, accountSummary);
+
+    const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
+    txList.forEach((tx, idx) => {
+      const txDate = tx.date || meta.period?.end || meta.period?.start || entry.period || null;
+      if (!withinRange(txDate, range)) return;
+      const amount = Number(tx.amount);
+      if (!Number.isFinite(amount)) return;
+      const id = `${entry.key}:${idx}`;
+      transactions.push({
+        __id: id,
+        amount,
+        direction: tx.direction || (amount >= 0 ? 'inflow' : 'outflow'),
+        description: tx.description || 'Transaction',
+        category: tx.category || 'Other',
+        date: tx.date || null,
+        transfer: Boolean(tx.transfer),
+        accountId,
+        accountName,
+      });
+    });
+  });
+
+  if (!transactions.length) {
+    return {
+      totals: { income: 0, spend: 0 },
+      categories: [],
+      topCategories: [],
+      largestExpenses: [],
+      accounts: Array.from(accounts.values()).map((acc) => ({ ...acc, totals: { income: 0, spend: 0 } })),
+      transactions: [],
+      transferCount: 0,
+      hasData: false,
+    };
+  }
+
+  const signatureMap = new Map();
+  const transferIds = new Set();
+  transactions.forEach((tx) => {
+    if (tx.transfer) transferIds.add(tx.__id);
+    const dateKey = tx.date ? String(tx.date).slice(0, 10) : 'unknown';
+    const descKey = String(tx.description || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const key = `${dateKey}|${Math.abs(tx.amount).toFixed(2)}|${descKey}`;
+    const bucket = signatureMap.get(key) || { inflow: [], outflow: [] };
+    if (tx.amount >= 0) bucket.inflow.push(tx);
+    else bucket.outflow.push(tx);
+    signatureMap.set(key, bucket);
+  });
+
+  for (const bucket of signatureMap.values()) {
+    if (bucket.inflow.length && bucket.outflow.length) {
+      bucket.inflow.forEach((tx) => transferIds.add(tx.__id));
+      bucket.outflow.forEach((tx) => transferIds.add(tx.__id));
+    }
+  }
+
+  const filtered = transactions.filter((tx) => !transferIds.has(tx.__id));
+
+  filtered.forEach((tx) => {
+    const acc = accounts.get(tx.accountId);
+    if (!acc) return;
+    if (tx.amount >= 0) acc.totals.income += tx.amount;
+    else acc.totals.spend += Math.abs(tx.amount);
+  });
+
+  const totals = filtered.reduce((acc, tx) => {
+    if (tx.amount >= 0) acc.income += tx.amount;
+    else acc.spend += Math.abs(tx.amount);
+    return acc;
+  }, { income: 0, spend: 0 });
+
+  const categoryGroups = {};
+  filtered.forEach((tx) => {
+    const key = tx.category || 'Other';
+    if (!categoryGroups[key]) categoryGroups[key] = { category: key, inflow: 0, outflow: 0 };
+    if (tx.amount >= 0) categoryGroups[key].inflow += tx.amount;
+    else categoryGroups[key].outflow += Math.abs(tx.amount);
+  });
+
+  const categories = Object.values(categoryGroups)
+    .sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
+  const topCategories = categories
+    .filter((cat) => cat.outflow)
+    .slice(0, 5)
+    .map((cat) => ({
+      category: cat.category,
+      outflow: cat.outflow,
+      inflow: cat.inflow,
+    }));
+
+  const largestExpenses = filtered
+    .filter((tx) => tx.amount < 0)
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+    .slice(0, 5)
+    .map((tx) => ({
+      description: tx.description,
+      amount: Math.abs(tx.amount),
+      category: tx.category,
+      date: tx.date || null,
+      accountName: tx.accountName || null,
+    }));
+
+  return {
+    totals,
+    categories,
+    topCategories,
+    largestExpenses,
+    accounts: Array.from(accounts.values()).map((acc) => ({
+      ...acc,
+      totals: {
+        income: Math.round(acc.totals.income * 100) / 100,
+        spend: Math.round(acc.totals.spend * 100) / 100,
+      },
+    })),
+    transactions: filtered,
+    transferCount: transferIds.size,
+    hasData: filtered.length > 0,
+  };
+}
+
+function buildRangeView(docSources = {}, range) {
+  const grouped = groupSourcesByBase(docSources);
+
+  const payslipEntries = Array.isArray(grouped.payslip) ? grouped.payslip : [];
+  const payslipInRange = payslipEntries
+    .map((entry) => ({
+      entry,
+      payDate: entry.metrics?.payDate || entry.metadata?.payDate || entry.metrics?.periodEnd || entry.metrics?.periodStart,
+    }))
+    .filter((item) => withinRange(item.payDate, range));
+  const latestPayslip = payslipInRange
+    .slice()
+    .sort((a, b) => {
+      const aDate = toDate(a.payDate);
+      const bDate = toDate(b.payDate);
+      return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+    })[0]?.entry || null;
+
+  const statementEntries = Array.isArray(grouped.current_account_statement)
+    ? grouped.current_account_statement
+    : [];
+  const statementSummary = summariseStatementRange(statementEntries, range);
+
+  return {
+    payslip: {
+      latest: latestPayslip,
+      entries: payslipInRange.map((item) => item.entry),
+      hasData: payslipInRange.length > 0,
+    },
+    statements: statementSummary,
+  };
+}
+
 // GET /api/analytics/dashboard
 router.get('/dashboard', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
@@ -185,6 +385,9 @@ router.get('/dashboard', auth, async (req, res) => {
   const assetAllocation = Array.isArray(summary.assetAllocation) ? summary.assetAllocation : [];
   const liabilitySchedule = Array.isArray(summary.liabilitySchedule) ? summary.liabilitySchedule : [];
   const affordability = summary.affordability || {};
+  const rangeView = buildRangeView(docSources, range);
+  const latestPayslipEntry = rangeView.payslip.latest;
+  const statementSummary = rangeView.statements;
 
   const assetBreakdown = assetAllocation.map((item) => ({
     key: item.key || item.label,
@@ -204,41 +407,40 @@ router.get('/dashboard', auth, async (req, res) => {
   }));
 
   const metrics = [];
-  if (docAggregates.income?.gross != null) {
+  if (latestPayslipEntry?.metrics?.gross != null) {
+    const payMetrics = latestPayslipEntry.metrics;
     metrics.push({
       key: 'income',
-      value: Number(docAggregates.income.gross),
+      value: Number(payMetrics.gross),
       format: 'currency',
       subLabel: (() => {
-        const net = docAggregates.income.net;
-        const pct = docAggregates.income.takeHomePercent;
+        const net = payMetrics.net;
+        const pct = payMetrics.takeHomePercent;
         if (net != null && pct != null) {
           return `Take-home ${Number(net).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })} (${(pct * 100).toFixed(1)}% of gross).`;
         }
         if (net != null) {
           return `Net pay ${Number(net).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })}.`;
         }
-        return 'Derived from latest payslip upload.';
+        return 'Derived from latest payslip in range.';
       })(),
-      sourceNote: 'Derived from payslip uploads in the document vault.',
+      sourceNote: 'Derived from payslip uploads within the selected range.',
     });
   }
-  if (docAggregates.cashflow?.spend != null) {
+  if (statementSummary?.hasData) {
     metrics.push({
       key: 'spend',
-      value: Number(docAggregates.cashflow.spend),
+      value: Number(statementSummary.totals.spend || 0),
       format: 'currency',
       delta: null,
-      sourceNote: 'Calculated from categorised transactions in current account statements.'
+      sourceNote: 'Calculated from categorised transactions in current account statements (range filtered).'
     });
-  }
-  if (docAggregates.cashflow?.income != null) {
     metrics.push({
       key: 'savingsCapacity',
-      value: Number(docAggregates.cashflow.income) - Number(docAggregates.cashflow.spend || 0),
+      value: Number(statementSummary.totals.income || 0) - Number(statementSummary.totals.spend || 0),
       format: 'currency',
-      subLabel: 'Income minus spending from documents',
-      sourceNote: 'Income and spending inferred from bank statements.'
+      subLabel: 'Income minus spending from documents in range',
+      sourceNote: 'Income and spending inferred from bank statements (range filtered).'
     });
   }
   if (docAggregates.tax?.taxDue != null) {
@@ -251,12 +453,8 @@ router.get('/dashboard', auth, async (req, res) => {
     });
   }
 
-  const categorySource = Array.isArray(docAggregates.cashflow?.topCategories) && docAggregates.cashflow.topCategories.length
-    ? docAggregates.cashflow.topCategories
-    : Array.isArray(docAggregates.cashflow?.categories)
-      ? docAggregates.cashflow.categories
-      : [];
-  const totalSpend = Number(docAggregates.cashflow?.spend || 0) || categorySource.reduce((acc, item) => acc + Number(item.outflow || item.amount || 0), 0) || 1;
+  const categorySource = Array.isArray(statementSummary?.categories) ? statementSummary.categories : [];
+  const totalSpend = Number(statementSummary?.totals?.spend || 0) || categorySource.reduce((acc, item) => acc + Number(item.outflow || item.amount || 0), 0) || 1;
   const spendCategories = categorySource
     .filter((cat) => (cat.outflow || cat.amount))
     .map((cat) => ({
@@ -270,40 +468,50 @@ router.get('/dashboard', auth, async (req, res) => {
   const processingMessage = processingStates.find((state) => state.active && state.message)?.message
     || (processingActive ? 'Updating analytics…' : null);
 
-  const payslipAnalytics = docAggregates.income && Object.keys(docAggregates.income).length
+  const payslipAnalytics = latestPayslipEntry?.metrics
     ? {
-        gross: docAggregates.income.gross ?? null,
-        grossYtd: docAggregates.income.grossYtd ?? null,
-        net: docAggregates.income.net ?? null,
-        netYtd: docAggregates.income.netYtd ?? null,
-        tax: docAggregates.income.tax ?? null,
-        ni: docAggregates.income.ni ?? null,
-        pension: docAggregates.income.pension ?? null,
-        studentLoan: docAggregates.income.studentLoan ?? null,
-        totalDeductions: docAggregates.income.totalDeductions ?? null,
-        annualisedGross: docAggregates.income.annualisedGross ?? null,
-        effectiveMarginalRate: docAggregates.income.effectiveMarginalRate ?? null,
-        expectedMarginalRate: docAggregates.income.expectedMarginalRate ?? null,
-        marginalRateDelta: docAggregates.income.marginalRateDelta ?? null,
-        takeHomePercent: docAggregates.income.takeHomePercent ?? null,
-        payFrequency: docAggregates.income.payFrequency || null,
-        taxCode: docAggregates.income.taxCode || null,
-        deductions: Array.isArray(docAggregates.income.deductions) ? docAggregates.income.deductions : [],
-        earnings: Array.isArray(docAggregates.income.earnings) ? docAggregates.income.earnings : [],
-        allowances: Array.isArray(docAggregates.income.allowances) ? docAggregates.income.allowances : [],
-        notes: docAggregates.income.notes || [],
-        extractionSource: docAggregates.income.extractionSource || null,
+        gross: latestPayslipEntry.metrics.gross ?? null,
+        grossYtd: latestPayslipEntry.metrics.grossYtd ?? null,
+        net: latestPayslipEntry.metrics.net ?? null,
+        netYtd: latestPayslipEntry.metrics.netYtd ?? null,
+        tax: latestPayslipEntry.metrics.tax ?? null,
+        ni: latestPayslipEntry.metrics.ni ?? null,
+        pension: latestPayslipEntry.metrics.pension ?? null,
+        studentLoan: latestPayslipEntry.metrics.studentLoan ?? null,
+        totalDeductions: latestPayslipEntry.metrics.totalDeductions ?? null,
+        annualisedGross: latestPayslipEntry.metrics.annualisedGross ?? null,
+        effectiveMarginalRate: latestPayslipEntry.metrics.effectiveMarginalRate ?? null,
+        expectedMarginalRate: latestPayslipEntry.metrics.expectedMarginalRate ?? null,
+        marginalRateDelta: latestPayslipEntry.metrics.marginalRateDelta ?? null,
+        takeHomePercent: latestPayslipEntry.metrics.takeHomePercent ?? null,
+        payFrequency: latestPayslipEntry.metrics.payFrequency || null,
+        taxCode: latestPayslipEntry.metrics.taxCode || null,
+        deductions: Array.isArray(latestPayslipEntry.metrics.deductions) ? latestPayslipEntry.metrics.deductions : [],
+        earnings: Array.isArray(latestPayslipEntry.metrics.earnings) ? latestPayslipEntry.metrics.earnings : [],
+        allowances: Array.isArray(latestPayslipEntry.metrics.allowances) ? latestPayslipEntry.metrics.allowances : [],
+        notes: latestPayslipEntry.metrics.notes || [],
+        extractionSource: latestPayslipEntry.metrics.extractionSource || null,
+        payDate: latestPayslipEntry.metrics.payDate || latestPayslipEntry.metadata?.payDate || null,
+        periodStart: latestPayslipEntry.metrics.periodStart || latestPayslipEntry.metadata?.periodStart || null,
+        periodEnd: latestPayslipEntry.metrics.periodEnd || latestPayslipEntry.metadata?.periodEnd || null,
       }
     : null;
 
-  const statementHighlights = docAggregates.cashflow && Object.keys(docAggregates.cashflow).length
+  const statementHighlights = statementSummary?.hasData
     ? {
-        totalIncome: docAggregates.cashflow.income ?? null,
-        totalSpend: docAggregates.cashflow.spend ?? null,
-        topCategories: Array.isArray(docAggregates.cashflow.topCategories) ? docAggregates.cashflow.topCategories : [],
-        largestExpenses: Array.isArray(docAggregates.cashflow.largestExpenses) ? docAggregates.cashflow.largestExpenses : [],
+        totalIncome: statementSummary.totals.income ?? null,
+        totalSpend: statementSummary.totals.spend ?? null,
+        topCategories: Array.isArray(statementSummary.topCategories) ? statementSummary.topCategories : [],
+        largestExpenses: Array.isArray(statementSummary.largestExpenses) ? statementSummary.largestExpenses : [],
+        accounts: Array.isArray(statementSummary.accounts) ? statementSummary.accounts : [],
+        transferCount: statementSummary.transferCount || 0,
       }
     : null;
+
+  const rangeStatus = {
+    payslip: rangeView.payslip.hasData ? null : 'No payslip data in selected range.',
+    statements: statementSummary?.hasData ? null : 'No statements in selected range.',
+  };
 
   const usage = user.usageStats || {};
   const documentsProgress = {
@@ -324,6 +532,19 @@ router.get('/dashboard', auth, async (req, res) => {
   const progressPercent = documentsProgress.required.total
     ? Math.round((documentsProgress.required.completed / documentsProgress.required.total) * 100)
     : 0;
+
+  const usageStatsNew = await computeUsageStats(user._id, range);
+  if (usageStatsNew) {
+    const prevUsage = user.usageStats || {};
+    const prevSaved = Number(prevUsage.moneySavedEstimate || 0);
+    const newSaved = Number(usageStatsNew.moneySavedEstimate || 0);
+    let cumulative = Number(prevUsage.moneySavedCumulative || 0);
+    if (newSaved > prevSaved) cumulative += newSaved - prevSaved;
+    usageStatsNew.moneySavedCumulative = Math.round(cumulative);
+    const nextUsage = { ...prevUsage, ...usageStatsNew };
+    await User.findByIdAndUpdate(user._id, { $set: { usageStats: nextUsage } }).exec().catch(() => {});
+    user.usageStats = nextUsage;
+  }
 
   const payload = {
     range,
@@ -350,10 +571,11 @@ router.get('/dashboard', auth, async (req, res) => {
         values: []
       },
       spendByCategory: spendCategories,
-      largestExpenses: Array.isArray(docAggregates.cashflow?.largestExpenses) ? docAggregates.cashflow.largestExpenses : [],
+      largestExpenses: Array.isArray(statementSummary?.largestExpenses) ? statementSummary.largestExpenses : [],
       payslipAnalytics,
       statementHighlights,
       hmrcBalance: docAggregates.tax?.taxDue != null ? { value: Number(docAggregates.tax.taxDue) } : null,
+      rangeStatus,
     },
     financialPosture: {
       netWorth: summary.netWorth ?? null,

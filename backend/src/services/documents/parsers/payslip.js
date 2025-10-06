@@ -96,6 +96,34 @@ function parseTaxCode(text) {
   return match ? match[1].trim() : null;
 }
 
+function parseDate(value) {
+  if (!value) return null;
+  const iso = new Date(value);
+  if (!Number.isNaN(iso.getTime())) return iso.toISOString().slice(0, 10);
+  const dmy = String(value).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (dmy) {
+    const day = dmy[1].padStart(2, '0');
+    const month = dmy[2].padStart(2, '0');
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${year}-${month}-${day}`;
+  }
+  const monthText = String(value).match(/([0-9]{1,2})\s+([A-Za-z]{3,9})\s*(\d{2,4})?/);
+  if (monthText) {
+    const monthNames = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
+    };
+    const month = monthNames[monthText[2].slice(0, 3).toLowerCase()];
+    if (month) {
+      const day = monthText[1].padStart(2, '0');
+      const yearRaw = monthText[3] || `${new Date().getFullYear()}`;
+      const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw.padStart(4, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return null;
+}
+
 async function llmPayslipExtraction(text) {
   const schema = {
     name: 'payslip_analysis',
@@ -170,6 +198,9 @@ async function llmPayslipExtraction(text) {
           type: 'array',
           items: { type: 'string' },
         },
+        payment_date: { type: ['string', 'null'] },
+        period_start: { type: ['string', 'null'] },
+        period_end: { type: ['string', 'null'] },
       },
     },
     strict: true,
@@ -198,6 +229,9 @@ ${text.slice(0, 6000)}`;
     payFrequencyLabel: response.pay_frequency || null,
     taxCode: response.tax_code || null,
     notes: Array.isArray(response.notes) ? response.notes : [],
+    payDate: parseDate(response.payment_date) || null,
+    periodStart: parseDate(response.period_start) || null,
+    periodEnd: parseDate(response.period_end) || null,
     source: 'openai',
   };
 }
@@ -265,6 +299,12 @@ function heuristicPayslipExtraction(text) {
   const expectedRate = expectedUkMarginalRate(annualisedGross);
   const takeHomePercent = metrics.gross ? (metrics.net ?? 0) / metrics.gross : null;
 
+  const payDateMatch = text.match(/pay\s*date[:\s]+([A-Za-z0-9\/-]+)/i)
+    || text.match(/date\s*paid[:\s]+([A-Za-z0-9\/-]+)/i)
+    || text.match(/payment\s*date[:\s]+([A-Za-z0-9\/-]+)/i);
+  const periodMatch = text.match(/period\s*(?:start|from)[:\s]+([A-Za-z0-9\/-]+)/i);
+  const periodEndMatch = text.match(/period\s*(?:end|to)[:\s]+([A-Za-z0-9\/-]+)/i);
+
   return {
     raw: null,
     gross: metrics.gross ?? null,
@@ -290,6 +330,9 @@ function heuristicPayslipExtraction(text) {
     taxCode: parseTaxCode(text),
     notes: [],
     source: 'heuristic',
+    payDate: parseDate(payDateMatch?.[1]) || null,
+    periodStart: parseDate(periodMatch?.[1]) || null,
+    periodEnd: parseDate(periodEndMatch?.[1]) || null,
   };
 }
 
@@ -307,6 +350,9 @@ function mergeExtraction(base, fallback) {
   if (merged.takeHomePercent == null) merged.takeHomePercent = fallback.takeHomePercent;
   if (!merged.taxCode) merged.taxCode = fallback.taxCode;
   if (!merged.payFrequencyLabel) merged.payFrequencyLabel = fallback.payFrequencyLabel;
+  if (!merged.payDate) merged.payDate = fallback.payDate;
+  if (!merged.periodStart) merged.periodStart = fallback.periodStart;
+  if (!merged.periodEnd) merged.periodEnd = fallback.periodEnd;
   merged.notes = Array.from(new Set([...(fallback.notes || []), ...(base.notes || [])])).filter(Boolean);
   return merged;
 }
@@ -347,6 +393,9 @@ async function analysePayslip(text) {
     notes: summaryNotes,
     extractionSource: merged.source,
     llmNotes: merged.notes || [],
+    payDate: merged.payDate || null,
+    periodStart: merged.periodStart || null,
+    periodEnd: merged.periodEnd || null,
   };
   return breakdown;
 }
