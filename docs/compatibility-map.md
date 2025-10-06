@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | `INTERNAL_TASK_SECRET` | Shared secret for header auth on `/_internal` routes. | Use `Authorization: Bearer <token>` check server-side. |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_BASE` | Configure Cloudflare R2 client + signed URL host. | Supersede `R2_S3_ENDPOINT`; keep backward-compatible fallback during migration.【F:docs/analytics-calculation-plan.md†L21-L41】 |
-| `REDIS_URL` (or `BULLMQ_REDIS_URL`) | Backing store for BullMQ queues used by worker service. | Ensure least-privilege credentials. |
+| `MONGODB_URI` | Connection string for Mongo-backed worker outbox and analytics collections. | Scope credentials to required collections only. |
 | `WORKER_METRICS_API_KEY` | Optional metrics push gateway token for job telemetry. | Enables observability per plan requirements. |
 | `CLAMAV_HOST` / `CLAMAV_PORT` (or provider equivalent) | Antivirus scan endpoint for ingest pipeline before parsing. | Worker should short-circuit if not configured but log requirement. |
 | `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (existing) | Keep for Plaid readiness; feature-flag job should detect absence and no-op. | Already referenced today; document for completeness.【F:backend/utils/plaidConfig.js†L16-L53】 |
@@ -40,7 +40,7 @@
 ## Minimal Migration Steps
 1. **Model rollout**: Introduce `VaultFile`, `DocChecklist`, and `AnalyticsCache` Mongo schemas with required indices before enabling worker writes. Backfill from existing `User.usageStats` + JSON docs.
 2. **R2 client upgrade**: Deploy `lib/r2.ts` with new env vars, update backend upload path to record object keys + SHA-256, and ensure Cloudflare Worker can presign downloads.
-3. **Queue infrastructure**: Provision Redis (or alternative) for BullMQ, deploy new `services/worker` container, and configure `/\_internal` secrets.
+3. **Queue infrastructure**: Provision Mongo outbox collections, deploy new `services/worker` container, and configure `/\_internal` secrets.
 4. **Analytics cache cut-over**: Modify `/api/analytics/dashboard` to read from `AnalyticsCache`, trigger recompute on cache miss, and keep serving last-known-good payload to UI.
 5. **Front-end adjustments**: Keep existing components but wire UI to show background refresh indicators and validation badges sourced from new payload fields.
 6. **Operational setup**: Configure Render cron schedules (15m incremental, daily full recompute), Cloudflare Worker for signed R2 access, and run updated CI/CD (lint/typecheck/tests) before release.
