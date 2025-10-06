@@ -86,6 +86,23 @@
     /* Utility */
     .muted{ color: var(--muted) }
     .chip{ font-size:.78rem; padding:.1rem .5rem; background: var(--chip-bg); color: var(--chip-fg); border-radius: 999px }
+
+    /* Document catalogue */
+    .doc-progress-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:12px; }
+    .doc-progress-card{ border:1px solid var(--bs-border-color); border-radius:12px; padding:12px; background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
+    .doc-progress-card .progress{ height:10px; }
+    .doc-progress-meta{ color: var(--muted); font-size:.85rem; }
+    #doc-progress-updated{ color: var(--muted); font-size:.85rem; }
+
+    .doc-table tbody tr{ transition: background-color .15s ease; }
+    .doc-table tbody tr:hover{ background: rgba(111,66,193,.05); }
+    .doc-table .doc-why,
+    .doc-table .doc-where{ min-width: 180px; max-width: 240px; }
+
+    .doc-files-panel{ border:1px solid var(--bs-border-color); border-radius:12px; padding:12px; background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
+    .doc-files-panel table{ margin-bottom:0; }
+    .doc-files-panel .table thead th{ font-size:.78rem; text-transform:uppercase; letter-spacing:.03em; }
+    .doc-files-panel .table td{ font-size:.85rem; }
   </style>
 
   <script>
@@ -118,6 +135,85 @@
         </div>
       </div>
     </div>
+
+    <!-- Document checklist -->
+    <section class="panel mb-4" id="catalogue-panel">
+      <div class="panel-header flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <i class="bi bi-clipboard-check text-primary"></i>
+          <strong>Document checklist</strong>
+        </div>
+        <div id="doc-progress-updated">Updated —</div>
+      </div>
+      <div class="panel-body">
+        <div class="doc-progress-grid mb-3">
+          <div class="doc-progress-card">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold">Required</span>
+              <span id="doc-progress-required-count" class="doc-progress-meta">0 / 0</span>
+            </div>
+            <div class="progress mb-1">
+              <div id="doc-progress-required-bar" class="progress-bar bg-danger" style="width:0%"></div>
+            </div>
+            <div class="doc-progress-meta">Keep these up to date for compliance.</div>
+          </div>
+          <div class="doc-progress-card">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold">Helpful</span>
+              <span id="doc-progress-helpful-count" class="doc-progress-meta">0 / 0</span>
+            </div>
+            <div class="progress mb-1">
+              <div id="doc-progress-helpful-bar" class="progress-bar bg-success" style="width:0%"></div>
+            </div>
+            <div class="doc-progress-meta">Extras that accelerate advice and prep.</div>
+          </div>
+        </div>
+
+        <div class="table-responsive mb-3">
+          <table class="table table-hover align-middle doc-table">
+            <thead class="table-light">
+              <tr>
+                <th>Document</th>
+                <th>Required?</th>
+                <th>Status</th>
+                <th>Last uploaded</th>
+                <th>Next due</th>
+                <th class="doc-why">Why we need it</th>
+                <th class="doc-where">Where to find it</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="doc-catalogue-body">
+              <tr><td colspan="8" class="text-muted small">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="doc-catalogue-msg" class="small text-muted"></div>
+
+        <div id="doc-files-panel" class="doc-files-panel d-none">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h6 class="m-0" id="doc-files-title">Uploads</h6>
+            <button type="button" id="doc-files-close" class="btn btn-sm btn-light">Close</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Filename</th>
+                  <th>Uploaded</th>
+                  <th>Size</th>
+                  <th>Collection</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="doc-files-table-body">
+                <tr><td colspan="5" class="text-muted small">Select a document to preview uploads.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- KPIs -->
     <div class="row g-3 mb-3">

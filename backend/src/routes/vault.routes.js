@@ -29,6 +29,15 @@ const { getSignedUrl: presign } = require('@aws-sdk/s3-request-presigner');
 // NEW: for ZIP streaming
 const archiver = require('archiver');
 
+const User = require('../../models/User');
+const {
+  catalogue: DOCUMENT_CATALOGUE,
+  getCatalogueEntry,
+  getRequiredKeys,
+  getHelpfulKeys,
+  summarizeCatalogue,
+} = require('../services/documents/catalogue');
+
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 
@@ -225,18 +234,21 @@ router.get('/collections/:id/files', async (req, res) => {
 
   const pref = collectionPrefix(u.id, colId);
   const objs = (await listAll(pref)).filter(o => !String(o.Key).endsWith('/'));
+  const { perFile } = await getUserCatalogueState(u.id);
 
   const items = objs.map(o => {
     const key = String(o.Key);
     const id = keyToFileId(key);
     const displayName = extractDisplayNameFromKey(key);
+    const tracked = perFile[id];
     return {
       id,
       name: displayName,
       size: o.Size || 0,
       uploadedAt: o.LastModified ? new Date(o.LastModified).toISOString() : null,
       viewUrl: `/api/vault/files/${id}/view`,
-      downloadUrl: `/api/vault/files/${id}/download`
+      downloadUrl: `/api/vault/files/${id}/download`,
+      catalogueKey: tracked?.key || null,
     };
   }).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
   res.json(items);
@@ -250,6 +262,13 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
 
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
+
+  const catalogueKeyRaw = req.body?.catalogueKey;
+  const catalogueKeyInput = Array.isArray(catalogueKeyRaw) ? catalogueKeyRaw[0] : catalogueKeyRaw;
+  const trimmedCatalogueKey = catalogueKeyInput ? String(catalogueKeyInput).trim() : '';
+  const entryForCatalogue = trimmedCatalogueKey ? getCatalogueEntry(trimmedCatalogueKey) : null;
+  const normalizedCatalogueKey = entryForCatalogue?.key || null;
+  const hasValidCatalogueKey = Boolean(normalizedCatalogueKey);
 
   const uploaded = [];
   for (const f of files) {
@@ -267,17 +286,23 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       size: f.size || 0,
       uploadedAt: new Date().toISOString(),
       viewUrl: `/api/vault/files/${id}/view`,
-      downloadUrl: `/api/vault/files/${id}/download`
+      downloadUrl: `/api/vault/files/${id}/download`,
+      catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
     });
+  }
+  if (hasValidCatalogueKey) {
+    await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, colId);
   }
   res.status(201).json({ uploaded });
 });
 
 router.delete('/files/:id', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const key = fileIdToKey(String(req.params.id || ''));
+  const fileId = String(req.params.id || '');
+  const key = fileIdToKey(fileId);
   if (!key.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
   await deleteObject(key).catch(() => {});
+  await recordCatalogueDeletion(u.id, fileId);
   res.json({ ok: true });
 });
 
@@ -298,7 +323,8 @@ router.get('/files/:id/download', async (req, res) => {
 // Rename (copy→delete; keep date/uuid; swap trailing name)
 router.patch('/files/:id', express.json(), async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const oldKey = fileIdToKey(String(req.params.id || ''));
+  const oldId = String(req.params.id || '');
+  const oldKey = fileIdToKey(oldId);
   if (!oldKey.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
 
   const newNameRaw = String(req.body?.name || '').trim();
@@ -317,6 +343,7 @@ router.patch('/files/:id', express.json(), async (req, res) => {
   const newKey = `${userId}/${colId}/${date}-${uuid}-${safeBase}`;
   if (newKey === oldKey) {
     const id = keyToFileId(oldKey);
+    await recordCatalogueRename(u.id, oldId, safeBase);
     return res.json({
       id, name: safeBase,
       viewUrl: `/api/vault/files/${id}/view`,
@@ -328,6 +355,7 @@ router.patch('/files/:id', express.json(), async (req, res) => {
   await deleteObject(oldKey);
 
   const newId = keyToFileId(newKey);
+  await replaceCatalogueFileId(u.id, oldId, newId, safeBase);
   res.json({
     id: newId, name: safeBase,
     viewUrl: `/api/vault/files/${newId}/view`,

@@ -29,6 +29,10 @@ const SalaryNavigatorSchema = new mongoose.Schema({
   targetSalary:      { type: Number, default: null },
   currentSalary:     { type: Number, default: null },
   nextReviewAt:      { type: Date, default: null },
+  role:              { type: String, default: '' },
+  company:           { type: String, default: '' },
+  location:          { type: String, default: '' },
+  tenure:            { type: Number, default: null },
   package:{
     base:       { type: Number, default: 0 },
     bonus:      { type: Number, default: 0 },
@@ -51,6 +55,7 @@ const SalaryNavigatorSchema = new mongoose.Schema({
   achievements:      { type: [mongoose.Schema.Types.Mixed], default: [] },
   promotionCriteria: { type: [mongoose.Schema.Types.Mixed], default: [] },
   benchmarks:        { type: [mongoose.Schema.Types.Mixed], default: [] },
+  marketBenchmark:   { type: mongoose.Schema.Types.Mixed, default: {} },
   taxSummary:        { type: mongoose.Schema.Types.Mixed, default: {} }
 }, { _id: false });
 
@@ -122,6 +127,11 @@ const UserSchema = new mongoose.Schema({
   usageStats: {
     documentsUploaded:   { type: Number, default: 0 },
     documentsRequiredMet:{ type: Number, default: 0 },
+    documentsHelpfulMet: { type: Number, default: 0 },
+    documentsRequiredTotal: { type: Number, default: 0 },
+    documentsHelpfulTotal:  { type: Number, default: 0 },
+    documentsProgressUpdatedAt: { type: Date, default: null },
+    documentsCatalogue: { type: mongoose.Schema.Types.Mixed, default: {} },
     moneySavedEstimate:  { type: Number, default: 0 },
     hmrcFilingsComplete: { type: Number, default: 0 },
     minutesActive:       { type: Number, default: 0 }
