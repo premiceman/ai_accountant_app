@@ -1,11 +1,15 @@
 // backend/src/routes/user.routes.js
-const express = require('express');
-const router = express.Router();
+// Bridge module that re-exports the primary user router defined in ../routes/user.js.
+// This ensures legacy require paths continue working without serving stale stub data.
 
-// Minimal /api/user/me for dashboard greeting
-router.get('/me', (req, res) => {
-  // If you already have auth, replace this with real user extraction
-  res.json({ id: 'demo', email: 'demo@example.com', firstName: 'Alex' });
-});
-
-module.exports = router;
+try {
+  module.exports = require('../../routes/user');
+} catch (err) {
+  console.error('Failed to load backend/routes/user.js from src/routes/user.routes.js bridge.', err);
+  const express = require('express');
+  const router = express.Router();
+  router.use((req, res) => {
+    res.status(503).json({ error: 'User service unavailable' });
+  });
+  module.exports = router;
+}

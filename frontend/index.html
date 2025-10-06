@@ -89,9 +89,74 @@
     .site-footer{ background:var(--bg-surface); border-top:1px solid var(--bd-hairline) }
     .site-footer .small{ color:var(--fg-3) }
 
+    .landing-nav-inner{ display:flex; align-items:center; gap:1rem; }
+    .landing-nav-actions{ margin-left:auto; display:flex; align-items:center; gap:.6rem; }
+    .landing-bento{ display:none; width:44px; height:44px; border-radius:14px; border:1px solid color-mix(in oklab, var(--bd-hairline) 60%, transparent); background:linear-gradient(160deg, color-mix(in oklab, var(--bg-surface) 96%, transparent), color-mix(in oklab, var(--bg-surface-2) 82%, transparent)); box-shadow:0 10px 24px rgba(12,21,32,0.08); align-items:center; justify-content:center; color:var(--fg-2); padding:0; }
+    .landing-bento:focus-visible{ outline:3px solid var(--focus); outline-offset:3px; }
+    .landing-bento:hover{ color:var(--fg); transform:translateY(-1px); }
+    .landing-bento__dots{ display:grid; grid-template-columns:repeat(3,6px); grid-auto-rows:6px; gap:4px; }
+    .landing-bento__dots span{ display:block; width:6px; height:6px; border-radius:50%; background:color-mix(in oklab, var(--brand) 22%, white); box-shadow:0 2px 4px rgba(12,21,32,0.18); }
+
+    .landing-menu{ position:fixed; inset:0; background:linear-gradient(140deg, color-mix(in oklab, var(--bg-body) 88%, transparent) 0%, color-mix(in oklab, var(--bg-surface-2) 96%, transparent) 50%, color-mix(in oklab, var(--brand) 12%, transparent) 100%); backdrop-filter:blur(16px); padding-top:clamp(1rem, 4vw, 1.5rem); display:flex; flex-direction:column; gap:clamp(1rem, 4vw, 1.5rem); opacity:0; transform:translateY(16px); pointer-events:none; transition:opacity .3s ease, transform .3s ease; z-index:1200; overflow-y:auto; -webkit-overflow-scrolling:touch; scrollbar-gutter:stable both-edges; }
+    .landing-menu::before{ content:""; position:absolute; inset:12% 8% auto 8%; height:280px; background:radial-gradient(circle at top, color-mix(in oklab, var(--brand) 32%, transparent), transparent 68%); opacity:.55; filter:blur(20px); pointer-events:none; }
+    .landing-menu.is-open{ opacity:1; transform:translateY(0); pointer-events:auto; }
+    .landing-menu__header, .landing-menu__tiles{ position:relative; z-index:1; }
+    .landing-menu__header{ display:flex; align-items:flex-start; justify-content:space-between; gap:1.5rem; padding:0 clamp(1.5rem, 7vw, 2.75rem); }
+    .landing-menu__eyebrow{ letter-spacing:.18em; color:var(--fg-2); font-size:.75rem; }
+    .landing-menu__title{ font-size:clamp(1.5rem, 5vw, 2.5rem); }
+    .landing-menu__subtitle{ color:var(--fg-2); font-size:.95rem; max-width:36ch; }
+    .landing-menu__close{ width:48px; height:48px; border-radius:16px; border:1px solid color-mix(in oklab, var(--bd-hairline) 70%, transparent); background:linear-gradient(160deg, var(--bg-surface) 30%, var(--bg-surface-2) 100%); display:flex; align-items:center; justify-content:center; color:var(--fg); box-shadow:0 12px 26px rgba(12,21,32,0.12); transition:transform .2s ease, box-shadow .2s ease; }
+    .landing-menu__close:hover{ transform:translateY(-2px); box-shadow:0 16px 32px rgba(12,21,32,0.16); }
+    .landing-menu__tiles{ display:grid; gap:clamp(1rem, 6vw, 2rem); padding:0 clamp(1.5rem, 7vw, 2.75rem) clamp(2.5rem, 9vw, 3.5rem); grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); }
+    .landing-menu__tile{ position:relative; border-radius:24px; border:1px solid color-mix(in oklab, var(--bd-hairline) 80%, transparent); background:linear-gradient(160deg, var(--bg-surface) 55%, color-mix(in oklab, var(--bg-surface-2) 80%, transparent)); padding:clamp(1.35rem, 5vw, 1.85rem); text-decoration:none; color:inherit; display:flex; flex-direction:column; gap:.45rem; box-shadow:0 18px 36px rgba(12,21,32,0.12); transition:transform .25s ease, box-shadow .25s ease; }
+    .landing-menu__tile::after{ content:""; position:absolute; inset:auto 18% -24px 18%; height:40px; border-radius:999px; background:radial-gradient(circle, rgba(12,21,32,0.16), transparent 70%); opacity:0; transition:opacity .25s ease; }
+    .landing-menu__tile:hover{ transform:translateY(-6px); box-shadow:0 26px 46px rgba(12,21,32,0.18); }
+    .landing-menu__tile:hover::after{ opacity:1; }
+    .landing-menu__tile-icon{ width:48px; height:48px; border-radius:16px; display:grid; place-items:center; background:color-mix(in oklab, var(--brand) 14%, white); color:color-mix(in oklab, var(--brand) 85%, #083d33); font-size:1.35rem; box-shadow:0 12px 28px rgba(0,194,168,0.18); }
+    .landing-menu__tile-title{ font-weight:600; font-size:1.1rem; }
+    .landing-menu__tile-copy{ color:var(--fg-2); font-size:.95rem; line-height:1.5; }
+    .landing-menu__tile--accent{ background:linear-gradient(160deg, color-mix(in oklab, var(--brand) 14%, white) 0%, color-mix(in oklab, var(--brand-hover) 18%, white) 100%); color:#0E151A; box-shadow:0 24px 46px rgba(0,194,168,0.25); }
+    .landing-menu__tile--accent .landing-menu__tile-icon{ background:rgba(255,255,255,0.85); color:var(--brand); box-shadow:0 12px 28px rgba(255,255,255,0.3); }
+
+    html.landing-menu-open, body.landing-menu-open{ overflow:hidden; height:100%; }
+
+    @media (max-width: 991.98px){
+      .landing-nav-actions{ display:none; }
+      .landing-bento{ display:inline-flex; }
+      .hero-inner{ padding: clamp(4.5rem, 14vw, 6rem) clamp(1.25rem, 6vw, 2rem) clamp(3rem, 12vw, 4rem); text-align:left; }
+      .hero-cta{ flex-direction:column; align-items:stretch; }
+      .hero-cta .btn{ width:100%; justify-content:center; }
+      .chip{ font-size:.85rem; }
+      .logos{ gap: clamp(1rem, 4vw, 2rem); }
+      .landing-menu{ display:flex; }
+    }
+
+    @media (max-width: 767.98px){
+      .hero{ min-height:auto; }
+      section{ padding: clamp(2.5rem, 10vw, 3.5rem) 0; }
+      .features{ grid-template-columns: 1fr; }
+      .feature{ transform:none; }
+      .feature:hover{ transform:none; }
+      .feature, .feature.wide{ grid-column: span 1; }
+      .hero p.lede{ max-width: 100%; }
+    }
+
+    @media (max-width: 575.98px){
+      .hero-inner{ padding-top: clamp(4rem, 16vw, 5rem); }
+      .landing-menu__tiles{ grid-template-columns: 1fr; }
+      .landing-menu__header{ flex-direction:column; align-items:flex-start; }
+      .landing-menu__close{ align-self:flex-end; }
+    }
+
+    @media (min-width: 992px){
+      .landing-menu{ display:none!important; }
+    }
+
     @media (prefers-reduced-motion: reduce){
       .layer{ transition:none }
       .reveal{ transition:none }
+      .landing-menu{ transition:none; }
+      .landing-menu__tile, .landing-bento, .landing-menu__close{ transition:none; }
     }
   </style>
 </head>
@@ -99,9 +164,17 @@
 
   <!-- Top nav -->
   <nav class="landing-nav navbar navbar-expand-lg py-2 border-bottom bg-body-tertiary">
-    <div class="container">
+    <div class="container landing-nav-inner">
+      <button class="landing-bento" type="button" id="landingMenuToggle" aria-expanded="false" aria-controls="landingMenu">
+        <span class="visually-hidden">Open navigation menu</span>
+        <span class="landing-bento__dots" aria-hidden="true">
+          <span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+          <span></span><span></span><span></span>
+        </span>
+      </button>
       <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
-      <div class="ms-auto d-flex align-items-center gap-2">
+      <div class="landing-nav-actions">
         <a class="btn btn-outline" href="#features">Features</a>
         <a class="btn btn-outline" href="#advisor">AI Advisor</a>
         <a class="btn btn-outline" href="#security">Security</a>
@@ -110,6 +183,51 @@
       </div>
     </div>
   </nav>
+
+  <div class="landing-menu" id="landingMenu" hidden>
+    <div class="landing-menu__header">
+      <div>
+        <p class="landing-menu__eyebrow text-uppercase fw-semibold mb-1">Navigate</p>
+        <h2 class="landing-menu__title mb-0">Explore AI Accountant</h2>
+        <p class="landing-menu__subtitle mb-0">Jump straight to the tools you need or learn what’s inside.</p>
+      </div>
+      <button class="landing-menu__close" type="button" id="landingMenuClose" aria-label="Close menu">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <div class="landing-menu__tiles">
+      <a class="landing-menu__tile" href="#features" data-close-menu>
+        <span class="landing-menu__tile-icon"><i class="bi bi-grid-1x2"></i></span>
+        <span class="landing-menu__tile-title">Features</span>
+        <span class="landing-menu__tile-copy">See everything included — automation, dashboards, compliance, and more.</span>
+      </a>
+      <a class="landing-menu__tile" href="#advisor" data-close-menu>
+        <span class="landing-menu__tile-icon"><i class="bi bi-stars"></i></span>
+        <span class="landing-menu__tile-title">AI Advisor</span>
+        <span class="landing-menu__tile-copy">Learn how our advisor pairs AI with your financial data to guide decisions.</span>
+      </a>
+      <a class="landing-menu__tile" href="#security" data-close-menu>
+        <span class="landing-menu__tile-icon"><i class="bi bi-shield-check"></i></span>
+        <span class="landing-menu__tile-title">Security</span>
+        <span class="landing-menu__tile-copy">Understand how we protect every document, connection, and transaction.</span>
+      </a>
+      <a class="landing-menu__tile" href="#faq" data-close-menu>
+        <span class="landing-menu__tile-icon"><i class="bi bi-question-circle"></i></span>
+        <span class="landing-menu__tile-title">FAQ</span>
+        <span class="landing-menu__tile-copy">Get answers to the top questions about pricing, coverage, and onboarding.</span>
+      </a>
+      <a class="landing-menu__tile landing-menu__tile--accent" href="/login.html" id="landingMenuLogin" data-close-menu>
+        <span class="landing-menu__tile-icon"><i class="bi bi-box-arrow-in-right"></i></span>
+        <span class="landing-menu__tile-title">Login</span>
+        <span class="landing-menu__tile-copy">Existing customer? Continue to your secure workspace.</span>
+      </a>
+      <a class="landing-menu__tile" href="/signup.html" data-close-menu>
+        <span class="landing-menu__tile-icon"><i class="bi bi-person-plus"></i></span>
+        <span class="landing-menu__tile-title">Create account</span>
+        <span class="landing-menu__tile-copy">New to AI Accountant? Start with a guided setup tailored to your needs.</span>
+      </a>
+    </div>
+  </div>
 
   <!-- HERO -->
   <header class="hero">
@@ -580,6 +698,106 @@
   </footer>
 
   <script src="/js/landing.js"></script>
+  <script>
+    (function(){
+      const menu = document.getElementById('landingMenu');
+      const toggle = document.getElementById('landingMenuToggle');
+      const closeBtn = document.getElementById('landingMenuClose');
+      if(!menu || !toggle || !closeBtn){ return; }
+
+      const getFocusable = () => Array.from(menu.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'));
+      let lastActive = null;
+      let restoreId;
+      let scrollOffset = 0;
+
+      const closeMenu = () => {
+        menu.classList.remove('is-open');
+        document.body.classList.remove('landing-menu-open');
+        document.documentElement.classList.remove('landing-menu-open');
+        toggle.setAttribute('aria-expanded', 'false');
+        document.body.style.removeProperty('position');
+        document.body.style.removeProperty('width');
+        document.body.style.removeProperty('top');
+        document.body.style.removeProperty('left');
+        document.body.style.removeProperty('right');
+        window.scrollTo(0, scrollOffset);
+        scrollOffset = 0;
+
+        const finish = () => {
+          menu.hidden = true;
+        };
+        if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+          finish();
+        } else {
+          menu.addEventListener('transitionend', finish, { once: true });
+        }
+        if(lastActive){
+          window.clearTimeout(restoreId);
+          restoreId = window.setTimeout(() => lastActive.focus({ preventScroll: true }), 40);
+        }
+      };
+
+      const openMenu = () => {
+        lastActive = document.activeElement;
+        menu.hidden = false;
+        menu.scrollTop = 0;
+        window.requestAnimationFrame(() => {
+          menu.classList.add('is-open');
+        });
+        document.body.classList.add('landing-menu-open');
+        document.documentElement.classList.add('landing-menu-open');
+        scrollOffset = window.scrollY || document.documentElement.scrollTop || 0;
+        document.body.style.position = 'fixed';
+        document.body.style.width = '100%';
+        document.body.style.top = `-${scrollOffset}px`;
+        document.body.style.left = '0';
+        document.body.style.right = '0';
+        toggle.setAttribute('aria-expanded', 'true');
+        const [first] = getFocusable();
+        if(first){ first.focus({ preventScroll: true }); }
+      };
+
+      toggle.addEventListener('click', () => {
+        if(menu.classList.contains('is-open')){
+          closeMenu();
+        } else {
+          openMenu();
+        }
+      });
+
+      closeBtn.addEventListener('click', closeMenu);
+
+      menu.addEventListener('click', (event) => {
+        const trigger = event.target.closest('[data-close-menu]');
+        if(trigger){ closeMenu(); }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if(event.key === 'Escape' && menu.classList.contains('is-open')){
+          closeMenu();
+        }
+        if(event.key === 'Tab' && menu.classList.contains('is-open')){
+          const items = getFocusable();
+          if(!items.length){ return; }
+          const first = items[0];
+          const last = items[items.length - 1];
+          if(event.shiftKey && document.activeElement === first){
+            event.preventDefault();
+            last.focus();
+          } else if(!event.shiftKey && document.activeElement === last){
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      });
+
+      window.addEventListener('resize', () => {
+        if(window.matchMedia('(min-width: 992px)').matches && menu.classList.contains('is-open')){
+          closeMenu();
+        }
+      });
+    })();
+  </script>
   <script>document.getElementById('y').textContent = new Date().getFullYear();</script>
 </body>
 </html>
