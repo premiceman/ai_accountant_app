@@ -394,6 +394,7 @@ function currency(value) {
 // Utility: shape user data for client (don't expose password/hash)
 function publicUser(u) {
   if (!u) return null;
+  const usage = u.usageStats || {};
   return {
     id: u._id,
     firstName: u.firstName || '',
@@ -409,7 +410,26 @@ function publicUser(u) {
     trial: u.trial || null,
     onboarding: u.onboarding || {},
     preferences: u.preferences || {},
-    usageStats: u.usageStats || {},
+    usageStats: {
+      documentsUploaded: usage.documentsUploaded || 0,
+      documentsRequiredMet: usage.documentsRequiredMet || 0,
+      documentsRequiredCompleted: usage.documentsRequiredCompleted || 0,
+      documentsRequiredTotal: usage.documentsRequiredTotal || 0,
+      documentsOutstanding: usage.documentsOutstanding || 0,
+      moneySavedEstimate: usage.moneySavedEstimate || 0,
+      moneySavedPrevSpend: usage.moneySavedPrevSpend || 0,
+      moneySavedChangePct:
+        usage.moneySavedChangePct == null ? null : usage.moneySavedChangePct,
+      debtOutstanding: usage.debtOutstanding || 0,
+      debtReduced: usage.debtReduced || 0,
+      debtReductionDelta: usage.debtReductionDelta || 0,
+      netCashFlow: usage.netCashFlow || 0,
+      netCashPrev: usage.netCashPrev || 0,
+      usageWindowDays: usage.usageWindowDays || 0,
+      hmrcFilingsComplete: usage.hmrcFilingsComplete || 0,
+      minutesActive: usage.minutesActive || 0,
+      updatedAt: usage.updatedAt || null
+    },
     salaryNavigator: decorateSalaryNavigator(u.salaryNavigator || {}),
     wealthPlan: decorateWealth(u.wealthPlan || {}),
     integrations: u.integrations || [],

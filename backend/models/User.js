@@ -125,11 +125,23 @@ const UserSchema = new mongoose.Schema({
   },
 
   usageStats: {
-    documentsUploaded:   { type: Number, default: 0 },
-    documentsRequiredMet:{ type: Number, default: 0 },
-    moneySavedEstimate:  { type: Number, default: 0 },
-    hmrcFilingsComplete: { type: Number, default: 0 },
-    minutesActive:       { type: Number, default: 0 }
+    documentsUploaded:            { type: Number, default: 0 },
+    documentsRequiredMet:         { type: Number, default: 0 },
+    documentsRequiredCompleted:   { type: Number, default: 0 },
+    documentsRequiredTotal:       { type: Number, default: 0 },
+    documentsOutstanding:         { type: Number, default: 0 },
+    moneySavedEstimate:           { type: Number, default: 0 },
+    moneySavedPrevSpend:          { type: Number, default: 0 },
+    moneySavedChangePct:          { type: Number, default: null },
+    debtOutstanding:              { type: Number, default: 0 },
+    debtReduced:                  { type: Number, default: 0 },
+    debtReductionDelta:           { type: Number, default: 0 },
+    netCashFlow:                  { type: Number, default: 0 },
+    netCashPrev:                  { type: Number, default: 0 },
+    usageWindowDays:              { type: Number, default: 0 },
+    hmrcFilingsComplete:          { type: Number, default: 0 },
+    minutesActive:                { type: Number, default: 0 },
+    updatedAt:                    { type: Date, default: null }
   },
 
   salaryNavigator: { type: SalaryNavigatorSchema, default: () => ({}) },
