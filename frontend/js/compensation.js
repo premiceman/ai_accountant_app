@@ -14,9 +14,14 @@
       },
       targetSalary: null,
       nextReviewAt: null,
+      role: '',
+      company: '',
+      location: '',
+      tenure: null,
       achievements: [],
       promotionCriteria: [],
       benchmarks: [],
+      marketBenchmark: {},
       contractFile: null,
       taxSummary: null
     },
@@ -26,7 +31,22 @@
   };
 
   const modals = {};
-  const debounceSaveTarget = debounce((value) => persist({ targetSalary: value }), 600);
+  const fieldSavers = {
+    targetSalary: createFieldSaver('targetSalary', (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    }),
+    role: createFieldSaver('role', (value) => (value || '').toString().trim()),
+    company: createFieldSaver('company', (value) => (value || '').toString().trim()),
+    location: createFieldSaver('location', (value) => (value || '').toString().trim()),
+    tenure: createFieldSaver('tenure', (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < 0) return null;
+      return Math.round(num * 10) / 10;
+    })
+  };
 
   init().catch((err) => {
     console.error('Compensation navigator failed to initialise', err);
@@ -61,11 +81,64 @@
   }
 
   function wireEvents() {
-    byId('comp-target-slider')?.addEventListener('input', (ev) => {
-      const value = Number(ev.target.value || 0);
-      setText('comp-target-salary', money(value));
-      debounceSaveTarget(value);
-      updateProgress(value, currentPackageTotal());
+    const targetInput = byId('comp-target-input');
+    targetInput?.addEventListener('input', (ev) => {
+      const raw = ev.target.value;
+      const value = raw === '' ? null : Number(raw);
+      const display = value !== null && Number.isFinite(value) ? money(value) : '£—';
+      setText('comp-target-salary', display);
+      if (value === null || !Number.isFinite(value)) {
+        updateProgress(0, currentPackageTotal());
+        state.nav.targetSalary = null;
+      } else {
+        updateProgress(value, currentPackageTotal());
+        state.nav.targetSalary = value;
+      }
+      fieldSavers.targetSalary(value);
+    });
+
+    document.querySelectorAll('[data-target-preset]')?.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.targetPreset;
+        const baseline = currentPackageTotal() || Number(state.nav.targetSalary) || 55000;
+        let target = baseline;
+        if (action === 'plus5') target = Math.round(baseline * 1.05 / 1000) * 1000;
+        if (action === 'plus10') target = Math.round(baseline * 1.1 / 1000) * 1000;
+        if (action === 'current') target = Math.round(currentPackageTotal() || baseline);
+        const clamped = Math.max(0, target);
+        if (targetInput) targetInput.value = clamped;
+        state.nav.targetSalary = clamped;
+        setText('comp-target-salary', money(clamped));
+        updateProgress(clamped, currentPackageTotal());
+        fieldSavers.targetSalary(clamped);
+      });
+    });
+
+    byId('comp-role')?.addEventListener('input', (ev) => {
+      const value = ev.target.value;
+      state.nav.role = value;
+      fieldSavers.role(value);
+    });
+
+    byId('comp-company')?.addEventListener('input', (ev) => {
+      const value = ev.target.value;
+      state.nav.company = value;
+      fieldSavers.company(value);
+    });
+
+    byId('comp-location')?.addEventListener('input', (ev) => {
+      const value = ev.target.value;
+      state.nav.location = value;
+      fieldSavers.location(value);
+    });
+
+    byId('comp-tenure')?.addEventListener('input', (ev) => {
+      const raw = ev.target.value;
+      const value = raw === '' ? null : Number(raw);
+      if (value === null || Number.isFinite(value)) {
+        state.nav.tenure = value;
+        fieldSavers.tenure(value);
+      }
     });
 
     byId('comp-next-review')?.addEventListener('change', async (ev) => {
@@ -218,6 +291,7 @@
   function renderAll() {
     renderPackage();
     renderProgress();
+    renderFairnessBanner();
     renderAchievements();
     renderCriteria();
     renderBenchmarks();
@@ -234,13 +308,18 @@
     setValue('comp-benefits', pkg.benefits);
     setValue('comp-other', pkg.other);
     setValue('comp-notes', pkg.notes || '');
+    setValue('comp-role', state.nav.role || '');
+    setValue('comp-company', state.nav.company || '');
+    setValue('comp-location', state.nav.location || '');
+    setValue('comp-tenure', state.nav.tenure ?? '');
     setText('comp-current-salary', money(currentPackageTotal()));
     setText('comp-current-breakdown', packageBreakdownLabel(pkg));
-    const slider = byId('comp-target-slider');
-    if (slider && Number(slider.value || 0) !== Number(state.nav.targetSalary || slider.min)) {
-      slider.value = Number(state.nav.targetSalary || slider.min);
-    }
-    setText('comp-target-salary', money(state.nav.targetSalary || slider?.value || 0));
+    const targetInput = byId('comp-target-input');
+    const targetValue = state.nav.targetSalary != null && Number.isFinite(Number(state.nav.targetSalary))
+      ? Number(state.nav.targetSalary)
+      : null;
+    if (targetInput) targetInput.value = targetValue != null ? targetValue : '';
+    setText('comp-target-salary', targetValue != null ? money(targetValue) : '£—');
     const nextReview = state.nav.nextReviewAt ? new Date(state.nav.nextReviewAt) : null;
     if (nextReview) {
       byId('comp-next-review').value = nextReview.toISOString().slice(0, 10);
@@ -253,7 +332,10 @@
 
   function renderProgress() {
     const total = currentPackageTotal();
-    const target = Number(state.nav.targetSalary || byId('comp-target-slider')?.value || 0);
+    const targetField = byId('comp-target-input');
+    const target = state.nav.targetSalary != null && Number.isFinite(Number(state.nav.targetSalary))
+      ? Number(state.nav.targetSalary)
+      : Number(targetField?.value || 0);
     updateProgress(target, total);
   }
 
@@ -334,15 +416,17 @@
     results.forEach((row) => {
       const col = document.createElement('div');
       col.className = 'col-12 col-md-6 col-xl-4';
+      const roleLabel = row.role || state.nav.role || state.me?.jobTitle || state.me?.roles?.[0] || 'Role';
+      const locationLabel = row.location || state.nav.location || state.me?.country?.toUpperCase() || 'UK';
       col.innerHTML = `
         <div class="card h-100 border-0 shadow-sm">
           <div class="card-body">
             <div class="d-flex justify-content-between align-items-start mb-2">
               <div>
                 <div class="fw-semibold">${escapeHtml(row.source || 'Benchmark')}</div>
-                <div class="small text-muted">${escapeHtml(row.role || state.me?.jobTitle || state.me?.roles?.[0] || 'Role')}</div>
+                <div class="small text-muted">${escapeHtml(roleLabel)}</div>
               </div>
-              <span class="badge text-bg-light">${escapeHtml(row.location || state.me?.country?.toUpperCase() || 'UK')}</span>
+              <span class="badge text-bg-light">${escapeHtml(locationLabel)}</span>
             </div>
             <div class="display-6">${money(row.medianSalary || 0)}</div>
             <div class="small text-muted mb-3">${escapeHtml(row.summary || '')}</div>
@@ -355,6 +439,64 @@
         </div>`;
       wrap.appendChild(col);
     });
+  }
+
+  function renderFairnessBanner() {
+    const banner = byId('comp-fairness-banner');
+    if (!banner) return;
+    const headline = byId('comp-fairness-headline');
+    const detail = byId('comp-fairness-detail');
+    const statusEl = byId('comp-fairness-status');
+    const timeline = byId('comp-fairness-timeline');
+    const data = state.nav.marketBenchmark || {};
+    const status = data.status || 'unknown';
+    banner.classList.remove('alert-warning', 'alert-success', 'alert-primary', 'alert-info', 'alert-secondary', 'alert-danger');
+    if (!data || status === 'unknown') {
+      banner.classList.add('d-none');
+      banner.classList.remove('d-flex');
+      if (headline) headline.textContent = '—';
+      if (detail) detail.textContent = 'Connect benchmarks to see how your pay stacks up.';
+      if (statusEl) statusEl.textContent = 'Status —';
+      if (timeline) timeline.textContent = 'Promotion timeline pending';
+      return;
+    }
+    banner.classList.remove('d-none');
+    banner.classList.add('d-flex');
+    let tone = 'alert-info';
+    if (status === 'underpaid') tone = 'alert-warning';
+    if (status === 'overpaid') tone = 'alert-primary';
+    if (status === 'fair') tone = 'alert-success';
+    banner.classList.add(tone);
+    const ratioPct = Number.isFinite(data.ratio) ? Math.round(data.ratio * 100) : null;
+    if (headline) headline.textContent = data.summary || 'Market benchmark ready.';
+    if (detail) {
+      const details = [];
+      if (data.marketMedian) details.push(`Blended median ${money(data.marketMedian)}.`);
+      if (status === 'underpaid' && data.recommendedRaise) details.push(`Aim for ${money(data.recommendedRaise)} uplift.`);
+      if (status === 'overpaid' && data.recommendedSalary) details.push(`Protect scope to sustain ${money(data.recommendedSalary)}.`);
+      if (!details.length && data.annualisedIncome) details.push(`Annualised income ${money(data.annualisedIncome)}.`);
+      detail.textContent = details.join(' ') || 'Benchmark sources blended for your role and tenure.';
+    }
+    if (statusEl) {
+      const ratioLabel = ratioPct ? ` (${ratioPct}% of market)` : '';
+      statusEl.textContent = `Status ${statusLabel(status)}${ratioLabel}`;
+    }
+    if (timeline) {
+      const tl = data.promotionTimeline || {};
+      if (tl.monthsToPromotion || tl.targetTitle || tl.windowStart || tl.windowEnd) {
+        const start = tl.windowStart ? new Date(tl.windowStart).toLocaleDateString() : null;
+        const end = tl.windowEnd ? new Date(tl.windowEnd).toLocaleDateString() : null;
+        const segments = [
+          tl.targetTitle || null,
+          tl.monthsToPromotion ? `~${tl.monthsToPromotion} months` : null,
+          start && end ? `${start} → ${end}` : (start || end),
+          tl.confidence ? `${tl.confidence} confidence` : null
+        ].filter(Boolean);
+        timeline.textContent = segments.length ? segments.join(' • ') : 'Promotion guidance ready';
+      } else {
+        timeline.textContent = 'Promotion timeline pending';
+      }
+    }
   }
 
   function renderContract() {
@@ -418,8 +560,9 @@
       if (!res.ok) throw new Error(`Benchmark ${res.status}`);
       const data = await res.json();
       state.nav.benchmarks = data.benchmarks || [];
+      if (data.marketBenchmark) state.nav.marketBenchmark = data.marketBenchmark;
       await refreshUser();
-      renderBenchmarks();
+      renderAll();
       toast('Benchmarks updated');
     } catch (err) {
       console.error('Benchmark failed', err);
@@ -575,17 +718,33 @@
       },
       targetSalary: null,
       nextReviewAt: null,
+      role: '',
+      company: '',
+      location: '',
+      tenure: null,
       achievements: [],
       promotionCriteria: [],
       benchmarks: [],
+      marketBenchmark: {},
       contractFile: null,
       taxSummary: null
     };
     const merged = { ...base, ...nav };
     merged.package = { ...base.package, ...(nav.package || {}) };
+    merged.targetSalary = nav.targetSalary != null && Number.isFinite(Number(nav.targetSalary)) ? Number(nav.targetSalary) : null;
+    merged.role = typeof nav.role === 'string' ? nav.role : '';
+    merged.company = typeof nav.company === 'string' ? nav.company : '';
+    merged.location = typeof nav.location === 'string' ? nav.location : '';
+    if (nav.tenure === '' || nav.tenure === null || nav.tenure === undefined) {
+      merged.tenure = null;
+    } else {
+      const tenureVal = Number(nav.tenure);
+      merged.tenure = Number.isFinite(tenureVal) ? tenureVal : null;
+    }
     merged.achievements = Array.isArray(nav.achievements) ? nav.achievements : [];
     merged.promotionCriteria = Array.isArray(nav.promotionCriteria) ? nav.promotionCriteria : [];
     merged.benchmarks = Array.isArray(nav.benchmarks) ? nav.benchmarks : [];
+    merged.marketBenchmark = nav.marketBenchmark && typeof nav.marketBenchmark === 'object' ? nav.marketBenchmark : {};
     return merged;
   }
 
@@ -654,6 +813,15 @@
     }
   }
 
+  function statusLabel(status) {
+    switch (status) {
+      case 'underpaid': return 'Under-paid';
+      case 'overpaid': return 'Over-paid';
+      case 'fair': return 'Fair';
+      default: return 'Unknown';
+    }
+  }
+
   function numberFrom(id) { return Number(byId(id)?.value || 0); }
   function setValue(id, value) { const el = byId(id); if (el) el.value = value ?? ''; }
   function setText(id, value) { const el = byId(id); if (el) el.textContent = value ?? '—'; }
@@ -688,6 +856,14 @@
     el.textContent = message;
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 2200);
+  }
+
+  function createFieldSaver(key, transform = (value) => value) {
+    return debounce((value) => {
+      const payload = {};
+      payload[key] = transform(value);
+      persist(payload).catch((err) => console.error(`Failed to save ${key}`, err));
+    }, 600);
   }
 
   function debounce(fn, delay = 300) {
