@@ -1,4 +1,5 @@
 const pdfParse = require('pdf-parse');
+const { analysePayslip } = require('./parsers/payslip');
 
 function normalise(text) {
   return String(text || '').toLowerCase();
@@ -27,10 +28,41 @@ function extractNumber(text, labels) {
   for (const label of labels) {
     const idx = lower.indexOf(label);
     if (idx === -1) continue;
-    const snippet = text.slice(Math.max(0, idx - 12), idx + 60);
-    const match = snippet.match(/(-?\d[\d,.]*)(?:\s*(?:£|gbp))?/i) || snippet.match(/£\s*(-?[\d,.]+)/i);
+    const snippet = text.slice(Math.max(0, idx - 12), idx + 80);
+    const match = snippet.match(/£\s*(-?[\d,.]+)/i)
+      || snippet.match(/(-?\d[\d,.]*)(?:\s*(?:£|gbp))?/i);
     if (match) {
-      return Number(match[1].replace(/[,£\s]/g, ''));
+      const cleaned = match[1].replace(/[,£\s]/g, '');
+      const value = Number.parseFloat(cleaned);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return null;
+}
+
+function parseStatementDate(str) {
+  if (!str) return null;
+  const trimmed = str.trim();
+  const iso = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const dmy = trimmed.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if (dmy) {
+    const [day, month, yearRaw] = [dmy[1], dmy[2], dmy[3]];
+    const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const monText = trimmed.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s*(\d{2,4})?/);
+  if (monText) {
+    const monthNames = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
+    };
+    const monthKey = monText[2].slice(0, 3).toLowerCase();
+    const month = monthNames[monthKey];
+    if (month) {
+      const yearRaw = monText[3] || String(new Date().getFullYear());
+      const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw.padStart(4, '0');
+      return `${year}-${month}-${String(monText[1]).padStart(2, '0')}`;
     }
   }
   return null;
@@ -49,10 +81,23 @@ function parseStatementTransactions(text) {
   };
   const transactions = [];
   for (const line of lines) {
-    const amountMatch = line.match(/(-?£?\d[\d,]*\.?\d{0,2})$/);
+    const amountMatch = line.match(/(-?£?\d[\d,]*\.?\d{0,2})\s*(dr|cr)?$/i);
     if (!amountMatch) continue;
-    const amount = Number(amountMatch[1].replace(/[,£]/g, ''));
-    const description = line.replace(amountMatch[0], '').trim();
+    let amount = Number(amountMatch[1].replace(/[,£]/g, ''));
+    if (!Number.isFinite(amount)) continue;
+    const debitCredit = amountMatch[2] ? amountMatch[2].toLowerCase() : null;
+    if (debitCredit === 'dr') amount = -Math.abs(amount);
+    if (debitCredit === 'cr') amount = Math.abs(amount);
+    const withoutAmount = line.replace(amountMatch[0], '').trim();
+    const dateMatch = withoutAmount.match(/^[0-9]{1,2}[^A-Za-z0-9]?\s*[A-Za-z]{3,9}\s*[0-9]{0,4}/)
+      || withoutAmount.match(/^[0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}/)
+      || withoutAmount.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2}/);
+    let description = withoutAmount;
+    let date = null;
+    if (dateMatch) {
+      date = parseStatementDate(dateMatch[0]);
+      description = withoutAmount.slice(dateMatch[0].length).trim();
+    }
     const descLower = normalise(description);
     let category = 'other';
     for (const [cat, probes] of Object.entries(categories)) {
@@ -62,7 +107,7 @@ function parseStatementTransactions(text) {
       }
     }
     const direction = amount >= 0 ? 'inflow' : 'outflow';
-    transactions.push({ description, amount, category, direction });
+    transactions.push({ description: description || 'Transaction', amount, category, direction, date });
   }
   const totals = transactions.reduce((acc, tx) => {
     if (tx.direction === 'inflow') acc.income += tx.amount;
@@ -83,24 +128,41 @@ function summariseTransactions(transactions) {
   return Object.values(groups).sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
 }
 
-function buildInsights(entry, text) {
+async function buildInsights(entry, text) {
   const key = entry.key;
   const insights = { key, metrics: {}, narrative: [] };
 
   if (key === 'payslip') {
-    const gross = extractNumber(text, ['gross pay', 'total gross']);
-    const net = extractNumber(text, ['net pay', 'take home']);
-    const tax = extractNumber(text, ['tax', 'income tax']);
-    const ni = extractNumber(text, ['national insurance']);
-    const pension = extractNumber(text, ['pension', 'employee pension']);
+    const breakdown = await analysePayslip(text || '');
     insights.metrics = {
-      gross,
-      net,
-      tax,
-      ni,
-      pension,
+      gross: breakdown.gross ?? null,
+      grossYtd: breakdown.grossYtd ?? null,
+      net: breakdown.net ?? null,
+      netYtd: breakdown.netYtd ?? null,
+      tax: breakdown.tax ?? null,
+      ni: breakdown.ni ?? null,
+      pension: breakdown.pension ?? null,
+      studentLoan: breakdown.studentLoan ?? null,
+      totalDeductions: breakdown.totalDeductions ?? null,
+      annualisedGross: breakdown.annualisedGross ?? null,
+      effectiveMarginalRate: breakdown.effectiveMarginalRate ?? null,
+      expectedMarginalRate: breakdown.expectedMarginalRate ?? null,
+      marginalRateDelta: breakdown.marginalRateDelta ?? null,
+      takeHomePercent: breakdown.takeHomePercent ?? null,
+      payFrequency: breakdown.payFrequency || null,
+      taxCode: breakdown.taxCode || null,
+      deductions: breakdown.deductions || [],
+      earnings: breakdown.earnings || [],
+      allowances: breakdown.allowances || [],
+      notes: breakdown.notes || [],
+      extractionSource: breakdown.extractionSource || 'heuristic',
+      llmNotes: breakdown.llmNotes || [],
     };
-    insights.narrative.push('Earnings and deductions extracted from payslip.');
+    if (insights.metrics.notes.length) {
+      insights.narrative.push(...insights.metrics.notes);
+    } else {
+      insights.narrative.push('Earnings and deductions extracted from payslip.');
+    }
   } else if (key === 'current_account_statement') {
     const parsed = parseStatementTransactions(text);
     insights.transactions = parsed.transactions;
@@ -108,8 +170,29 @@ function buildInsights(entry, text) {
       income: parsed.totals.income,
       spend: parsed.totals.spend,
       categories: summariseTransactions(parsed.transactions),
+      topCategories: summariseTransactions(parsed.transactions)
+        .filter((cat) => cat.outflow)
+        .slice(0, 5)
+        .map((cat) => ({
+          category: cat.category,
+          outflow: cat.outflow,
+          inflow: cat.inflow,
+        })),
+      largestExpenses: parsed.transactions
+        .filter((tx) => tx.direction === 'outflow')
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+        .slice(0, 5)
+        .map((tx) => ({
+          description: tx.description,
+          amount: Math.abs(tx.amount),
+          category: tx.category,
+          date: tx.date || null,
+        })),
     };
     insights.narrative.push('Classified inflows and outflows from current account statement.');
+    if (insights.metrics.topCategories?.length) {
+      insights.narrative.push('Identified top spending categories from the latest bank statement.');
+    }
   } else if (key === 'savings_account_statement' || key === 'isa_statement') {
     const balance = extractNumber(text, ['balance', 'closing balance']);
     const interest = extractNumber(text, ['interest', 'gross interest']);
@@ -167,7 +250,7 @@ async function analyseDocument(entry, buffer, originalName) {
   }
   return {
     valid: true,
-    insights: buildInsights(entry, text),
+    insights: await buildInsights(entry, text),
     text,
   };
 }

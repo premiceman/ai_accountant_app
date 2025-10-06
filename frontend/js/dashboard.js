@@ -198,6 +198,7 @@
   }
 
   function renderAccounting(data) {
+    setAccountingLoading(data.accounting?.processing);
     const metrics = data.accounting?.metrics || [];
     applyMetric('kpi-savings', metrics.find((m) => m.key === 'savingsCapacity'), { subId: 'kpi-savings-sub', deltaId: 'kpi-savings-delta' });
     applyMetric('kpi-hmrc', metrics.find((m) => m.key === 'hmrcBalance'), { subId: 'kpi-hmrc-sub' });
@@ -206,9 +207,11 @@
     const comparatives = data.accounting?.comparatives || {};
     setText('comparison-label', comparatives.label || 'Comparing to previous period');
 
+    renderPayslipAnalytics(data.accounting?.payslipAnalytics || null);
+    renderStatementHighlights(data.accounting?.statementHighlights || null);
     renderSpendCategory(data.accounting?.spendByCategory || []);
     renderInflationTrend(data.accounting?.inflationTrend || []);
-    renderMerchants(data.accounting?.merchants || []);
+    renderLargestExpenses(data.accounting?.largestExpenses || []);
     renderDuplicates(data.accounting?.duplicates || []);
     renderGauges('gauges', data.accounting?.allowances || []);
     renderObligations(data.accounting?.obligations || [], data.accounting?.hmrcBalance);
@@ -246,32 +249,175 @@
     ]);
   }
 
-  function renderMerchants(merchants) {
-    const list = byId('merchant-list');
-    const empty = byId('merchant-empty');
-    if (!list) return;
-    list.innerHTML = '';
-    if (!Array.isArray(merchants) || !merchants.length) {
+  function renderPayslipAnalytics(analytics) {
+    const empty = byId('payslip-empty');
+    const grossEl = byId('payslip-gross');
+    const grossYtdEl = byId('payslip-gross-ytd');
+    const netEl = byId('payslip-net');
+    const netYtdEl = byId('payslip-net-ytd');
+    const dedEl = byId('payslip-deductions');
+    const taxCodeEl = byId('payslip-tax-code');
+    const emtrEl = byId('payslip-emtr');
+    const emtrCompareEl = byId('payslip-emtr-compare');
+    const notesEl = byId('payslip-notes');
+    const freqEl = byId('payslip-frequency');
+    const earningsTable = byId('payslip-earnings-table')?.querySelector('tbody');
+    const deductionsTable = byId('payslip-deductions-table')?.querySelector('tbody');
+
+    if (!analytics || Object.keys(analytics).length === 0) {
+      if (grossEl) grossEl.textContent = '£—';
+      if (grossYtdEl) grossYtdEl.textContent = '';
+      if (netEl) netEl.textContent = '£—';
+      if (netYtdEl) netYtdEl.textContent = '';
+      if (dedEl) dedEl.textContent = '£—';
+      if (taxCodeEl) taxCodeEl.textContent = '';
+      if (emtrEl) emtrEl.textContent = '—%';
+      if (emtrCompareEl) emtrCompareEl.textContent = '';
+      if (freqEl) freqEl.textContent = '—';
+      if (earningsTable) earningsTable.innerHTML = '';
+      if (deductionsTable) deductionsTable.innerHTML = '';
+      if (notesEl) notesEl.textContent = '';
+      empty?.classList.remove('d-none');
+      return;
+    }
+
+    empty?.classList.add('d-none');
+    if (grossEl) grossEl.textContent = analytics.gross != null ? money(analytics.gross) : '£—';
+    if (grossYtdEl) grossYtdEl.textContent = analytics.grossYtd != null ? `YTD ${money(analytics.grossYtd)}` : '';
+    if (netEl) netEl.textContent = analytics.net != null ? money(analytics.net) : '£—';
+    if (netYtdEl) netYtdEl.textContent = analytics.netYtd != null ? `YTD ${money(analytics.netYtd)}` : '';
+    if (dedEl) dedEl.textContent = analytics.totalDeductions != null ? money(analytics.totalDeductions) : '£—';
+    if (taxCodeEl) taxCodeEl.textContent = analytics.taxCode ? `Tax code ${analytics.taxCode}` : '';
+    const emtr = typeof analytics.effectiveMarginalRate === 'number' ? analytics.effectiveMarginalRate : null;
+    if (emtrEl) emtrEl.textContent = emtr != null ? `${(emtr * 100).toFixed(1)}%` : '—%';
+    if (emtrCompareEl) {
+      emtrCompareEl.classList.remove('text-danger', 'text-success', 'text-muted');
+      emtrCompareEl.classList.add('small');
+      const expected = typeof analytics.expectedMarginalRate === 'number' ? analytics.expectedMarginalRate : null;
+      if (expected != null && emtr != null) {
+        const delta = analytics.marginalRateDelta != null ? analytics.marginalRateDelta : emtr - expected;
+        const arrow = delta > 0.02 ? '▲' : delta < -0.02 ? '▼' : '•';
+        emtrCompareEl.textContent = `${arrow} expected ${(expected * 100).toFixed(1)}%`;
+        emtrCompareEl.classList.add(Math.abs(delta) <= 0.02 ? 'text-muted' : delta > 0.02 ? 'text-danger' : 'text-success');
+      } else {
+        emtrCompareEl.textContent = '';
+        emtrCompareEl.classList.add('text-muted');
+      }
+    }
+    if (freqEl) freqEl.textContent = analytics.payFrequency || '—';
+
+    const renderRows = (tbody, rows) => {
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      if (!Array.isArray(rows) || !rows.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="2" class="text-muted small">No data</td>';
+        tbody.appendChild(tr);
+        return;
+      }
+      rows.slice(0, 6).forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(row.label || row.category || 'Item')}</td>
+          <td class="text-end">${money(row.amount)}</td>`;
+        tbody.appendChild(tr);
+      });
+    };
+
+    renderRows(earningsTable, analytics.earnings || []);
+    renderRows(deductionsTable, analytics.deductions || []);
+
+    const notes = [];
+    if (Array.isArray(analytics.notes) && analytics.notes.length) {
+      notes.push(...analytics.notes);
+    }
+    if (Array.isArray(analytics.allowances) && analytics.allowances.length) {
+      notes.push(`Allowances: ${analytics.allowances.map((a) => `${a.label || 'Allowance'} ${money(a.amount)}`).join(', ')}`);
+    }
+    if (Array.isArray(analytics.earnings) && analytics.earnings.length && analytics.takeHomePercent != null) {
+      notes.push(`Take-home ${(analytics.takeHomePercent * 100).toFixed(1)}% of gross.`);
+    }
+    if (notesEl) notesEl.textContent = notes.join(' ');
+  }
+
+  function renderStatementHighlights(highlights) {
+    setMoneyOrDash('statement-income', highlights?.totalIncome);
+    setMoneyOrDash('statement-spend', highlights?.totalSpend);
+    const topList = byId('statement-top-categories');
+    const topEmpty = byId('statement-top-empty');
+    const expenseList = byId('statement-largest-expenses');
+    const expenseEmpty = byId('statement-expense-empty');
+    if (topList) {
+      topList.innerHTML = '';
+      const items = Array.isArray(highlights?.topCategories) ? highlights.topCategories : [];
+      if (!items.length) {
+        topEmpty?.classList.remove('d-none');
+      } else {
+        topEmpty?.classList.add('d-none');
+        items.slice(0, 5).forEach((item) => {
+          const li = document.createElement('li');
+          li.className = 'd-flex justify-content-between align-items-center mb-2';
+          li.innerHTML = `
+            <span>${escapeHtml(item.category || 'Category')}</span>
+            <span class="fw-semibold">${money(item.outflow ?? item.amount)}</span>`;
+          topList.appendChild(li);
+        });
+      }
+    }
+    if (expenseList) {
+      expenseList.innerHTML = '';
+      const items = Array.isArray(highlights?.largestExpenses) ? highlights.largestExpenses : [];
+      if (!items.length) {
+        expenseEmpty?.classList.remove('d-none');
+      } else {
+        expenseEmpty?.classList.add('d-none');
+        items.slice(0, 5).forEach((item) => {
+          const li = document.createElement('li');
+          li.className = 'd-flex justify-content-between align-items-center mb-2';
+          const dateLabel = item.date ? new Date(item.date).toLocaleDateString() : '—';
+          li.innerHTML = `
+            <div>
+              <div class="fw-semibold">${escapeHtml(item.description || 'Transaction')}</div>
+              <div class="text-muted small">${escapeHtml(item.category || '—')} · ${dateLabel}</div>
+            </div>
+            <span class="fw-semibold">${money(item.amount)}</span>`;
+          expenseList.appendChild(li);
+        });
+      }
+    }
+  }
+
+  function renderLargestExpenses(expenses) {
+    const table = byId('largest-expense-table');
+    const tbody = table?.querySelector('tbody');
+    const empty = byId('largest-expense-empty');
+    if (tbody) tbody.innerHTML = '';
+    if (!Array.isArray(expenses) || !expenses.length) {
       empty?.classList.remove('d-none');
       return;
     }
     empty?.classList.add('d-none');
-    const total = merchants.reduce((acc, item) => acc + Number(item.amount || 0), 0) || 1;
-    merchants.forEach((merchant) => {
-      const share = (Number(merchant.amount || 0) / total) * 100;
-      const li = document.createElement('li');
-      li.className = 'list-group-item d-flex justify-content-between align-items-center';
-      li.innerHTML = `
-        <div>
-          <div class="fw-semibold">${escapeHtml(merchant.name || 'Merchant')}</div>
-          <div class="text-muted small">${merchant.transactions || 0} transactions</div>
-        </div>
-        <div class="text-end">
-          <div class="fw-semibold">${money(merchant.amount)}</div>
-          <div class="text-muted small">${share.toFixed(1)}%</div>
-        </div>`;
-      list.appendChild(li);
+    expenses.slice(0, 8).forEach((expense) => {
+      const tr = document.createElement('tr');
+      const date = expense.date ? new Date(expense.date).toLocaleDateString() : '—';
+      tr.innerHTML = `
+        <td>${escapeHtml(expense.description || 'Transaction')}</td>
+        <td>${date}</td>
+        <td class="text-end">${money(expense.amount)}</td>
+        <td class="text-end">${escapeHtml(expense.category || '—')}</td>`;
+      tbody?.appendChild(tr);
     });
+  }
+
+  function setAccountingLoading(processing) {
+    const section = byId('accounting-section');
+    const overlay = byId('accounting-loading');
+    if (!section || !overlay) return;
+    const active = Boolean(processing?.active);
+    section.classList.toggle('is-loading', active);
+    overlay.classList.toggle('d-none', !active);
+    const msgEl = overlay.querySelector('[data-loading-message]');
+    if (msgEl) msgEl.textContent = processing?.message || 'Updating…';
   }
 
   function renderDuplicates(duplicates) {
