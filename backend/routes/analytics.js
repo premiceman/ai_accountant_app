@@ -175,8 +175,10 @@ router.get('/dashboard', auth, async (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const range = parseRange(req.query);
-  const integrations = Array.isArray(user.integrations) ? user.integrations : [];
-  const hasData = integrations.some((i) => i.status === 'connected');
+  const docInsights = user.documentInsights || {};
+  const docSources = docInsights.sources || {};
+  const docAggregates = docInsights.aggregates || {};
+  const hasData = Object.keys(docSources).length > 0;
   const wealthPlan = user.wealthPlan || {};
   const summary = wealthPlan.summary || {};
   const assetAllocation = Array.isArray(summary.assetAllocation) ? summary.assetAllocation : [];
@@ -200,27 +202,99 @@ router.get('/dashboard', auth, async (req, res) => {
     type: 'liability'
   }));
 
+  const metrics = [];
+  if (docAggregates.income?.gross != null) {
+    metrics.push({
+      key: 'income',
+      value: Number(docAggregates.income.gross),
+      format: 'currency',
+      subLabel: docAggregates.income.net != null ? `Net pay ${Number(docAggregates.income.net).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })}` : 'Derived from latest payslip upload.',
+      sourceNote: 'Derived from payslip uploads in the document vault.',
+    });
+  }
+  if (docAggregates.cashflow?.spend != null) {
+    metrics.push({
+      key: 'spend',
+      value: Number(docAggregates.cashflow.spend),
+      format: 'currency',
+      delta: null,
+      sourceNote: 'Calculated from categorised transactions in current account statements.'
+    });
+  }
+  if (docAggregates.cashflow?.income != null) {
+    metrics.push({
+      key: 'savingsCapacity',
+      value: Number(docAggregates.cashflow.income) - Number(docAggregates.cashflow.spend || 0),
+      format: 'currency',
+      subLabel: 'Income minus spending from documents',
+      sourceNote: 'Income and spending inferred from bank statements.'
+    });
+  }
+  if (docAggregates.tax?.taxDue != null) {
+    metrics.push({
+      key: 'hmrcBalance',
+      value: Number(docAggregates.tax.taxDue),
+      format: 'currency',
+      subLabel: 'Outstanding balance from HMRC correspondence',
+      sourceNote: 'Based on latest HMRC correspondence upload.'
+    });
+  }
+
+  const spendCategories = Array.isArray(docAggregates.cashflow?.categories)
+    ? docAggregates.cashflow.categories
+        .filter((cat) => cat.outflow)
+        .map((cat) => ({
+          label: cat.category,
+          amount: cat.outflow,
+          share: 0,
+        }))
+    : [];
+  const totalSpend = spendCategories.reduce((acc, item) => acc + Number(item.amount || 0), 0) || 1;
+  spendCategories.forEach((item) => {
+    item.share = Number(item.amount || 0) / totalSpend;
+  });
+
+  const usage = user.usageStats || {};
+  const documentsProgress = {
+    required: {
+      completed: usage.documentsRequiredMet || 0,
+      total: usage.documentsRequiredTotal || REQUIRED_DOC_TYPES.length,
+    },
+    helpful: {
+      completed: usage.documentsHelpfulMet || 0,
+      total: usage.documentsHelpfulTotal || 0,
+    },
+    analytics: {
+      completed: usage.documentsAnalyticsMet || 0,
+      total: usage.documentsAnalyticsTotal || 0,
+    },
+    updatedAt: usage.documentsProgressUpdatedAt || null,
+  };
+  const progressPercent = documentsProgress.required.total
+    ? Math.round((documentsProgress.required.completed / documentsProgress.required.total) * 100)
+    : 0;
+
   const payload = {
     range,
     preferences: user.preferences || {},
     hasData,
     accounting: {
-      metrics: [],
+      metrics,
       allowances: [],
       obligations: [],
       documents: {
         required: [],
         helpful: [],
-        progress: user.usageStats?.documentsRequiredMet || 0,
-        completed: {
-          count: user.usageStats?.documentsRequiredCompleted || 0,
-          total: user.usageStats?.documentsRequiredTotal || REQUIRED_DOC_TYPES.length
-        }
+        analytics: [],
+        progress: documentsProgress,
+        progressPercent,
       },
       comparatives: {
         mode: (user.preferences?.deltaMode || 'absolute'),
         values: []
-      }
+      },
+      spendByCategory: spendCategories,
+      hmrcBalance: docAggregates.tax?.taxDue != null ? { value: Number(docAggregates.tax.taxDue) } : null,
     },
     financialPosture: {
       netWorth: summary.netWorth ?? null,

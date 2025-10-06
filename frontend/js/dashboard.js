@@ -343,7 +343,7 @@
     if (!el) return;
     if (!metric) {
       el.textContent = '—';
-      if (opts.subId) setText(opts.subId, 'No data — set up your integrations to get started.');
+      if (opts.subId) setText(opts.subId, 'No data — upload documents in the vault to get started.');
       if (opts.deltaId) setText(opts.deltaId, '');
       return;
     }
@@ -354,6 +354,15 @@
     if (opts.deltaId) setText(opts.deltaId, formatDelta(metric.delta, metric.deltaMode));
     if (opts.noteId) setText(opts.noteId, metric.note || '');
     if (opts.subtleId) setText(opts.subtleId, metric.subtle || '');
+
+    const card = el.closest('[data-metric-card]');
+    if (card) {
+      if (metric.sourceNote) {
+        card.setAttribute('title', metric.sourceNote);
+      } else {
+        card.removeAttribute('title');
+      }
+    }
   }
 
   function formatDelta(delta, mode) {
@@ -474,7 +483,7 @@
     container.innerHTML = '';
     const entries = Array.isArray(gauges) ? gauges : [];
     if (!entries.length) {
-      container.innerHTML = '<div class="col-12 text-muted small">No data — set up your integrations to get started.</div>';
+      container.innerHTML = '<div class="col-12 text-muted small">No data — upload documents in the vault to get started.</div>';
       return;
     }
     entries.forEach((g) => {
@@ -587,7 +596,7 @@
 
     if (!combined.length) {
       empty?.classList.remove('d-none');
-      empty.textContent = hasData ? 'No upcoming events yet.' : 'No data — set up your integrations to get started.';
+      empty.textContent = hasData ? 'No upcoming events yet.' : 'No data — upload documents in the vault to get started.';
       return;
     }
     empty?.classList.add('d-none');

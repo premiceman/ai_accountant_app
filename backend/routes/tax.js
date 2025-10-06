@@ -7,7 +7,6 @@ const dayjs = require('dayjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const { REQUIRED_DOCUMENTS } = require('../data/documentCatalogue');
-const { readJsonSafe, paths } = require('../src/store/jsondb');
 
 const router = express.Router();
 
@@ -20,11 +19,13 @@ router.get('/snapshot', async (req, res) => {
   const hmrc = findHmrcIntegration(user.integrations);
   const meta = hmrc?.metadata || {};
 
-  const allowances = buildAllowances(meta, user);
-  const paymentsOnAccount = buildPayments(meta, allowances);
-  const obligations = buildObligations(meta, paymentsOnAccount);
-  const balances = buildBalances(meta, paymentsOnAccount);
-  const documents = await buildDocuments(req.user.id);
+  const docInsights = user.documentInsights || {};
+  const docAggregates = docInsights.aggregates || {};
+  const allowances = buildAllowances(meta, user, docAggregates);
+  const paymentsOnAccount = buildPayments(meta, allowances, docAggregates);
+  const obligations = buildObligations(meta, paymentsOnAccount, docAggregates);
+  const balances = buildBalances(meta, paymentsOnAccount, docAggregates);
+  const documents = buildDocumentsFromCatalogue(user, docInsights);
   const aiPromptSeed = buildAiSeed({
     hmrc,
     user,
@@ -96,7 +97,7 @@ function pct(used, total) {
   return Math.min(100, Math.round((toNumber(used, 0) / t) * 100));
 }
 
-function buildAllowances(meta, user) {
+function buildAllowances(meta, user, docAggregates = {}) {
   const sourceArray = Array.isArray(meta.allowances) ? meta.allowances : null;
   const sourceObject = !sourceArray && meta.gauges && typeof meta.gauges === 'object' ? meta.gauges : null;
   const navigator = user?.salaryNavigator?.taxSummary?.gauges || {};
@@ -129,6 +130,16 @@ function buildAllowances(meta, user) {
     if (knownKeys.has(item.key)) return;
     allowances.push(normaliseAllowance(item));
   });
+
+  const pensionAllow = allowances.find((a) => a.key === 'pensionAnnual');
+  if (pensionAllow && docAggregates.pension?.contributions != null) {
+    pensionAllow.used = toNumber(docAggregates.pension.contributions, pensionAllow.used);
+  }
+
+  const isaAllow = allowances.find((a) => a.key === 'isa');
+  if (isaAllow && docAggregates.savings?.balance != null) {
+    isaAllow.used = Math.min(toNumber(isaAllow.total, isaAllow.total), toNumber(docAggregates.savings.balance));
+  }
 
   return allowances
     .map((item) => {
@@ -187,7 +198,7 @@ function slugify(label) {
     || 'item';
 }
 
-function buildPayments(meta, allowances) {
+function buildPayments(meta, allowances, docAggregates = {}) {
   const payments = Array.isArray(meta.paymentsOnAccount) ? meta.paymentsOnAccount : [];
   if (payments.length) {
     return payments.map((item) => ({
@@ -197,6 +208,17 @@ function buildPayments(meta, allowances) {
       status: item.status || 'due',
       note: item.note || item.description || null,
     })).sort(byDueDate);
+  }
+
+  if (docAggregates.tax?.taxDue != null && docAggregates.tax.taxDue > 0) {
+    const jan = upcomingDueDate(0, 31, 1);
+    return [{
+      reference: `${taxYearLabel(jan)} Balance`,
+      dueDate: jan,
+      amount: Math.round(Number(docAggregates.tax.taxDue)),
+      status: 'due',
+      note: 'Balance due inferred from HMRC correspondence upload.',
+    }];
   }
 
   const personal = allowances.find((a) => a.key === 'personalAllowance');
@@ -224,7 +246,7 @@ function buildPayments(meta, allowances) {
   ];
 }
 
-function buildObligations(meta, payments) {
+function buildObligations(meta, payments, docAggregates = {}) {
   const obligations = Array.isArray(meta.obligations) ? meta.obligations : [];
   if (obligations.length) {
     return obligations
@@ -249,6 +271,17 @@ function buildObligations(meta, payments) {
     note: p.note,
   }));
 
+  if (docAggregates.tax?.taxDue != null && docAggregates.tax.taxDue > 0) {
+    paymentsMapped.push({
+      label: 'Balance due',
+      dueDate: paymentsMapped[0]?.dueDate || filingDate,
+      status: 'due',
+      period: taxYearLabel(paymentsMapped[0]?.dueDate || filingDate),
+      type: 'payment',
+      note: 'Generated from HMRC correspondence upload.',
+    });
+  }
+
   return [
     {
       label: 'Submit Self Assessment return',
@@ -262,9 +295,12 @@ function buildObligations(meta, payments) {
   ].sort(byDueDate);
 }
 
-function buildBalances(meta, payments) {
+function buildBalances(meta, payments, docAggregates = {}) {
   const sa = meta.balances?.selfAssessment || {};
-  const net = toNumber(sa.net, meta?.kpis?.hmrc?.netForRange || 0);
+  let net = toNumber(sa.net, meta?.kpis?.hmrc?.netForRange || 0);
+  if (!net && docAggregates.tax?.taxDue != null) {
+    net = Number(docAggregates.tax.taxDue);
+  }
   const debit = Math.max(0, toNumber(sa.debit, net > 0 ? net : 0));
   const credit = Math.max(0, toNumber(sa.credit, net < 0 ? Math.abs(net) : 0));
   const label = sa.label || meta?.kpis?.hmrc?.label || (net > 0 ? 'Amount due to HMRC' : net < 0 ? 'HMRC owes you' : 'Settled');
@@ -288,35 +324,21 @@ function buildBalances(meta, payments) {
   };
 }
 
-async function buildDocuments(userId) {
-  const index = await readJsonSafe(paths.docsIndex, []);
-  const mine = index.filter((row) => String(row.userId) === String(userId));
-  const latestByType = new Map();
-  mine.forEach((row) => {
-    const key = row.type || 'other';
-    const current = latestByType.get(key);
-    if (!current) {
-      latestByType.set(key, row);
-      return;
-    }
-    const currentDate = new Date(current.uploadDate || 0).getTime();
-    const nextDate = new Date(row.uploadDate || 0).getTime();
-    if (Number.isFinite(nextDate) && nextDate > currentDate) {
-      latestByType.set(key, row);
-    }
-  });
-
+function buildDocumentsFromCatalogue(user, docInsights = {}) {
+  const catalogue = user?.usageStats?.documentsCatalogue?.perKey || {};
   return REQUIRED_DOCUMENTS.map((doc) => {
-    const latest = latestByType.get(doc.key) || null;
-    const uploadedAt = latest?.uploadDate || null;
-    const fresh = isDocumentFresh(doc.cadence, uploadedAt);
+    const entry = catalogue[doc.key] || {};
+    const latest = entry.latestUploadedAt || entry.updatedAt || null;
+    const uploadedCount = Array.isArray(entry.files) ? entry.files.length : 0;
+    const fresh = isDocumentFresh(doc.cadence, latest);
     return {
       key: doc.key,
       label: doc.label,
       required: true,
-      lastUploadedAt: uploadedAt,
-      uploadedCount: mine.filter((row) => (row.type || 'other') === doc.key).length,
+      lastUploadedAt: latest,
+      uploadedCount,
       status: fresh ? 'complete' : latest ? 'stale' : 'missing',
+      sourceNote: docInsights.sources?.[doc.key]?.files?.map((f) => f.name).join(', ') || null,
     };
   });
 }
