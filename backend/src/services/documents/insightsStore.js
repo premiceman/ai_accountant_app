@@ -12,6 +12,10 @@ function mergeFileReference(existing = [], fileInfo) {
 
 function normaliseDate(value) {
   if (!value) return null;
+  if (value instanceof Date) {
+    const iso = value.toISOString();
+    return iso;
+  }
   const date = new Date(value);
   if (!Number.isNaN(date.getTime())) return date.toISOString();
   const match = String(value).match(/(\d{4}-\d{2}-\d{2})/);
@@ -116,6 +120,17 @@ function summariseStatementEntries(entries = []) {
   });
   const categories = Object.values(categoryGroups)
     .sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
+  const totalOutflow = categories.reduce((acc, item) => acc + (item.outflow || 0), 0);
+  const spendingCanteorgies = categories
+    .filter((item) => item.outflow || item.inflow)
+    .map((item) => ({
+      label: item.category,
+      category: item.category,
+      amount: item.outflow || item.inflow || 0,
+      outflow: item.outflow || 0,
+      inflow: item.inflow || 0,
+      share: totalOutflow ? (item.outflow || 0) / totalOutflow : 0,
+    }));
   const topCategories = categories
     .filter((cat) => cat.outflow)
     .slice(0, 5)
@@ -141,6 +156,7 @@ function summariseStatementEntries(entries = []) {
     categories,
     topCategories,
     largestExpenses,
+    spendingCanteorgies,
     accounts: Array.from(accounts.values()).map((acc) => ({
       ...acc,
       totals: {
@@ -218,6 +234,7 @@ function buildAggregates(sources) {
       largestExpenses: summary.largestExpenses,
       accounts: summary.accounts,
       transferCount: summary.transferCount,
+      spendingCanteorgies: summary.spendingCanteorgies,
     };
   }
 
@@ -278,6 +295,159 @@ function buildAggregates(sources) {
   return aggregates;
 }
 
+function monthKeyFromIso(iso) {
+  if (!iso) return null;
+  const match = String(iso).match(/(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function monthRangeForKey(key) {
+  const [yearStr, monthStr] = key.split('-');
+  const year = Number(yearStr);
+  const monthIndex = Number(monthStr) - 1;
+  if (!Number.isInteger(year) || !Number.isInteger(monthIndex)) return { start: null, end: null, label: key };
+  const start = new Date(Date.UTC(year, monthIndex, 1));
+  const end = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
+  const label = start.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  return { start: start.toISOString(), end: end.toISOString(), label };
+}
+
+function ensureTimelineBucket(map, key) {
+  if (!map.has(key)) {
+    map.set(key, {
+      payslip: null,
+      statements: {
+        income: 0,
+        spend: 0,
+        net: 0,
+        transactions: 0,
+        categoryMap: new Map(),
+      },
+      sources: { payslip: false, statements: false },
+      statementPeriods: new Set(),
+    });
+  }
+  return map.get(key);
+}
+
+function buildTimeline(sources = {}) {
+  const buckets = new Map();
+  for (const entry of Object.values(sources)) {
+    if (!entry) continue;
+    const baseKey = entry.baseKey || entry.key;
+    if (!baseKey) continue;
+    if (baseKey === 'payslip') {
+      const payDateIso = normaliseDate(entry.metrics?.payDate || entry.metadata?.payDate || entry.metrics?.periodEnd || entry.metrics?.periodStart || entry.files?.[0]?.uploadedAt);
+      const monthKey = monthKeyFromIso(payDateIso);
+      if (!monthKey) continue;
+      const bucket = ensureTimelineBucket(buckets, monthKey);
+      bucket.sources.payslip = true;
+      const metrics = entry.metrics || {};
+      if (!bucket.payslip || (bucket.payslip.payDate || '').localeCompare(payDateIso || '') < 0) {
+        bucket.payslip = {
+          gross: metrics.gross ?? null,
+          net: metrics.net ?? null,
+          tax: metrics.tax ?? null,
+          ni: metrics.ni ?? null,
+          pension: metrics.pension ?? null,
+          studentLoan: metrics.studentLoan ?? null,
+          totalDeductions: metrics.totalDeductions ?? null,
+          annualisedGross: metrics.annualisedGross ?? null,
+          takeHomePercent: metrics.takeHomePercent ?? null,
+          payFrequency: metrics.payFrequency || null,
+          taxCode: metrics.taxCode || null,
+          extractionSource: metrics.extractionSource || entry.metadata?.extractionSource || null,
+          payDate: payDateIso,
+          periodStart: normaliseDate(metrics.periodStart || entry.metadata?.periodStart) || null,
+          periodEnd: normaliseDate(metrics.periodEnd || entry.metadata?.periodEnd) || null,
+        };
+      }
+    } else if (baseKey === 'current_account_statement') {
+      const meta = entry.metadata || {};
+      const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
+      const fallbackStart = normaliseDate(meta.period?.start || entry.period || entry.files?.[0]?.uploadedAt);
+      const fallbackEnd = normaliseDate(meta.period?.end || entry.period || entry.files?.[0]?.uploadedAt);
+      txList.forEach((tx) => {
+        const amount = Number(tx.amount);
+        if (!Number.isFinite(amount)) return;
+        const iso = normaliseDate(tx.date) || fallbackEnd || fallbackStart;
+        const monthKey = monthKeyFromIso(iso);
+        if (!monthKey) return;
+        const bucket = ensureTimelineBucket(buckets, monthKey);
+        bucket.sources.statements = true;
+        if (amount >= 0) bucket.statements.income += amount;
+        else bucket.statements.spend += Math.abs(amount);
+        bucket.statements.transactions += 1;
+        const category = tx.category || 'Other';
+        const record = bucket.statements.categoryMap.get(category) || { label: category, inflow: 0, outflow: 0, amount: 0 };
+        if (amount >= 0) {
+          record.inflow += amount;
+          record.amount += amount;
+        } else {
+          const abs = Math.abs(amount);
+          record.outflow += abs;
+          record.amount += abs;
+        }
+        bucket.statements.categoryMap.set(category, record);
+      });
+      if (fallbackStart || fallbackEnd) {
+        const iso = fallbackEnd || fallbackStart;
+        const monthKey = monthKeyFromIso(iso);
+        if (monthKey) {
+          const bucket = ensureTimelineBucket(buckets, monthKey);
+          bucket.statementPeriods.add(JSON.stringify({
+            start: fallbackStart,
+            end: fallbackEnd,
+            accountId: meta.accountId || null,
+          }));
+          bucket.sources.statements = true;
+        }
+      }
+    }
+  }
+
+  const results = Array.from(buckets.entries()).map(([monthKey, bucket]) => {
+    const { start, end, label } = monthRangeForKey(monthKey);
+    const categories = Array.from(bucket.statements.categoryMap.values())
+      .sort((a, b) => (b.outflow || b.amount) - (a.outflow || a.amount));
+    const totalOutflow = categories.reduce((acc, item) => acc + (item.outflow || 0), 0);
+    const spendingCanteorgies = categories
+      .filter((item) => item.outflow || item.amount)
+      .map((item) => ({
+        label: item.label,
+        category: item.label,
+        amount: item.outflow || item.amount || 0,
+        outflow: item.outflow || 0,
+        inflow: item.inflow || 0,
+        share: totalOutflow ? (item.outflow || item.amount || 0) / totalOutflow : 0,
+      }));
+    const income = Math.round(bucket.statements.income * 100) / 100;
+    const spend = Math.round(bucket.statements.spend * 100) / 100;
+    return {
+      period: {
+        month: monthKey,
+        label,
+        start,
+        end,
+      },
+      payslip: bucket.payslip,
+      statements: {
+        income,
+        spend,
+        net: Math.round((income - spend) * 100) / 100,
+        transactions: bucket.statements.transactions,
+        spendingCanteorgies,
+      },
+      sources: {
+        payslip: bucket.sources.payslip,
+        statements: bucket.sources.statements,
+      },
+    };
+  });
+
+  return results.sort((a, b) => a.period.month.localeCompare(b.period.month));
+}
+
 async function applyDocumentInsights(userId, key, insights, fileInfo) {
   if (!userId || !key || !insights) return null;
   const doc = await User.findById(userId, 'documentInsights').lean();
@@ -309,6 +479,7 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   const newState = {
     sources,
     aggregates: buildAggregates(sources),
+    timeline: buildTimeline(sources),
     processing,
     updatedAt: new Date(),
   };
