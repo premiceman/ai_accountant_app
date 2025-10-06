@@ -207,18 +207,18 @@
     const comparatives = data.accounting?.comparatives || {};
     setText('comparison-label', comparatives.label || 'Comparing to previous period');
 
-    renderPayslipAnalytics(data.accounting?.payslipAnalytics || null);
-    renderStatementHighlights(data.accounting?.statementHighlights || null);
-    renderSpendCategory(data.accounting?.spendByCategory || []);
+    renderPayslipAnalytics(data.accounting?.payslipAnalytics || null, data.accounting?.rangeStatus || {});
+    renderStatementHighlights(data.accounting?.statementHighlights || null, data.accounting?.rangeStatus || {});
+    renderSpendCategory(data.accounting?.spendByCategory || [], data.accounting?.rangeStatus || {});
     renderInflationTrend(data.accounting?.inflationTrend || []);
-    renderLargestExpenses(data.accounting?.largestExpenses || []);
+    renderLargestExpenses(data.accounting?.largestExpenses || [], data.accounting?.rangeStatus || {});
     renderDuplicates(data.accounting?.duplicates || []);
     renderGauges('gauges', data.accounting?.allowances || []);
     renderObligations(data.accounting?.obligations || [], data.accounting?.hmrcBalance);
     renderAlerts(data.accounting?.alerts || []);
   }
 
-  function renderSpendCategory(categories) {
+  function renderSpendCategory(categories, rangeStatus = {}) {
     const total = categories.reduce((acc, item) => acc + Number(item.amount || 0), 0);
     setText('spend-category-total', categories.length ? money(total) : '£—');
     renderDonut('chart-spend-category', categories.map((c) => Math.round(Number(c.amount || 0))), categories.map((c) => c.label || c.category));
@@ -235,8 +235,12 @@
         tbody.appendChild(tr);
       });
     }
-    if (!categories.length) empty?.classList.remove('d-none');
-    else empty?.classList.add('d-none');
+    if (!categories.length) {
+      empty?.classList.remove('d-none');
+      if (empty) empty.textContent = rangeStatus.statements || 'No spending captured for this range.';
+    } else {
+      empty?.classList.add('d-none');
+    }
   }
 
   function renderInflationTrend(points) {
@@ -249,7 +253,7 @@
     ]);
   }
 
-  function renderPayslipAnalytics(analytics) {
+  function renderPayslipAnalytics(analytics, rangeStatus = {}) {
     const empty = byId('payslip-empty');
     const grossEl = byId('payslip-gross');
     const grossYtdEl = byId('payslip-gross-ytd');
@@ -277,7 +281,10 @@
       if (earningsTable) earningsTable.innerHTML = '';
       if (deductionsTable) deductionsTable.innerHTML = '';
       if (notesEl) notesEl.textContent = '';
-      empty?.classList.remove('d-none');
+      if (empty) {
+        empty.textContent = rangeStatus.payslip || 'Upload a current payslip to unlock granular analytics.';
+        empty.classList.remove('d-none');
+      }
       return;
     }
 
@@ -340,18 +347,24 @@
     if (notesEl) notesEl.textContent = notes.join(' ');
   }
 
-  function renderStatementHighlights(highlights) {
+  function renderStatementHighlights(highlights, rangeStatus = {}) {
     setMoneyOrDash('statement-income', highlights?.totalIncome);
     setMoneyOrDash('statement-spend', highlights?.totalSpend);
     const topList = byId('statement-top-categories');
     const topEmpty = byId('statement-top-empty');
     const expenseList = byId('statement-largest-expenses');
     const expenseEmpty = byId('statement-expense-empty');
+    const accountsList = byId('statement-account-summary');
+    const accountsEmpty = byId('statement-account-empty');
+    const transferNote = byId('statement-transfer-note');
     if (topList) {
       topList.innerHTML = '';
       const items = Array.isArray(highlights?.topCategories) ? highlights.topCategories : [];
       if (!items.length) {
-        topEmpty?.classList.remove('d-none');
+        if (topEmpty) {
+          topEmpty.textContent = rangeStatus.statements || 'No spending categories identified.';
+          topEmpty.classList.remove('d-none');
+        }
       } else {
         topEmpty?.classList.add('d-none');
         items.slice(0, 5).forEach((item) => {
@@ -368,7 +381,10 @@
       expenseList.innerHTML = '';
       const items = Array.isArray(highlights?.largestExpenses) ? highlights.largestExpenses : [];
       if (!items.length) {
-        expenseEmpty?.classList.remove('d-none');
+        if (expenseEmpty) {
+          expenseEmpty.textContent = rangeStatus.statements || 'No major outgoings detected.';
+          expenseEmpty.classList.remove('d-none');
+        }
       } else {
         expenseEmpty?.classList.add('d-none');
         items.slice(0, 5).forEach((item) => {
@@ -385,15 +401,51 @@
         });
       }
     }
+    if (accountsList) {
+      accountsList.innerHTML = '';
+      const accounts = Array.isArray(highlights?.accounts) ? highlights.accounts : [];
+      if (!accounts.length) {
+        if (accountsEmpty) {
+          accountsEmpty.textContent = rangeStatus.statements || 'No accounts captured in this range.';
+          accountsEmpty.classList.remove('d-none');
+        }
+      } else {
+        accountsEmpty?.classList.add('d-none');
+        accounts.slice(0, 6).forEach((account) => {
+          const li = document.createElement('li');
+          li.className = 'd-flex justify-content-between align-items-center mb-1';
+          const label = [account.bankName, account.accountName].filter(Boolean).join(' · ') || account.accountName || 'Account';
+          const masked = account.accountNumberMasked ? ` · ${escapeHtml(account.accountNumberMasked)}` : '';
+          li.innerHTML = `
+            <div>
+              <div class="fw-semibold">${escapeHtml(label)}${masked}</div>
+              <div class="text-muted small">Income ${money(account.totals?.income || 0)} · Spend ${money(account.totals?.spend || 0)}</div>
+            </div>`;
+          accountsList.appendChild(li);
+        });
+      }
+    }
+    if (transferNote) {
+      const count = Number(highlights?.transferCount || 0);
+      if (count > 0) {
+        transferNote.textContent = `${count} potential transfers omitted from spending totals.`;
+        transferNote.classList.remove('d-none');
+      } else {
+        transferNote.classList.add('d-none');
+      }
+    }
   }
 
-  function renderLargestExpenses(expenses) {
+  function renderLargestExpenses(expenses, rangeStatus = {}) {
     const table = byId('largest-expense-table');
     const tbody = table?.querySelector('tbody');
     const empty = byId('largest-expense-empty');
     if (tbody) tbody.innerHTML = '';
     if (!Array.isArray(expenses) || !expenses.length) {
-      empty?.classList.remove('d-none');
+      if (empty) {
+        empty.textContent = rangeStatus.statements || 'No significant spending detected.';
+        empty.classList.remove('d-none');
+      }
       return;
     }
     empty?.classList.add('d-none');

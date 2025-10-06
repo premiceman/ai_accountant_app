@@ -1,5 +1,6 @@
 const pdfParse = require('pdf-parse');
 const { analysePayslip } = require('./parsers/payslip');
+const { analyseCurrentAccountStatement } = require('./parsers/statement');
 
 function normalise(text) {
   return String(text || '').toLowerCase();
@@ -40,100 +41,24 @@ function extractNumber(text, labels) {
   return null;
 }
 
-function parseStatementDate(str) {
-  if (!str) return null;
-  const trimmed = str.trim();
-  const iso = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (iso) return iso[1];
-  const dmy = trimmed.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-  if (dmy) {
-    const [day, month, yearRaw] = [dmy[1], dmy[2], dmy[3]];
-    const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  }
-  const monText = trimmed.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s*(\d{2,4})?/);
-  if (monText) {
-    const monthNames = {
-      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-      jul: '07', aug: '08', sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
-    };
-    const monthKey = monText[2].slice(0, 3).toLowerCase();
-    const month = monthNames[monthKey];
-    if (month) {
-      const yearRaw = monText[3] || String(new Date().getFullYear());
-      const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw.padStart(4, '0');
-      return `${year}-${month}-${String(monText[1]).padStart(2, '0')}`;
-    }
-  }
-  return null;
-}
-
-function parseStatementTransactions(text) {
-  const lines = String(text || '').split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
-  const categories = {
-    income: ['salary', 'payroll', 'payslip', 'hmrc', 'bonus'],
-    housing: ['rent', 'mortgage'],
-    groceries: ['tesco', 'sainsbury', 'waitrose', 'aldi', 'lidl', 'morrison'],
-    subscriptions: ['netflix', 'spotify', 'prime', 'icloud', 'google'],
-    utilities: ['edf', 'octopus', 'british gas', 'thames water', 'ee', 'o2', 'vodafone'],
-    savings: ['transfer', 'savings', 'isa'],
-    shopping: ['amazon', 'apple', 'currys', 'argos'],
-  };
-  const transactions = [];
-  for (const line of lines) {
-    const amountMatch = line.match(/(-?£?\d[\d,]*\.?\d{0,2})\s*(dr|cr)?$/i);
-    if (!amountMatch) continue;
-    let amount = Number(amountMatch[1].replace(/[,£]/g, ''));
-    if (!Number.isFinite(amount)) continue;
-    const debitCredit = amountMatch[2] ? amountMatch[2].toLowerCase() : null;
-    if (debitCredit === 'dr') amount = -Math.abs(amount);
-    if (debitCredit === 'cr') amount = Math.abs(amount);
-    const withoutAmount = line.replace(amountMatch[0], '').trim();
-    const dateMatch = withoutAmount.match(/^[0-9]{1,2}[^A-Za-z0-9]?\s*[A-Za-z]{3,9}\s*[0-9]{0,4}/)
-      || withoutAmount.match(/^[0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}/)
-      || withoutAmount.match(/^[0-9]{4}-[0-9]{2}-[0-9]{2}/);
-    let description = withoutAmount;
-    let date = null;
-    if (dateMatch) {
-      date = parseStatementDate(dateMatch[0]);
-      description = withoutAmount.slice(dateMatch[0].length).trim();
-    }
-    const descLower = normalise(description);
-    let category = 'other';
-    for (const [cat, probes] of Object.entries(categories)) {
-      if (probes.some((probe) => descLower.includes(probe))) {
-        category = cat;
-        break;
-      }
-    }
-    const direction = amount >= 0 ? 'inflow' : 'outflow';
-    transactions.push({ description: description || 'Transaction', amount, category, direction, date });
-  }
-  const totals = transactions.reduce((acc, tx) => {
-    if (tx.direction === 'inflow') acc.income += tx.amount;
-    else acc.spend += Math.abs(tx.amount);
-    return acc;
-  }, { income: 0, spend: 0 });
-  return { transactions, totals };
-}
-
-function summariseTransactions(transactions) {
-  const groups = {};
-  for (const tx of transactions) {
-    const key = tx.category || 'other';
-    if (!groups[key]) groups[key] = { category: key, inflow: 0, outflow: 0 };
-    if (tx.direction === 'inflow') groups[key].inflow += tx.amount;
-    else groups[key].outflow += Math.abs(tx.amount);
-  }
-  return Object.values(groups).sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
-}
-
-async function buildInsights(entry, text) {
+async function buildInsights(entry, text, context = {}) {
   const key = entry.key;
   const insights = { key, metrics: {}, narrative: [] };
+  const originalName = context.originalName || null;
 
   if (key === 'payslip') {
     const breakdown = await analysePayslip(text || '');
+    const periodKey = breakdown.payDate || breakdown.periodEnd || breakdown.periodStart || null;
+    if (periodKey) {
+      insights.storeKey = `payslip:${periodKey}`;
+    }
+    insights.baseKey = key;
+    insights.metadata = {
+      payDate: breakdown.payDate || null,
+      periodStart: breakdown.periodStart || null,
+      periodEnd: breakdown.periodEnd || null,
+      extractionSource: breakdown.extractionSource || null,
+    };
     insights.metrics = {
       gross: breakdown.gross ?? null,
       grossYtd: breakdown.grossYtd ?? null,
@@ -157,6 +82,9 @@ async function buildInsights(entry, text) {
       notes: breakdown.notes || [],
       extractionSource: breakdown.extractionSource || 'heuristic',
       llmNotes: breakdown.llmNotes || [],
+      payDate: breakdown.payDate || null,
+      periodStart: breakdown.periodStart || null,
+      periodEnd: breakdown.periodEnd || null,
     };
     if (insights.metrics.notes.length) {
       insights.narrative.push(...insights.metrics.notes);
@@ -164,32 +92,46 @@ async function buildInsights(entry, text) {
       insights.narrative.push('Earnings and deductions extracted from payslip.');
     }
   } else if (key === 'current_account_statement') {
-    const parsed = parseStatementTransactions(text);
-    insights.transactions = parsed.transactions;
-    insights.metrics = {
-      income: parsed.totals.income,
-      spend: parsed.totals.spend,
-      categories: summariseTransactions(parsed.transactions),
-      topCategories: summariseTransactions(parsed.transactions)
-        .filter((cat) => cat.outflow)
-        .slice(0, 5)
-        .map((cat) => ({
-          category: cat.category,
-          outflow: cat.outflow,
-          inflow: cat.inflow,
-        })),
-      largestExpenses: parsed.transactions
-        .filter((tx) => tx.direction === 'outflow')
-        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
-        .slice(0, 5)
-        .map((tx) => ({
-          description: tx.description,
-          amount: Math.abs(tx.amount),
-          category: tx.category,
-          date: tx.date || null,
-        })),
+    const analysed = await analyseCurrentAccountStatement(text || '');
+    const metadata = analysed.metadata || {};
+    const periodKey = [metadata.accountId, metadata.period?.start, metadata.period?.end]
+      .filter(Boolean)
+      .join(':');
+    if (periodKey) {
+      insights.storeKey = `${key}:${periodKey}`;
+    } else if (metadata.accountId) {
+      insights.storeKey = `${key}:${metadata.accountId}`;
+    }
+    insights.baseKey = key;
+    insights.metadata = {
+      ...metadata,
+      extractionSource: analysed.extractionSource || null,
+      originalName,
     };
-    insights.narrative.push('Classified inflows and outflows from current account statement.');
+    const transactions = (analysed.transactions || []).map((tx) => ({
+      ...tx,
+      amount: Number(tx.amount),
+      direction: tx.direction || (Number(tx.amount) >= 0 ? 'inflow' : 'outflow'),
+      accountId: metadata.accountId || null,
+      accountName: metadata.accountName || null,
+      bankName: metadata.bankName || null,
+      accountType: metadata.accountType || null,
+      statementPeriod: metadata.period || null,
+    }));
+    insights.transactions = transactions;
+    insights.metrics = {
+      income: analysed.summary?.totals?.income ?? 0,
+      spend: analysed.summary?.totals?.spend ?? 0,
+      categories: analysed.summary?.categories || [],
+      topCategories: analysed.summary?.topCategories || [],
+      largestExpenses: analysed.summary?.largestExpenses || [],
+      extractionSource: analysed.extractionSource || null,
+      account: metadata,
+    };
+    const accountLabel = [metadata.accountName, metadata.accountNumberMasked].filter(Boolean).join(' ');
+    insights.narrative.push(accountLabel
+      ? `Classified inflows and outflows for ${accountLabel}.`
+      : 'Classified inflows and outflows from current account statement.');
     if (insights.metrics.topCategories?.length) {
       insights.narrative.push('Identified top spending categories from the latest bank statement.');
     }
@@ -250,7 +192,7 @@ async function analyseDocument(entry, buffer, originalName) {
   }
   return {
     valid: true,
-    insights: await buildInsights(entry, text),
+    insights: await buildInsights(entry, text, { originalName }),
     text,
   };
 }
