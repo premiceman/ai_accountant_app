@@ -173,16 +173,29 @@ router.get('/dashboard', auth, async (req, res) => {
   const range = parseRange(req.query);
   const integrations = Array.isArray(user.integrations) ? user.integrations : [];
   const hasData = integrations.some((i) => i.status === 'connected');
-  const usageStats = await computeUsageStats(user._id, range);
-  if (usageStats) {
-    const nextUsage = { ...user.usageStats, ...usageStats };
-    try {
-      await User.updateOne({ _id: user._id }, { $set: { usageStats: nextUsage } });
-    } catch (err) {
-      console.warn('Failed to persist usage stats', err);
-    }
-    user.usageStats = nextUsage;
-  }
+  const wealthPlan = user.wealthPlan || {};
+  const summary = wealthPlan.summary || {};
+  const assetAllocation = Array.isArray(summary.assetAllocation) ? summary.assetAllocation : [];
+  const liabilitySchedule = Array.isArray(summary.liabilitySchedule) ? summary.liabilitySchedule : [];
+  const affordability = summary.affordability || {};
+
+  const assetBreakdown = assetAllocation.map((item) => ({
+    key: item.key || item.label,
+    label: item.label || item.key,
+    value: Number(item.total || 0),
+    weight: item.weight || 0,
+    type: 'asset'
+  }));
+
+  const liabilityBreakdown = liabilitySchedule.map((item) => ({
+    key: item.id || item.name,
+    label: item.name || 'Liability',
+    value: Number(item.startingBalance || 0),
+    monthlyPayment: Number(item.monthlyPayment || 0),
+    payoffMonths: item.payoffMonths || null,
+    type: 'liability'
+  }));
+
   const payload = {
     range,
     preferences: user.preferences || {},
@@ -206,22 +219,38 @@ router.get('/dashboard', auth, async (req, res) => {
       }
     },
     financialPosture: {
-      netWorth: null,
-      breakdown: [],
-      liquidity: null,
-      trends: [],
-      savingsRate: null
+      netWorth: summary.netWorth ?? null,
+      breakdown: [...assetBreakdown, ...liabilityBreakdown],
+      liquidity: summary.cashReserves != null ? {
+        cash: Number(summary.cashReserves || 0),
+        runwayMonths: summary.runwayMonths ?? null
+      } : null,
+      trends: summary.projections?.yearly || [],
+      savingsRate: affordability.savingsRateCurrent ?? null,
+      affordability: {
+        freeCashflow: affordability.freeCashflow ?? null,
+        recommendedContribution: affordability.recommendedContribution ?? null,
+        recommendedSavingsRate: affordability.recommendedSavingsRate ?? null,
+        advisories: Array.isArray(affordability.advisories) ? affordability.advisories : []
+      }
     },
     salaryNavigator: user.salaryNavigator || {},
-    wealthPlan: user.wealthPlan || {},
+    wealthPlan,
     aiInsights: [],
     gating: {
       tier: user.licenseTier || 'free'
     }
   };
 
-  if (user.usageStats) {
-    payload.usageStats = user.usageStats;
+  const advisories = Array.isArray(affordability.advisories) ? affordability.advisories.filter(Boolean) : [];
+  if (advisories.length) {
+    payload.aiInsights.push({
+      id: `affordability-${Date.now()}`,
+      type: 'affordability',
+      title: 'Affordability advisory',
+      body: advisories.join(' '),
+      createdAt: new Date()
+    });
   }
 
   res.json(payload);

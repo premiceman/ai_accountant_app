@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const PaymentMethod = require('../models/PaymentMethod');
-const { computeMarketBenchmark } = require('../services/compensation/market');
+const { computeWealth } = require('../services/wealth/engine');
 let PDFDocument = null;
 try {
   PDFDocument = require('pdfkit');
@@ -275,85 +275,6 @@ function normaliseContributions(c = {}) {
   return { monthly: Number(c.monthly || 0) };
 }
 
-function monthsBetween(start, end) {
-  const a = new Date(start);
-  const b = new Date(end);
-  if (!a || !b || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
-  return Math.max(0, Math.round((b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())));
-}
-
-function computeWealth(plan) {
-  const assets = Array.isArray(plan.assets) ? plan.assets : [];
-  const liabilities = Array.isArray(plan.liabilities) ? plan.liabilities : [];
-  const goals = Array.isArray(plan.goals) ? plan.goals : [];
-  const contributions = plan.contributions || { monthly: 0 };
-  const assetsTotal = assets.reduce((sum, a) => sum + Number(a.value || 0), 0);
-  const liabilitiesTotal = liabilities.reduce((sum, l) => sum + Number(l.balance || 0), 0);
-  const netWorth = assetsTotal - liabilitiesTotal;
-  const denominator = assetsTotal + liabilitiesTotal;
-  const ratio = denominator > 0 ? ((assetsTotal - liabilitiesTotal) / denominator) : 0;
-  const strength = Math.max(0, Math.min(100, Math.round((ratio * 50) + 50)));
-  const cashTotal = assets.filter((a) => ['cash','savings'].includes(String(a.category || '').toLowerCase())).reduce((sum, a) => sum + Number(a.value || 0), 0);
-  const monthly = Math.max(0, Number(contributions.monthly || 0));
-  const runwayMonths = monthly > 0 ? Math.max(0, Math.round(cashTotal / monthly)) : (cashTotal > 0 ? 0 : 0);
-
-  const steps = [];
-  let cursor = 1;
-  liabilities.filter((l) => l.status !== 'closed').sort((a, b) => Number(b.rate || 0) - Number(a.rate || 0)).forEach((liab) => {
-    const payment = Math.max(Number(liab.minimumPayment || 0), monthly || Number(liab.minimumPayment || 0));
-    const months = payment > 0 ? Math.ceil(Number(liab.balance || 0) / payment) : null;
-    steps.push({
-      id: liab.id || randomUUID(),
-      type: 'debt',
-      title: `Clear ${liab.name}`,
-      summary: `Allocate £${Math.round(payment).toLocaleString()} per month towards ${liab.name} at ${Number(liab.rate || 0).toFixed(2)}%.`,
-      startMonth: cursor,
-      endMonth: months ? cursor + months - 1 : null
-    });
-    if (months) cursor += months;
-  });
-
-  const milestones = goals.map((goal) => {
-    const months = goal.targetDate ? monthsBetween(new Date(), goal.targetDate) || 12 : 12;
-    const monthlyNeed = months > 0 ? Math.round(Number(goal.targetAmount || 0) / months) : Number(goal.targetAmount || 0);
-    return {
-      id: goal.id || randomUUID(),
-      title: goal.name || 'Goal',
-      description: `Allocate £${monthlyNeed.toLocaleString()} per month to reach £${Number(goal.targetAmount || 0).toLocaleString()}.`,
-      date: goal.targetDate ? new Date(goal.targetDate) : null,
-      amount: Number(goal.targetAmount || 0),
-      monthlyContribution: monthlyNeed
-    };
-  });
-
-  if (monthly > 0) {
-    steps.push({
-      id: randomUUID(),
-      type: 'invest',
-      title: 'Automate monthly investing',
-      summary: `Invest the remaining £${monthly.toLocaleString()} per month into diversified accounts once high-interest debt clears.`,
-      startMonth: cursor,
-      endMonth: cursor + 12
-    });
-  }
-
-  return {
-    summary: {
-      assetsTotal,
-      liabilitiesTotal,
-      netWorth,
-      strength,
-      runwayMonths,
-      cashReserves: cashTotal,
-      lastComputed: new Date()
-    },
-    strategy: {
-      steps,
-      milestones
-    }
-  };
-}
-
 function decorateWealth(plan) {
   const data = normalisePlanForResponse(plan);
   if (!data.summary || !Object.keys(data.summary).length) {
@@ -382,6 +303,42 @@ function normalisePlanForResponse(plan) {
   merged.goals = Array.isArray(plain.goals) ? plain.goals : [];
   merged.contributions = plain.contributions || { monthly: 0 };
   merged.summary = plain.summary || {};
+  merged.summary.assetAllocation = Array.isArray(merged.summary.assetAllocation) ? merged.summary.assetAllocation : [];
+  merged.summary.liabilitySchedule = Array.isArray(merged.summary.liabilitySchedule)
+    ? merged.summary.liabilitySchedule.map((item) => ({
+      ...item,
+      payoffDate: item?.payoffDate ? new Date(item.payoffDate) : null,
+      schedule: Array.isArray(item?.schedule) ? item.schedule : []
+    }))
+    : [];
+  const projections = merged.summary.projections || {};
+  merged.summary.projections = {
+    horizonMonths: Number(projections.horizonMonths || 0),
+    monthly: Array.isArray(projections.monthly) ? projections.monthly : [],
+    yearly: Array.isArray(projections.yearly) ? projections.yearly : [],
+    assumptions: projections.assumptions || {}
+  };
+  const affordability = merged.summary.affordability || {};
+  const goalScenarios = Array.isArray(affordability.goalScenarios)
+    ? affordability.goalScenarios.map((scenario) => ({
+      ...scenario,
+      targetDate: scenario?.targetDate ? new Date(scenario.targetDate) : null
+    }))
+    : [];
+  merged.summary.affordability = {
+    ...affordability,
+    monthlyIncome: affordability.monthlyIncome != null ? Number(affordability.monthlyIncome) : null,
+    monthlySpend: affordability.monthlySpend != null ? Number(affordability.monthlySpend) : null,
+    monthlyContribution: affordability.monthlyContribution != null ? Number(affordability.monthlyContribution) : null,
+    debtService: affordability.debtService != null ? Number(affordability.debtService) : null,
+    freeCashflow: affordability.freeCashflow != null ? Number(affordability.freeCashflow) : null,
+    savingsRateCurrent: affordability.savingsRateCurrent != null ? Number(affordability.savingsRateCurrent) : null,
+    recommendedSavingsRate: affordability.recommendedSavingsRate != null ? Number(affordability.recommendedSavingsRate) : null,
+    recommendedContribution: affordability.recommendedContribution != null ? Number(affordability.recommendedContribution) : null,
+    safeMonthlySavings: affordability.safeMonthlySavings != null ? Number(affordability.safeMonthlySavings) : null,
+    goalScenarios,
+    advisories: Array.isArray(affordability.advisories) ? affordability.advisories : []
+  };
   merged.strategy = plain.strategy || { steps: [], milestones: [] };
   merged.lastComputed = plain.lastComputed || null;
   return merged;
@@ -789,6 +746,14 @@ router.get('/wealth-plan/export', auth, async (req, res) => {
     doc.text(`Assets: ${currency(plan.summary?.assetsTotal)}  Liabilities: ${currency(plan.summary?.liabilitiesTotal)}`);
     doc.text(`Financial strength: ${plan.summary?.strength ?? 0}/100`);
     doc.text(`Cash runway: ${plan.summary?.runwayMonths ?? 0} months`);
+    if (plan.summary?.affordability) {
+      const aff = plan.summary.affordability;
+      const rateLabel = aff.recommendedSavingsRate != null ? `${Math.round(aff.recommendedSavingsRate * 1000) / 10}%` : '—';
+      doc.text(`Recommended savings rate: ${rateLabel}`);
+      if (aff.freeCashflow != null) {
+        doc.text(`Free cashflow after contributions: ${currency(aff.freeCashflow)}/month`);
+      }
+    }
     doc.moveDown();
     doc.fontSize(14).text('Assets', { underline: true });
     if (Array.isArray(plan.assets) && plan.assets.length) {
