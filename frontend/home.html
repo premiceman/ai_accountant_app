@@ -103,9 +103,10 @@
         <div class="col-12 col-md-6 col-xl-3">
           <div class="card h-100 shadow-sm">
             <div class="card-body">
-              <div class="text-muted small">Tax band</div>
-              <div class="h4 m-0" id="kpi-tax-band">—</div>
-              <div class="small text-success" id="kpi-tax-band-delta"></div>
+              <div class="text-muted small">Savings capacity</div>
+              <div class="h4 m-0" id="kpi-savings">£—</div>
+              <div class="small text-muted" id="kpi-savings-sub"></div>
+              <div class="small text-muted" id="kpi-savings-delta"></div>
             </div>
           </div>
         </div>
@@ -113,8 +114,8 @@
           <div class="card h-100 shadow-sm">
             <div class="card-body">
               <div class="text-muted small">HMRC balance</div>
-              <div class="h4 m-0" id="kpi-tax-pos">—</div>
-              <div class="text-muted small" id="kpi-tax-pos-sub">—</div>
+              <div class="h4 m-0" id="kpi-hmrc">—</div>
+              <div class="text-muted small" id="kpi-hmrc-sub">—</div>
             </div>
           </div>
         </div>
@@ -139,31 +140,63 @@
       </div>
 
       <div class="row g-3 mb-3">
-        <div class="col-12 col-lg-7">
+        <div class="col-12 col-xl-6">
           <div class="card shadow-sm h-100">
             <div class="card-body">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title m-0">Take-home waterfall</h5>
-                <button class="btn btn-sm btn-outline-secondary" id="wf-details">View drivers</button>
+                <h5 class="card-title m-0">Spend by category</h5>
+                <span class="badge text-bg-light" id="spend-category-total">£—</span>
               </div>
-              <canvas id="chart-waterfall" height="140"></canvas>
-              <div class="text-muted small mt-2" id="waterfall-meta"></div>
+              <canvas id="chart-spend-category" height="160"></canvas>
+              <div class="table-responsive mt-3">
+                <table class="table table-sm align-middle mb-0">
+                  <thead class="table-light"><tr><th>Category</th><th class="text-end">Amount</th><th class="text-end">Share</th></tr></thead>
+                  <tbody id="spend-category-table"></tbody>
+                </table>
+              </div>
+              <div class="text-muted small mt-2" id="spend-category-empty">No spending captured for this range.</div>
             </div>
           </div>
         </div>
-        <div class="col-12 col-lg-5">
+        <div class="col-12 col-xl-6">
           <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <h5 class="card-title">Effective marginal tax rate</h5>
-              <canvas id="chart-emtr" height="140"></canvas>
-              <div class="text-muted small mt-2">Understand when additional income becomes less efficient.</div>
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Inflation-adjusted spend trend</h5>
+              <canvas id="chart-inflation-trend" height="160"></canvas>
+              <div class="text-muted small mt-2">Nominal vs real spending over the last 6 months.</div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="row g-3">
-        <div class="col-12 col-lg-7">
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-6">
+          <div class="card shadow-sm h-100">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Largest merchants</h5>
+              <ul class="list-group list-group-flush flex-grow-1" id="merchant-list"></ul>
+              <div class="text-muted small mt-2 d-none" id="merchant-empty">No merchant spend detected.</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="card shadow-sm h-100">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Potential duplicate transactions</h5>
+              <div class="table-responsive flex-grow-1">
+                <table class="table table-sm align-middle mb-0" id="duplicates-table">
+                  <thead class="table-light"><tr><th>Date</th><th>Merchant</th><th class="text-end">Amount</th><th class="text-end">Count</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="text-muted small mt-2" id="duplicates-empty">No duplicates detected.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-6">
           <div class="card shadow-sm h-100">
             <div class="card-body">
               <h5 class="card-title">Allowance utilisation</h5>
@@ -171,22 +204,32 @@
             </div>
           </div>
         </div>
-        <div class="col-12 col-lg-5">
+        <div class="col-12 col-lg-6">
           <div class="card shadow-sm h-100">
             <div class="card-body d-flex flex-column">
-              <div class="d-flex justify-content-between align-items-center">
-                <h5 class="card-title m-0">Obligations timeline</h5>
-                <button class="btn btn-sm btn-outline-primary" id="events-sync">Sync calendars</button>
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title m-0">HMRC obligations</h5>
+                <span class="badge text-bg-warning" id="hmrc-balance">£—</span>
               </div>
-              <div id="events-scroll" class="mt-2 flex-grow-1" style="max-height: 320px; overflow-y: auto;">
-                <table class="table table-sm table-hover align-middle mb-0" id="events-table">
-                  <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
-                    <tr><th style="width:110px;">Date</th><th>Event</th><th style="width:36px;"></th></tr>
-                  </thead>
-                  <tbody id="events-tbody"></tbody>
+              <div class="table-responsive flex-grow-1">
+                <table class="table table-sm align-middle mb-0" id="obligations-table">
+                  <thead class="table-light"><tr><th>Due</th><th>Obligation</th><th class="text-end">Amount</th></tr></thead>
+                  <tbody></tbody>
                 </table>
               </div>
-              <div id="events-empty" class="text-muted small mt-2">No data — set up your integrations to get started.</div>
+              <div class="text-muted small mt-2" id="obligations-empty">No obligations in this window.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-12">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <h5 class="card-title">Alerts</h5>
+              <div id="alert-queue" class="d-flex flex-column gap-2"></div>
+              <div class="text-muted small" id="alerts-empty">No alerts raised.</div>
             </div>
           </div>
         </div>
@@ -226,22 +269,37 @@
         </div>
         <div class="col-12 col-lg-6">
           <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <h5 class="card-title">Income vs expenditure</h5>
-              <div class="row g-3 align-items-center">
+            <div class="card-body d-flex flex-column">
+              <h5 class="card-title">Affordability snapshot</h5>
+              <div class="display-6 fw-semibold" id="savings-monthly">£—</div>
+              <div class="text-muted small" id="savings-note">Monitor your surplus after essentials and commitments.</div>
+              <div class="row g-2 mt-3">
                 <div class="col-6">
-                  <div class="fw-semibold">Total income</div>
-                  <div class="h3 m-0" id="fp-inc-total">£—</div>
-                  <div class="text-muted small" id="fp-inc-notes">—</div>
+                  <div class="border rounded p-2 h-100 bg-light-subtle">
+                    <div class="text-muted small">Essentials</div>
+                    <div class="fw-semibold" id="savings-essentials">£—</div>
+                  </div>
                 </div>
                 <div class="col-6">
-                  <div class="fw-semibold">Total spend</div>
-                  <div class="h3 m-0" id="fp-spend-total">£—</div>
-                  <div class="text-muted small" id="fp-spend-notes">—</div>
+                  <div class="border rounded p-2 h-100 bg-light-subtle">
+                    <div class="text-muted small">Discretionary</div>
+                    <div class="fw-semibold" id="savings-discretionary">£—</div>
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="border rounded p-2 h-100">
+                    <div class="text-muted small">Monthly contributions</div>
+                    <div class="fw-semibold" id="savings-contributions">£—</div>
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="border rounded p-2 h-100">
+                    <div class="text-muted small">Savings rate</div>
+                    <div class="fw-semibold" id="savings-rate">—%</div>
+                  </div>
                 </div>
               </div>
-              <div class="mt-3"><canvas id="fp-incspend-chart" height="120"></canvas></div>
-              <div class="alert alert-light border mt-3 d-none" id="fp-income-empty">No data — set up your integrations to get started.</div>
+              <div class="alert alert-light border mt-3 d-none" id="savings-empty">Connect accounts to track affordability.</div>
             </div>
           </div>
         </div>
@@ -265,20 +323,9 @@
         <div class="col-12 col-lg-6">
           <div class="card shadow-sm h-100">
             <div class="card-body">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title m-0">Investments</h5>
-                <div class="badge text-bg-success" id="fp-perf-ytd">YTD —%</div>
-              </div>
-              <div class="row g-3">
-                <div class="col-6">
-                  <canvas id="fp-allocation-chart" height="150"></canvas>
-                  <div class="text-muted small text-center mt-1">Asset allocation</div>
-                </div>
-                <div class="col-6">
-                  <canvas id="fp-portfolio-line" height="150"></canvas>
-                  <div class="text-muted small text-center mt-1">Portfolio value (12m)</div>
-                </div>
-              </div>
+              <h5 class="card-title">Asset mix</h5>
+              <canvas id="fp-allocation-chart" height="170"></canvas>
+              <div class="text-muted small text-center mt-2" id="liquidity-note">—</div>
             </div>
           </div>
         </div>
@@ -336,5 +383,4 @@
   <script src="/js/dashboard.js"></script>
   <script src="/js/mobile-sidebar.js"></script>
 </body>
-</html>
 </html>

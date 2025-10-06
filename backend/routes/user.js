@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const PaymentMethod = require('../models/PaymentMethod');
+const { computeWealth } = require('../services/wealth/engine');
 let PDFDocument = null;
 try {
   PDFDocument = require('pdfkit');
@@ -33,6 +34,24 @@ function normalisePackage(pkg = {}) {
 
 function packageTotal(pkg = {}) {
   return ['base', 'bonus', 'commission', 'equity', 'benefits', 'other'].reduce((sum, key) => sum + Number(pkg[key] || 0), 0);
+}
+
+function safeNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function cleanText(value, max = 180) {
+  if (value === undefined || value === null) return '';
+  const str = String(value).trim();
+  if (!max || str.length <= max) return str;
+  return str.slice(0, max);
+}
+
+function safeDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function estimateUkTax(pkg = {}) {
@@ -67,12 +86,63 @@ function estimateUkTax(pkg = {}) {
   };
 }
 
+function normaliseMarketBenchmark(block = {}) {
+  if (!block || typeof block !== 'object') return {};
+  const status = ['underpaid', 'fair', 'overpaid'].includes(block.status) ? block.status : 'unknown';
+  const result = {
+    status,
+    ratio: safeNumber(block.ratio),
+    summary: block.summary ? String(block.summary) : '',
+    marketMedian: safeNumber(block.marketMedian),
+    annualisedIncome: safeNumber(block.annualisedIncome),
+    recommendedSalary: safeNumber(block.recommendedSalary),
+    recommendedRaise: safeNumber(block.recommendedRaise),
+    nextReview: safeDate(block.nextReview),
+    updatedAt: safeDate(block.updatedAt) || new Date(),
+    bands: null,
+    promotionTimeline: null,
+    sources: []
+  };
+  if (block.bands && typeof block.bands === 'object') {
+    result.bands = {
+      low: safeNumber(block.bands.low),
+      median: safeNumber(block.bands.median),
+      high: safeNumber(block.bands.high)
+    };
+  }
+  if (block.promotionTimeline && typeof block.promotionTimeline === 'object') {
+    const timeline = block.promotionTimeline;
+    result.promotionTimeline = {
+      monthsToPromotion: safeNumber(timeline.monthsToPromotion),
+      targetTitle: timeline.targetTitle ? String(timeline.targetTitle) : '',
+      windowStart: safeDate(timeline.windowStart),
+      windowEnd: safeDate(timeline.windowEnd),
+      confidence: timeline.confidence ? String(timeline.confidence) : null,
+      notes: timeline.notes ? String(timeline.notes) : ''
+    };
+  }
+  if (Array.isArray(block.sources)) {
+    result.sources = block.sources.slice(0, 8).map((src) => ({
+      label: src?.label ? String(src.label) : '',
+      type: src?.type ? String(src.type) : 'data',
+      weight: safeNumber(src?.weight)
+    }));
+  }
+  return result;
+}
+
 function decorateSalaryNavigator(nav) {
   const data = toPlain(nav || {});
   data.package = normalisePackage(data.package || {});
+  data.targetSalary = safeNumber(data.targetSalary);
   data.currentSalary = packageTotal(data.package);
   data.progress = data.targetSalary ? Math.min(100, Math.round((data.currentSalary / Number(data.targetSalary || 0)) * 100)) || 0 : 0;
   data.taxSummary = Object.keys(data.taxSummary || {}).length ? data.taxSummary : estimateUkTax(data.package);
+  data.role = typeof data.role === 'string' ? data.role : '';
+  data.company = typeof data.company === 'string' ? data.company : '';
+  data.location = typeof data.location === 'string' ? data.location : '';
+  data.tenure = safeNumber(data.tenure);
+  data.marketBenchmark = normaliseMarketBenchmark(data.marketBenchmark || {});
   return data;
 }
 
@@ -112,21 +182,27 @@ function normaliseContract(contract) {
   };
 }
 
-function buildMockBenchmarks(pkg = {}, country = 'uk') {
+function buildMockBenchmarks(pkg = {}, options = {}) {
+  const opts = typeof options === 'string' ? { country: options } : (options || {});
+  const country = (opts.country || 'uk').toLowerCase();
+  const role = opts.role || 'Comparable role';
+  const location = opts.location || country.toUpperCase();
+  const tenure = safeNumber(opts.tenure);
   const base = packageTotal(pkg) || 45000;
-  const uplift = base * 0.08;
+  const tenureFactor = tenure ? Math.min(1.4, 1 + (tenure / 12)) : 1;
+  const uplift = base * 0.08 * tenureFactor;
   const now = new Date();
   return [
     {
       id: randomUUID(),
       source: 'ONS Earnings',
-      role: 'Comparable UK role',
-      location: country.toUpperCase(),
-      medianSalary: Math.round(base + uplift),
+      role: role,
+      location: location,
+      medianSalary: Math.round((base + uplift) * 1.02),
       percentiles: {
-        p25: Math.round(base * 0.9),
-        p50: Math.round(base + uplift),
-        p75: Math.round(base + uplift * 2)
+        p25: Math.round(base * 0.9 * tenureFactor),
+        p50: Math.round((base + uplift) * tenureFactor),
+        p75: Math.round((base + uplift * 2) * tenureFactor)
       },
       summary: 'Office for National Statistics data weighted for experience and location.',
       generatedAt: now
@@ -134,13 +210,13 @@ function buildMockBenchmarks(pkg = {}, country = 'uk') {
     {
       id: randomUUID(),
       source: 'Recruitment platforms',
-      role: 'Live job adverts',
-      location: 'Hybrid',
-      medianSalary: Math.round(base + uplift * 1.2),
+      role: role,
+      location: location || 'Hybrid',
+      medianSalary: Math.round((base + uplift * 1.2) * tenureFactor),
       percentiles: {
-        p25: Math.round(base),
-        p50: Math.round(base + uplift * 1.2),
-        p75: Math.round(base + uplift * 2.4)
+        p25: Math.round(base * tenureFactor),
+        p50: Math.round((base + uplift * 1.2) * tenureFactor),
+        p75: Math.round((base + uplift * 2.4) * tenureFactor)
       },
       summary: 'Aggregated from Indeed, Reed and Hays salary guides.',
       generatedAt: now
@@ -148,13 +224,13 @@ function buildMockBenchmarks(pkg = {}, country = 'uk') {
     {
       id: randomUUID(),
       source: 'Industry peers',
-      role: 'Peer submitted data',
-      location: country === 'us' ? 'USA' : 'UK',
-      medianSalary: Math.round(base + uplift * 0.6),
+      role: role,
+      location: country === 'us' ? 'USA' : location,
+      medianSalary: Math.round((base + uplift * 0.6) * tenureFactor),
       percentiles: {
-        p25: Math.round(base * 0.95),
-        p50: Math.round(base + uplift * 0.6),
-        p75: Math.round(base + uplift * 1.5)
+        p25: Math.round(base * 0.95 * tenureFactor),
+        p50: Math.round((base + uplift * 0.6) * tenureFactor),
+        p75: Math.round((base + uplift * 1.5) * tenureFactor)
       },
       summary: 'Community-sourced packages adjusted for benefits and equity.',
       generatedAt: now
@@ -199,85 +275,6 @@ function normaliseContributions(c = {}) {
   return { monthly: Number(c.monthly || 0) };
 }
 
-function monthsBetween(start, end) {
-  const a = new Date(start);
-  const b = new Date(end);
-  if (!a || !b || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
-  return Math.max(0, Math.round((b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())));
-}
-
-function computeWealth(plan) {
-  const assets = Array.isArray(plan.assets) ? plan.assets : [];
-  const liabilities = Array.isArray(plan.liabilities) ? plan.liabilities : [];
-  const goals = Array.isArray(plan.goals) ? plan.goals : [];
-  const contributions = plan.contributions || { monthly: 0 };
-  const assetsTotal = assets.reduce((sum, a) => sum + Number(a.value || 0), 0);
-  const liabilitiesTotal = liabilities.reduce((sum, l) => sum + Number(l.balance || 0), 0);
-  const netWorth = assetsTotal - liabilitiesTotal;
-  const denominator = assetsTotal + liabilitiesTotal;
-  const ratio = denominator > 0 ? ((assetsTotal - liabilitiesTotal) / denominator) : 0;
-  const strength = Math.max(0, Math.min(100, Math.round((ratio * 50) + 50)));
-  const cashTotal = assets.filter((a) => ['cash','savings'].includes(String(a.category || '').toLowerCase())).reduce((sum, a) => sum + Number(a.value || 0), 0);
-  const monthly = Math.max(0, Number(contributions.monthly || 0));
-  const runwayMonths = monthly > 0 ? Math.max(0, Math.round(cashTotal / monthly)) : (cashTotal > 0 ? 0 : 0);
-
-  const steps = [];
-  let cursor = 1;
-  liabilities.filter((l) => l.status !== 'closed').sort((a, b) => Number(b.rate || 0) - Number(a.rate || 0)).forEach((liab) => {
-    const payment = Math.max(Number(liab.minimumPayment || 0), monthly || Number(liab.minimumPayment || 0));
-    const months = payment > 0 ? Math.ceil(Number(liab.balance || 0) / payment) : null;
-    steps.push({
-      id: liab.id || randomUUID(),
-      type: 'debt',
-      title: `Clear ${liab.name}`,
-      summary: `Allocate £${Math.round(payment).toLocaleString()} per month towards ${liab.name} at ${Number(liab.rate || 0).toFixed(2)}%.`,
-      startMonth: cursor,
-      endMonth: months ? cursor + months - 1 : null
-    });
-    if (months) cursor += months;
-  });
-
-  const milestones = goals.map((goal) => {
-    const months = goal.targetDate ? monthsBetween(new Date(), goal.targetDate) || 12 : 12;
-    const monthlyNeed = months > 0 ? Math.round(Number(goal.targetAmount || 0) / months) : Number(goal.targetAmount || 0);
-    return {
-      id: goal.id || randomUUID(),
-      title: goal.name || 'Goal',
-      description: `Allocate £${monthlyNeed.toLocaleString()} per month to reach £${Number(goal.targetAmount || 0).toLocaleString()}.`,
-      date: goal.targetDate ? new Date(goal.targetDate) : null,
-      amount: Number(goal.targetAmount || 0),
-      monthlyContribution: monthlyNeed
-    };
-  });
-
-  if (monthly > 0) {
-    steps.push({
-      id: randomUUID(),
-      type: 'invest',
-      title: 'Automate monthly investing',
-      summary: `Invest the remaining £${monthly.toLocaleString()} per month into diversified accounts once high-interest debt clears.`,
-      startMonth: cursor,
-      endMonth: cursor + 12
-    });
-  }
-
-  return {
-    summary: {
-      assetsTotal,
-      liabilitiesTotal,
-      netWorth,
-      strength,
-      runwayMonths,
-      cashReserves: cashTotal,
-      lastComputed: new Date()
-    },
-    strategy: {
-      steps,
-      milestones
-    }
-  };
-}
-
 function decorateWealth(plan) {
   const data = normalisePlanForResponse(plan);
   if (!data.summary || !Object.keys(data.summary).length) {
@@ -306,6 +303,42 @@ function normalisePlanForResponse(plan) {
   merged.goals = Array.isArray(plain.goals) ? plain.goals : [];
   merged.contributions = plain.contributions || { monthly: 0 };
   merged.summary = plain.summary || {};
+  merged.summary.assetAllocation = Array.isArray(merged.summary.assetAllocation) ? merged.summary.assetAllocation : [];
+  merged.summary.liabilitySchedule = Array.isArray(merged.summary.liabilitySchedule)
+    ? merged.summary.liabilitySchedule.map((item) => ({
+      ...item,
+      payoffDate: item?.payoffDate ? new Date(item.payoffDate) : null,
+      schedule: Array.isArray(item?.schedule) ? item.schedule : []
+    }))
+    : [];
+  const projections = merged.summary.projections || {};
+  merged.summary.projections = {
+    horizonMonths: Number(projections.horizonMonths || 0),
+    monthly: Array.isArray(projections.monthly) ? projections.monthly : [],
+    yearly: Array.isArray(projections.yearly) ? projections.yearly : [],
+    assumptions: projections.assumptions || {}
+  };
+  const affordability = merged.summary.affordability || {};
+  const goalScenarios = Array.isArray(affordability.goalScenarios)
+    ? affordability.goalScenarios.map((scenario) => ({
+      ...scenario,
+      targetDate: scenario?.targetDate ? new Date(scenario.targetDate) : null
+    }))
+    : [];
+  merged.summary.affordability = {
+    ...affordability,
+    monthlyIncome: affordability.monthlyIncome != null ? Number(affordability.monthlyIncome) : null,
+    monthlySpend: affordability.monthlySpend != null ? Number(affordability.monthlySpend) : null,
+    monthlyContribution: affordability.monthlyContribution != null ? Number(affordability.monthlyContribution) : null,
+    debtService: affordability.debtService != null ? Number(affordability.debtService) : null,
+    freeCashflow: affordability.freeCashflow != null ? Number(affordability.freeCashflow) : null,
+    savingsRateCurrent: affordability.savingsRateCurrent != null ? Number(affordability.savingsRateCurrent) : null,
+    recommendedSavingsRate: affordability.recommendedSavingsRate != null ? Number(affordability.recommendedSavingsRate) : null,
+    recommendedContribution: affordability.recommendedContribution != null ? Number(affordability.recommendedContribution) : null,
+    safeMonthlySavings: affordability.safeMonthlySavings != null ? Number(affordability.safeMonthlySavings) : null,
+    goalScenarios,
+    advisories: Array.isArray(affordability.advisories) ? affordability.advisories : []
+  };
   merged.strategy = plain.strategy || { steps: [], milestones: [] };
   merged.lastComputed = plain.lastComputed || null;
   return merged;
@@ -318,6 +351,7 @@ function currency(value) {
 // Utility: shape user data for client (don't expose password/hash)
 function publicUser(u) {
   if (!u) return null;
+  const usage = u.usageStats || {};
   return {
     id: u._id,
     firstName: u.firstName || '',
@@ -333,7 +367,26 @@ function publicUser(u) {
     trial: u.trial || null,
     onboarding: u.onboarding || {},
     preferences: u.preferences || {},
-    usageStats: u.usageStats || {},
+    usageStats: {
+      documentsUploaded: usage.documentsUploaded || 0,
+      documentsRequiredMet: usage.documentsRequiredMet || 0,
+      documentsRequiredCompleted: usage.documentsRequiredCompleted || 0,
+      documentsRequiredTotal: usage.documentsRequiredTotal || 0,
+      documentsOutstanding: usage.documentsOutstanding || 0,
+      moneySavedEstimate: usage.moneySavedEstimate || 0,
+      moneySavedPrevSpend: usage.moneySavedPrevSpend || 0,
+      moneySavedChangePct:
+        usage.moneySavedChangePct == null ? null : usage.moneySavedChangePct,
+      debtOutstanding: usage.debtOutstanding || 0,
+      debtReduced: usage.debtReduced || 0,
+      debtReductionDelta: usage.debtReductionDelta || 0,
+      netCashFlow: usage.netCashFlow || 0,
+      netCashPrev: usage.netCashPrev || 0,
+      usageWindowDays: usage.usageWindowDays || 0,
+      hmrcFilingsComplete: usage.hmrcFilingsComplete || 0,
+      minutesActive: usage.minutesActive || 0,
+      updatedAt: usage.updatedAt || null
+    },
     salaryNavigator: decorateSalaryNavigator(u.salaryNavigator || {}),
     wealthPlan: decorateWealth(u.wealthPlan || {}),
     integrations: u.integrations || [],
@@ -465,15 +518,49 @@ router.put('/salary-navigator', auth, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const body = req.body || {};
     const nav = toPlain(user.salaryNavigator || {});
-    if (body.package && typeof body.package === 'object') nav.package = normalisePackage(body.package);
+    let shouldRecomputeMarket = false;
+    const explicitMarket = body.marketBenchmark !== undefined;
+    if (body.package && typeof body.package === 'object') {
+      nav.package = normalisePackage(body.package);
+      shouldRecomputeMarket = true;
+    }
     if (body.targetSalary !== undefined) nav.targetSalary = body.targetSalary != null ? Number(body.targetSalary) : null;
     if (body.nextReviewAt !== undefined) nav.nextReviewAt = body.nextReviewAt ? new Date(body.nextReviewAt) : null;
+    if (body.role !== undefined) {
+      nav.role = cleanText(body.role, 120);
+      shouldRecomputeMarket = true;
+    }
+    if (body.company !== undefined) {
+      nav.company = cleanText(body.company, 160);
+      shouldRecomputeMarket = true;
+    }
+    if (body.location !== undefined) {
+      nav.location = cleanText(body.location, 140);
+      shouldRecomputeMarket = true;
+    }
+    if (body.tenure !== undefined) {
+      const tenureVal = safeNumber(body.tenure);
+      nav.tenure = tenureVal != null && tenureVal >= 0 ? Math.round(tenureVal * 100) / 100 : null;
+      shouldRecomputeMarket = true;
+    }
     if (Array.isArray(body.achievements)) nav.achievements = body.achievements.map(normaliseAchievement);
     if (Array.isArray(body.promotionCriteria)) nav.promotionCriteria = body.promotionCriteria.map(normaliseCriterion);
     if (body.contractFile !== undefined) nav.contractFile = normaliseContract(body.contractFile);
-    if (Array.isArray(body.benchmarks)) nav.benchmarks = body.benchmarks;
+    if (Array.isArray(body.benchmarks)) {
+      nav.benchmarks = body.benchmarks;
+      shouldRecomputeMarket = true;
+    }
+    if (explicitMarket) nav.marketBenchmark = normaliseMarketBenchmark(body.marketBenchmark);
     nav.currentSalary = packageTotal(nav.package || {});
     nav.taxSummary = estimateUkTax(nav.package || {});
+    if (shouldRecomputeMarket && !explicitMarket) {
+      try {
+        const computed = await computeMarketBenchmark({ user, navigator: nav });
+        if (computed) nav.marketBenchmark = normaliseMarketBenchmark(computed);
+      } catch (err) {
+        console.warn('Unable to recompute market benchmark', err.message || err);
+      }
+    }
     user.salaryNavigator = nav;
     user.markModified('salaryNavigator');
     await user.save();
@@ -491,13 +578,27 @@ router.post('/salary-navigator/benchmark', auth, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     const nav = toPlain(user.salaryNavigator || {});
     nav.package = normalisePackage(nav.package || {});
-    const benchmarks = buildMockBenchmarks(nav.package, user.country || 'uk');
+    const benchmarks = buildMockBenchmarks(nav.package, {
+      country: user.country || 'uk',
+      role: nav.role,
+      location: nav.location,
+      tenure: nav.tenure
+    });
     nav.benchmarks = benchmarks;
     nav.benchmarkUpdatedAt = new Date();
+    try {
+      const marketBenchmark = await computeMarketBenchmark({ user, navigator: nav, benchmarks });
+      if (marketBenchmark) {
+        nav.marketBenchmark = normaliseMarketBenchmark(marketBenchmark);
+        nav.marketBenchmarkUpdatedAt = new Date();
+      }
+    } catch (err) {
+      console.warn('Market benchmark refresh failed', err.message || err);
+    }
     user.salaryNavigator = nav;
     user.markModified('salaryNavigator');
     await user.save();
-    res.json({ benchmarks });
+    res.json({ benchmarks: nav.benchmarks, marketBenchmark: nav.marketBenchmark });
   } catch (err) {
     console.error('POST /user/salary-navigator/benchmark error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -645,6 +746,14 @@ router.get('/wealth-plan/export', auth, async (req, res) => {
     doc.text(`Assets: ${currency(plan.summary?.assetsTotal)}  Liabilities: ${currency(plan.summary?.liabilitiesTotal)}`);
     doc.text(`Financial strength: ${plan.summary?.strength ?? 0}/100`);
     doc.text(`Cash runway: ${plan.summary?.runwayMonths ?? 0} months`);
+    if (plan.summary?.affordability) {
+      const aff = plan.summary.affordability;
+      const rateLabel = aff.recommendedSavingsRate != null ? `${Math.round(aff.recommendedSavingsRate * 1000) / 10}%` : '—';
+      doc.text(`Recommended savings rate: ${rateLabel}`);
+      if (aff.freeCashflow != null) {
+        doc.text(`Free cashflow after contributions: ${currency(aff.freeCashflow)}/month`);
+      }
+    }
     doc.moveDown();
     doc.fontSize(14).text('Assets', { underline: true });
     if (Array.isArray(plan.assets) && plan.assets.length) {

@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tax Lab — AI Accountant</title>
+  <script src="/js/head-include.js"></script>
+  <style>
+    :root {
+      --lab-muted: #6b7280;
+      --lab-bg: #f8fafc;
+      --card-radius: 18px;
+      --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.05);
+    }
+
+    body {
+      background-color: var(--lab-bg);
+    }
+
+    .lab-hero {
+      padding: 18px 0 8px;
+    }
+
+    .lab-hero .eyebrow {
+      font-size: .78rem;
+      color: var(--lab-muted);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .lab-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem 1rem;
+      align-items: center;
+      margin-top: .5rem;
+    }
+
+    .tax-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .tax-card {
+      background: #fff;
+      border-radius: var(--card-radius);
+      box-shadow: var(--tile-shadow);
+      border: 1px solid rgba(0,0,0,.05);
+      padding: 16px;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .tax-card h3 {
+      font-size: 1.05rem;
+      margin: 0 0 .25rem;
+    }
+
+    .tax-card .value {
+      font-size: 1.8rem;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .tax-card .sub {
+      color: var(--lab-muted);
+      font-size: .9rem;
+    }
+
+    .section-card {
+      background: #fff;
+      border-radius: var(--card-radius);
+      box-shadow: var(--tile-shadow);
+      border: 1px solid rgba(0,0,0,.05);
+      margin-bottom: 20px;
+    }
+
+    .section-card .card-header {
+      padding: 18px 18px 12px;
+      border-bottom: 1px solid rgba(0,0,0,.05);
+    }
+
+    .section-card .card-body {
+      padding: 18px;
+    }
+
+    .allowance-row + .allowance-row {
+      margin-top: 14px;
+    }
+
+    .allowance-row .label {
+      font-weight: 500;
+    }
+
+    .allowance-row .meta {
+      font-size: .85rem;
+      color: var(--lab-muted);
+    }
+
+    .progress {
+      height: 8px;
+      border-radius: 999px;
+    }
+
+    .progress-bar {
+      border-radius: 999px;
+    }
+
+    .doc-status {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .5rem;
+      padding: 10px 12px;
+      border: 1px dashed rgba(0,0,0,.08);
+      border-radius: 12px;
+      background: rgba(148, 163, 184, .08);
+    }
+
+    .doc-status.missing {
+      border-style: solid;
+      border-color: rgba(220, 38, 38, .3);
+      background: rgba(248, 113, 113, .08);
+    }
+
+    .doc-status.stale {
+      border-color: rgba(234, 179, 8, .4);
+      background: rgba(254, 240, 138, .2);
+    }
+
+    .doc-status.complete {
+      border-color: rgba(16, 163, 127, .35);
+      background: rgba(16, 163, 127, .12);
+    }
+
+    .doc-status .label {
+      font-weight: 500;
+    }
+
+    .timeline {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .timeline li {
+      position: relative;
+      padding-left: 28px;
+      margin-bottom: 16px;
+    }
+
+    .timeline li::before {
+      content: '';
+      position: absolute;
+      left: 10px;
+      top: 6px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #0d6efd;
+      box-shadow: 0 0 0 4px rgba(13,110,253,.2);
+    }
+
+    .timeline li:last-child {
+      margin-bottom: 0;
+    }
+
+    .quick-actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+    }
+
+    .quick-btn {
+      background: #fff;
+      border: 1px solid rgba(0,0,0,.08);
+      border-radius: 14px;
+      padding: 14px;
+      text-align: left;
+      box-shadow: var(--tile-shadow);
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+
+    .quick-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px rgba(15,23,42,.15);
+    }
+
+    .quick-btn button {
+      align-self: flex-start;
+    }
+
+    #ai-quick-output {
+      min-height: 120px;
+      white-space: pre-wrap;
+      font-size: .95rem;
+    }
+
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+
+    .scenario-card {
+      border: 1px solid rgba(0,0,0,.08);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fff;
+      box-shadow: var(--tile-shadow);
+    }
+
+    @media (max-width: 992px) {
+      body { background: #fff; }
+      .section-card { box-shadow: none; border-radius: 12px; }
+      .tax-card { border-radius: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar-container"></div>
+  <div id="sidebar-container"></div>
+
+  <main class="container py-4">
+    <section class="lab-hero">
+      <div class="eyebrow">Labs</div>
+      <h1 class="page-title" data-page-title data-lock-title>Tax Lab</h1>
+      <p class="text-muted small mb-0">Summaries for Self Assessment, HMRC balances, and evidence readiness.</p>
+      <div class="lab-meta">
+        <span class="badge text-bg-light border" id="hmrc-sync-label">Checking HMRC sync…</span>
+        <span class="text-muted small" id="hmrc-sync-sub"></span>
+      </div>
+    </section>
+
+    <div id="tax-error" class="alert alert-danger d-none" role="alert"></div>
+
+    <section class="tax-cards" id="tax-summary-cards">
+      <article class="tax-card">
+        <div>
+          <h3>Personal tax code</h3>
+          <div class="value" id="tax-code-value">—</div>
+        </div>
+        <div class="sub" id="tax-code-sub">Awaiting data…</div>
+      </article>
+      <article class="tax-card">
+        <div>
+          <h3>HMRC net position</h3>
+          <div class="value" id="tax-net-value">£—</div>
+        </div>
+        <div class="sub" id="tax-net-sub">—</div>
+      </article>
+      <article class="tax-card">
+        <div>
+          <h3>Next obligation</h3>
+          <div class="value" id="tax-next-label">—</div>
+        </div>
+        <div class="sub" id="tax-next-sub">—</div>
+      </article>
+      <article class="tax-card">
+        <div>
+          <h3>Evidence completeness</h3>
+          <div class="value" id="tax-doc-progress">—</div>
+        </div>
+        <div class="sub" id="tax-doc-sub">Required items uploaded</div>
+      </article>
+    </section>
+
+    <section class="section-card mt-4">
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h2 class="h5 mb-0">Allowance utilisation</h2>
+          <p class="text-muted small mb-0">Track remaining tax-efficient headroom across key allowances.</p>
+        </div>
+        <span class="badge text-bg-light" id="allowance-updated">—</span>
+      </div>
+      <div class="card-body" id="allowance-list"></div>
+    </section>
+
+    <div class="row g-3">
+      <div class="col-12 col-xl-6">
+        <section class="section-card">
+          <div class="card-header">
+            <h2 class="h5 mb-0">Payments on account</h2>
+            <p class="text-muted small mb-0">Monitor instalments and project upcoming cash requirements.</p>
+          </div>
+          <div class="card-body">
+            <div class="table-responsive">
+              <table class="table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th scope="col">Reference</th>
+                    <th scope="col" class="text-end">Amount</th>
+                    <th scope="col">Due</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="payments-body">
+                  <tr><td colspan="4" class="text-muted small">No payments scheduled.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="col-12 col-xl-6">
+        <section class="section-card">
+          <div class="card-header">
+            <h2 class="h5 mb-0">Upcoming obligations</h2>
+            <p class="text-muted small mb-0">Stay ahead of filing deadlines and HMRC milestones.</p>
+          </div>
+          <div class="card-body">
+            <ul class="timeline" id="obligation-list"></ul>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <section class="section-card">
+      <div class="card-header">
+        <h2 class="h5 mb-0">Required evidence coverage</h2>
+        <p class="text-muted small mb-0">Documents HMRC commonly expects for Self Assessment and related workflows.</p>
+      </div>
+      <div class="card-body" id="documents-list"></div>
+    </section>
+
+    <section class="section-card">
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+          <h2 class="h5 mb-0">Scenario deltas</h2>
+          <p class="text-muted small mb-0">Compare hypothetical moves against the current HMRC projection.</p>
+        </div>
+        <span class="badge text-bg-light" id="scenario-baseline-label">—</span>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small" id="scenario-baseline-desc">—</p>
+        <div class="scenario-grid" id="scenario-grid"></div>
+      </div>
+    </section>
+
+    <section class="section-card mb-5">
+      <div class="card-header">
+        <h2 class="h5 mb-0">Quick AI actions</h2>
+        <p class="text-muted small mb-0">Launch seeded prompts with the latest tax snapshot context.</p>
+      </div>
+      <div class="card-body">
+        <div class="quick-actions" id="ai-quick-actions"></div>
+        <hr class="my-4" />
+        <h3 class="h6">AI response</h3>
+        <div id="ai-quick-output" class="p-3 border rounded bg-light text-muted">Select an action to generate guidance.</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/nav.js"></script>
+  <script src="/js/mobile-sidebar.js"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>Auth.enforce();</script>
+  <script src="/js/tax-lab.js"></script>
+</body>
+</html>

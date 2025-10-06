@@ -31,6 +31,8 @@
               <div class="mt-3">
                 <label class="form-label" for="wealth-monthly">Monthly wealth contribution (£)</label>
                 <input type="number" class="form-control" id="wealth-monthly" min="0" step="50" placeholder="750">
+                <div class="small text-muted mt-2">Suggested savings rate: <span id="wealth-safe-rate">—</span> (<span id="wealth-recommended">—</span>/mo)</div>
+                <div class="small text-muted">Free cashflow after debt: <span id="wealth-free-cashflow">—</span></div>
               </div>
             </div>
             <div class="col-12 col-lg-4">
@@ -48,6 +50,72 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-4">
+      <div class="card shadow-sm border-0" id="affordability-card">
+        <div class="card-body">
+          <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Affordability planner</h2>
+              <p class="text-muted small mb-0">Stress-test upcoming purchases or liabilities against your available cashflow.</p>
+            </div>
+          </div>
+          <div class="row g-4 align-items-stretch">
+            <div class="col-12 col-lg-6">
+              <form id="affordability-form" class="row g-3">
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="planner-goal-type">Scenario</label>
+                  <select id="planner-goal-type" class="form-select">
+                    <option value="purchase">New purchase</option>
+                    <option value="liability">New liability</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="planner-goal-amount">Total amount (£)</label>
+                  <input type="number" class="form-control" id="planner-goal-amount" min="0" step="100" placeholder="15000">
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="planner-goal-months">Target timeline (months)</label>
+                  <input type="number" class="form-control" id="planner-goal-months" min="1" step="1" placeholder="18">
+                </div>
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="planner-goal-start">Desired start date</label>
+                  <input type="date" class="form-control" id="planner-goal-start">
+                </div>
+                <div class="col-12">
+                  <div class="alert alert-light border mb-0" id="planner-summary">Enter a target amount to generate recommendations.</div>
+                  <div class="small mt-2" id="planner-outcome"></div>
+                </div>
+              </form>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="border rounded p-3 h-100 bg-light">
+                <h6 class="fw-semibold mb-3">Cashflow snapshot</h6>
+                <dl class="row small mb-0">
+                  <dt class="col-7 text-muted">Monthly income</dt>
+                  <dd class="col-5 text-end" id="planner-income">—</dd>
+                  <dt class="col-7 text-muted">Core spend</dt>
+                  <dd class="col-5 text-end" id="planner-spend">—</dd>
+                  <dt class="col-7 text-muted">Debt service</dt>
+                  <dd class="col-5 text-end" id="planner-debt-service">—</dd>
+                  <dt class="col-7 text-muted">Free cashflow</dt>
+                  <dd class="col-5 text-end" id="planner-free-cashflow">—</dd>
+                  <dt class="col-7 text-muted">Safe savings rate</dt>
+                  <dd class="col-5 text-end" id="planner-safe-rate">—</dd>
+                  <dt class="col-7 text-muted">Safe monthly savings</dt>
+                  <dd class="col-5 text-end" id="planner-safe-monthly">—</dd>
+                </dl>
+                <div class="mt-3">
+                  <h6 class="fw-semibold mb-2">Existing goals</h6>
+                  <ul class="list-unstyled small mb-0" id="planner-goal-scenarios"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3" id="planner-advisories"></div>
         </div>
       </div>
     </section>

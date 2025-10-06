@@ -60,8 +60,9 @@
 
     .tile-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
       gap: var(--tile-gap);
+      grid-auto-rows: 1fr;
     }
 
     .tile {
@@ -71,15 +72,25 @@
       border: 1px solid var(--border-soft);
       padding: clamp(1rem, 2vw, 1.35rem);
       transition: transform 0.2s ease, box-shadow 0.2s ease;
-      min-height: 120px;
+      min-height: 150px;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      justify-content: flex-start;
+      gap: 0.85rem;
+      position: relative;
     }
 
     .tile:hover {
       transform: translateY(-4px);
       box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+    }
+
+    .tile-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.35rem;
+      width: 100%;
     }
 
     .tile .k {
@@ -89,13 +100,30 @@
       color: var(--muted);
     }
 
+    .tile-tip {
+      font-size: 1rem;
+      color: var(--muted);
+      cursor: help;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .tile-tip:hover {
+      color: var(--fg);
+    }
+
     .tile .v {
       font-size: clamp(1.45rem, 2.4vw, 1.9rem);
       font-weight: 700;
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
-      gap: 0.5rem;
+      gap: 0.45rem;
+    }
+
+    .tile .v span:first-child {
+      font-weight: 700;
     }
 
     .tile .delta {
@@ -109,6 +137,44 @@
     .tile .delta.up { background: rgba(22, 163, 74, 0.12); color: var(--ok); }
     .tile .delta.down { background: rgba(220, 38, 38, 0.12); color: var(--danger); }
     .tile .delta.info { background: rgba(15, 23, 42, 0.06); color: var(--muted); }
+
+    .tile-cta {
+      margin-top: auto;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--brand);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .tile-cta::after {
+      content: '↗';
+      font-size: 0.85em;
+      transition: transform 0.18s ease;
+    }
+
+    .tile-cta:hover::after {
+      transform: translate(2px, -2px);
+    }
+
+    .hero-sub {
+      max-width: 600px;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.55;
+    }
+
+    .hero-sub a {
+      color: var(--brand);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .hero-sub a:hover {
+      text-decoration: underline;
+    }
 
     .layout-grid {
       display: grid;
@@ -296,7 +362,7 @@
       }
 
       .tile-grid {
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       }
     }
   </style>
@@ -313,6 +379,7 @@
           <h1 class="page-title" data-page-title>Profile</h1>
         </div>
       </div>
+      <p class="hero-sub">See how Phloat is compounding value for you. These KPIs sync from the <a href="./scenario-lab.html">Scenario Lab</a>, <a href="./document-vault.html">Document Vault</a>, and <a href="./wealth-lab.html">Wealth Lab</a> so you can evidence savings, compliance readiness, and debt reduction from a single hub.</p>
       <div class="tile-grid" id="stat-tiles"></div>
     </section>
 
