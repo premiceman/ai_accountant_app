@@ -1,4 +1,4 @@
-import { Queue, Worker, QueueScheduler, JobsOptions, Job } from 'bullmq';
+import { Queue, Worker, JobsOptions, Job } from 'bullmq';
 import IORedis, { RedisOptions } from 'ioredis';
 
 export type ProcessorFn<T = unknown> = (data: T) => Promise<void> | void;
@@ -10,7 +10,6 @@ export interface BullQueueDriverOptions {
 
 interface RegisteredWorker<T = unknown> {
   worker: Worker<T, void, string>;
-  scheduler: QueueScheduler;
 }
 
 export class BullQueueDriver {
@@ -62,7 +61,7 @@ export class BullQueueDriver {
     }
 
     const connection = this.getConnection();
-    const worker = new Worker<T>(
+    const worker = new Worker<T, void, string>(
       name,
       async (job: Job<T, void, string>) => {
         await processor(job.data);
@@ -70,10 +69,7 @@ export class BullQueueDriver {
       { connection }
     );
 
-    const scheduler = new QueueScheduler(name, { connection });
-    void scheduler.waitUntilReady();
-
-    this.workers.set(name, { worker, scheduler });
+    this.workers.set(name, { worker });
   }
 
   async enqueue<T>(name: string, data: T, options?: JobsOptions) {
@@ -83,9 +79,8 @@ export class BullQueueDriver {
 
   async close() {
     await Promise.all(
-      Array.from(this.workers.values()).map(async ({ worker, scheduler }) => {
+      Array.from(this.workers.values()).map(async ({ worker }) => {
         await worker.close();
-        await scheduler.close();
       })
     );
     this.workers.clear();
