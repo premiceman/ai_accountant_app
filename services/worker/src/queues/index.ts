@@ -1,62 +1,22 @@
 import mongoose, { Connection, type ConnectOptions } from 'mongoose';
-import { JobsOptions } from 'bullmq';
 import pino from 'pino';
-import { BullQueueDriver, ProcessorFn } from './bull.js';
+
+export type ProcessorFn<T = unknown> = (data: T) => Promise<void> | void;
+
+export interface QueueJobOptions {
+  delayMs?: number;
+  delayUntil?: Date;
+}
 
 export interface QueueDriver {
   start(): Promise<void>;
   registerProcessor<T>(queueName: string, processor: ProcessorFn<T>): void;
-  enqueue<T>(queueName: string, data: T, options?: JobsOptions): Promise<void>;
+  enqueue<T>(queueName: string, data: T, options?: QueueJobOptions): Promise<void>;
   isReady(): boolean;
   shutdown(): Promise<void>;
 }
 
 const logger = pino({ name: 'worker-queues', level: process.env.LOG_LEVEL ?? 'info' });
-
-class BullDriverAdapter implements QueueDriver {
-  private readonly driver: BullQueueDriver;
-  private ready = false;
-
-  constructor() {
-    this.driver = new BullQueueDriver({
-      defaultJobOptions: {
-        removeOnComplete: true,
-        removeOnFail: false,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 1000 },
-      },
-    });
-  }
-
-  async start(): Promise<void> {
-    try {
-      await this.driver.ping();
-      this.ready = true;
-      logger.info({ driver: 'bullmq' }, 'Connected to Redis queue backend');
-    } catch (error) {
-      this.ready = false;
-      logger.error({ err: error }, 'Failed to initialise BullMQ driver');
-      throw error;
-    }
-  }
-
-  registerProcessor<T>(queueName: string, processor: ProcessorFn<T>): void {
-    this.driver.registerProcessor(queueName, processor);
-  }
-
-  async enqueue<T>(queueName: string, data: T, options?: JobsOptions): Promise<void> {
-    await this.driver.enqueue(queueName, data, options);
-  }
-
-  isReady(): boolean {
-    return this.ready;
-  }
-
-  async shutdown(): Promise<void> {
-    await this.driver.close();
-    this.ready = false;
-  }
-}
 
 interface OutboxDocument<T = unknown> {
   queue: string;
@@ -101,7 +61,7 @@ class MongoOutboxDriver implements QueueDriver {
 
     const uri = process.env.MONGODB_URI;
     if (!uri) {
-      throw new Error('MONGODB_URI must be defined when REDIS_URL is not set');
+      throw new Error('MONGODB_URI must be defined to use the Mongo outbox driver');
     }
 
     const options: ConnectOptions = {
@@ -150,18 +110,28 @@ class MongoOutboxDriver implements QueueDriver {
     }
   }
 
-  async enqueue<T>(queueName: string, data: T, _options?: JobsOptions): Promise<void> {
+  async enqueue<T>(queueName: string, data: T, options?: QueueJobOptions): Promise<void> {
     await this.ensureConnection();
     if (!this.model) {
       throw new Error('Outbox model not initialised');
     }
+
+    const availableAt = (() => {
+      if (options?.delayUntil) {
+        return options.delayUntil;
+      }
+      if (options?.delayMs) {
+        return new Date(Date.now() + Math.max(0, options.delayMs));
+      }
+      return new Date();
+    })();
 
     await this.model.create({
       queue: queueName,
       payload: data,
       state: 'pending',
       attempts: 0,
-      availableAt: new Date(),
+      availableAt,
       createdAt: new Date(),
     });
   }
@@ -257,18 +227,32 @@ class InMemoryDriver implements QueueDriver {
 
   async start(): Promise<void> {
     this.ready = true;
-    logger.warn('No REDIS_URL or MONGODB_URI found; using in-memory queue (non-persistent).');
+    logger.warn('No MONGODB_URI found; using in-memory queue (non-persistent).');
   }
 
   registerProcessor<T>(queueName: string, processor: ProcessorFn<T>): void {
     this.processors.set(queueName, processor as ProcessorFn);
   }
 
-  async enqueue<T>(queueName: string, data: T, _options?: JobsOptions): Promise<void> {
+  async enqueue<T>(queueName: string, data: T, options?: QueueJobOptions): Promise<void> {
     const processor = this.processors.get(queueName);
     if (!processor) {
       throw new Error(`No processor registered for queue ${queueName}`);
     }
+    const delayMs = (() => {
+      if (options?.delayUntil) {
+        return Math.max(0, options.delayUntil.getTime() - Date.now());
+      }
+      if (options?.delayMs) {
+        return Math.max(0, options.delayMs);
+      }
+      return 0;
+    })();
+
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
     await processor(data);
   }
 
@@ -286,9 +270,7 @@ export class QueueManager {
   private driver: QueueDriver;
 
   constructor() {
-    if (process.env.REDIS_URL) {
-      this.driver = new BullDriverAdapter();
-    } else if (process.env.MONGODB_URI) {
+    if (process.env.MONGODB_URI) {
       this.driver = new MongoOutboxDriver();
     } else {
       this.driver = new InMemoryDriver();
@@ -299,7 +281,7 @@ export class QueueManager {
     this.driver.registerProcessor(queueName, processor);
   }
 
-  async enqueue<T>(queueName: string, data: T, options?: JobsOptions): Promise<void> {
+  async enqueue<T>(queueName: string, data: T, options?: QueueJobOptions): Promise<void> {
     await this.driver.enqueue(queueName, data, options);
   }
 
