@@ -209,7 +209,10 @@
 
     renderPayslipAnalytics(data.accounting?.payslipAnalytics || null, data.accounting?.rangeStatus || {});
     renderStatementHighlights(data.accounting?.statementHighlights || null, data.accounting?.rangeStatus || {});
-    renderSpendCategory(data.accounting?.spendByCategory || [], data.accounting?.rangeStatus || {});
+    renderSpendCategory(
+      data.accounting?.spendingCanteorgies || data.accounting?.spendByCategory || [],
+      data.accounting?.rangeStatus || {}
+    );
     renderInflationTrend(data.accounting?.inflationTrend || []);
     renderLargestExpenses(data.accounting?.largestExpenses || [], data.accounting?.rangeStatus || {});
     renderDuplicates(data.accounting?.duplicates || []);
