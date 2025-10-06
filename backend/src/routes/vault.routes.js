@@ -15,6 +15,7 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
+const { DOCS } = require('../data/vaultCatalogue');
 
 const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
 const {
@@ -58,6 +59,29 @@ function extractDisplayNameFromKey(key) {
   const tail = String(key).split('/').pop() || 'file.pdf';
   const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/i);
   return m ? m[3] : tail;
+}
+
+function docMatchesFile(doc, file) {
+  const hay = `${file.name || ''} ${file.collectionName || ''}`.toLowerCase();
+  if (!hay.trim()) return false;
+  const probes = new Set();
+  const key = String(doc.key || '');
+  if (key) probes.add(key.toLowerCase().replace(/_/g, ' '));
+  const label = String(doc.label || '');
+  if (label) probes.add(label.toLowerCase());
+  const aliases = Array.isArray(doc.aliases) ? doc.aliases : [];
+  aliases.forEach(a => probes.add(String(a || '').toLowerCase()));
+  // Individual words from label (>=3 chars) to widen match but avoid noise
+  label
+    .split(/[^a-z0-9]+/i)
+    .map(w => w.toLowerCase())
+    .filter(w => w.length >= 3)
+    .forEach(w => probes.add(w));
+  for (const probe of probes) {
+    if (!probe) continue;
+    if (hay.includes(probe)) return true;
+  }
+  return false;
 }
 
 // ---- collections control doc ----
@@ -116,6 +140,66 @@ router.get('/stats', async (req, res) => {
   const files = objs.filter(o => !String(o.Key).endsWith('/'));
   const totalBytes = files.reduce((n, o) => n + (o.Size || 0), 0);
   res.json({ totalFiles: files.length, totalBytes, totalGB: +(totalBytes / (1024 ** 3)).toFixed(2), lastUpdated: new Date().toISOString() });
+});
+
+router.get('/catalogue', async (req, res) => {
+  const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
+
+  const [cols, objects] = await Promise.all([
+    loadCollectionsDoc(u.id),
+    listAll(userPrefix(u.id))
+  ]);
+
+  const colNameById = new Map(cols.map(c => [String(c.id), String(c.name || '')]));
+
+  const files = objects
+    .filter(o => !String(o.Key).endsWith('/'))
+    .map(o => {
+      const key = String(o.Key);
+      const id = keyToFileId(key);
+      const parts = key.split('/');
+      const collectionId = parts[1] || '';
+      const name = extractDisplayNameFromKey(key);
+      return {
+        id,
+        name,
+        size: o.Size || 0,
+        uploadedAt: o.LastModified ? new Date(o.LastModified).toISOString() : null,
+        collectionId,
+        collectionName: colNameById.get(collectionId) || null,
+        viewUrl: `/api/vault/files/${id}/view`,
+        downloadUrl: `/api/vault/files/${id}/download`
+      };
+    })
+    .sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+
+  const docEntries = DOCS.map(doc => {
+    const matches = files.filter(f => docMatchesFile(doc, f)).map(f => ({
+      id: f.id,
+      name: f.name,
+      size: f.size,
+      uploadedAt: f.uploadedAt,
+      collectionId: f.collectionId,
+      collectionName: f.collectionName,
+      viewUrl: f.viewUrl
+    }));
+
+    return {
+      key: doc.key,
+      label: doc.label,
+      required: !!doc.required,
+      cadence: doc.cadence || null,
+      why: doc.why || '',
+      where: doc.where || '',
+      matches
+    };
+  });
+
+  res.json({
+    required: docEntries.filter(d => d.required),
+    helpful: docEntries.filter(d => !d.required),
+    files
+  });
 });
 
 router.get('/collections', async (req, res) => {

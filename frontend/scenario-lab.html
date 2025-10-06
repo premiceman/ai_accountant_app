@@ -26,10 +26,14 @@
 
     .chat-wrap{
       display:grid;
-      grid-template-columns: 1fr 380px;
+      grid-template-columns: minmax(0,1fr) 360px;
       gap: 16px;
+      align-items: flex-start;
     }
-    @media (max-width: 1199.98px){ .chat-wrap{ grid-template-columns: 1fr; } }
+    @media (max-width: 1199.98px){
+      .chat-wrap{ grid-template-columns: 1fr; }
+      .side-column{ position: relative; top: 0; }
+    }
 
     .chat-card{
       border: 1px solid rgba(0,0,0,.06);
@@ -114,13 +118,18 @@
     .msg.assistant .bubble{ background: var(--assistant-bg); }
     .msg.user .bubble{ background: var(--user-bg); margin-left: auto; }
 
-    .side-card{
+    .side-column{ display:flex; flex-direction:column; gap:16px; position: sticky; top: 100px; }
+    @media (max-width: 1199.98px){ .side-column{ position: static; } }
+
+    .side-card,
+    .doc-card{
       border: 1px solid rgba(0,0,0,.06);
       border-radius: var(--card-radius);
       box-shadow: var(--tile-shadow);
       background: #fff;
     }
-    .side-card .card-body{ padding: 14px; }
+    .side-card .card-body,
+    .doc-card .card-body{ padding: 14px; }
     .example-btn{
       display:block; width:100%; text-align:left;
       border: 1px dashed rgba(0,0,0,.12);
@@ -135,6 +144,36 @@
       background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.6), rgba(255,255,255,0));
       animation: shimmer 1.2s infinite; }
     @keyframes shimmer { 100% { transform: translateX(100%); } }
+
+    .doc-section summary{ cursor:pointer; font-weight:600; margin-bottom:6px; }
+    .doc-section summary::-webkit-details-marker{ display:none; }
+    .doc-section summary::after{ content:'\25BC'; float:right; font-size:.75rem; transition: transform .2s ease; }
+    .doc-section[open] summary::after{ transform: rotate(180deg); }
+    .doc-list{ display:flex; flex-direction:column; gap:10px; }
+    .doc-entry{ border:1px solid rgba(0,0,0,.08); border-radius:12px; padding:10px 12px; background:#fafbff; }
+    .doc-entry-header{ display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+    .doc-entry-title{ font-weight:600; font-size:.95rem; }
+    .doc-entry-meta{ font-size:.75rem; color:var(--muted); }
+    .doc-files{ margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+    .doc-files label{ display:flex; align-items:flex-start; gap:6px; font-size:.85rem; cursor:pointer; }
+    .doc-files input[type='checkbox']{ margin-top:2px; }
+    .doc-empty{ font-size:.8rem; color:var(--muted); }
+    .doc-section-title{ font-weight:600; margin:12px 0 6px; }
+    .doc-badge-row{ display:flex; flex-wrap:wrap; gap:6px; }
+    .doc-badge{ display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:999px; background:var(--mint-ghost); color:var(--mint); font-size:.75rem; text-decoration:none; border:1px solid rgba(16,163,127,.3); }
+    .doc-badge button{ border:0; background:none; padding:0; margin:0; cursor:pointer; color:inherit; }
+    .doc-notices{ margin-top:10px; font-size:.8rem; }
+    .doc-notices .doc-notice{ padding:6px 8px; border-radius:8px; margin-bottom:6px; border:1px solid rgba(0,0,0,.1); background:#fff6f6; color:#b42318; }
+    .doc-notices .doc-notice.success{ background:#f2fbf5; border-color:rgba(16,163,127,.25); color:#0f5132; }
+    .doc-notices .doc-notice a{ color:inherit; text-decoration:underline; }
+    .doc-hint{ font-size:.76rem; color:var(--muted); margin-bottom:6px; }
+    .doc-selected{ margin:10px 0; }
+
+    .bubble{ position:relative; }
+    .bubble-content{ white-space:pre-wrap; word-wrap:break-word; }
+    .bubble-meta{ margin-top:8px; display:none; }
+    .bubble-meta.active{ display:block; }
+    .bubble-meta .doc-badge-row{ gap:4px; }
   </style>
 </head>
 <body>
@@ -181,15 +220,48 @@
         </div>
       </div>
 
-      <!-- Side panel -->
-      <div class="side-card">
-        <div class="card-body">
-          <h6 class="mb-2">Examples</h6>
-          <button class="example-btn mb-2" data-example="What tax implications should I consider when selling vested RSUs in the UK?">Tax implications for RSUs (UK)</button>
-          <button class="example-btn mb-2" data-example="Help me explore scenarios to reduce my capital gains tax if I rebalance my portfolio this year.">CGT scenario planning</button>
-          <button class="example-btn mb-2" data-example="Explain how to categorize transactions from multiple bank accounts for budgeting and analytics.">Transaction categorisation</button>
-          <hr class="my-3" />
-          <div class="small text-muted">Tip: Hold <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line.</div>
+      <!-- Side panels -->
+      <div class="side-column">
+        <div class="side-card">
+          <div class="card-body">
+            <h6 class="mb-2">Examples</h6>
+            <button class="example-btn mb-2" data-example="What tax implications should I consider when selling vested RSUs in the UK?">Tax implications for RSUs (UK)</button>
+            <button class="example-btn mb-2" data-example="Help me explore scenarios to reduce my capital gains tax if I rebalance my portfolio this year.">CGT scenario planning</button>
+            <button class="example-btn mb-2" data-example="Explain how to categorize transactions from multiple bank accounts for budgeting and analytics.">Transaction categorisation</button>
+            <hr class="my-3" />
+            <div class="small text-muted">Tip: Hold <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line.</div>
+          </div>
+        </div>
+
+        <div class="doc-card">
+          <div class="card-body" id="doc-panel">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">Vault documents</h6>
+              <button id="doc-refresh" class="btn btn-link btn-sm px-0" type="button">Refresh</button>
+            </div>
+            <div class="doc-hint">Link required or helpful evidence from your vault to ground the next answer.</div>
+            <div id="doc-loading" class="text-muted small">Loading vault catalogue…</div>
+            <div id="doc-error" class="alert alert-warning d-none"></div>
+            <div id="doc-selected" class="doc-selected d-none">
+              <div class="small text-muted mb-1">Attached to the next reply:</div>
+              <div id="doc-selected-list" class="doc-badge-row"></div>
+            </div>
+            <div id="doc-notices" class="doc-notices d-none"></div>
+            <div id="doc-sections" class="doc-sections d-none">
+              <details class="doc-section" id="doc-required-wrap" open>
+                <summary>Required documents</summary>
+                <div class="doc-list" id="doc-required"></div>
+              </details>
+              <details class="doc-section" id="doc-helpful-wrap">
+                <summary>Helpful documents</summary>
+                <div class="doc-list" id="doc-helpful"></div>
+              </details>
+              <div class="doc-section" id="doc-all-wrapper">
+                <div class="doc-section-title">All vault files</div>
+                <div class="doc-list" id="doc-all"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
