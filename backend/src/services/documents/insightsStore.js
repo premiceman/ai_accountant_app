@@ -23,11 +23,29 @@ function buildAggregates(sources) {
   if (payslip?.metrics) {
     aggregates.income = {
       gross: payslip.metrics.gross ?? null,
+      grossYtd: payslip.metrics.grossYtd ?? null,
       net: payslip.metrics.net ?? null,
+      netYtd: payslip.metrics.netYtd ?? null,
       tax: payslip.metrics.tax ?? null,
       ni: payslip.metrics.ni ?? null,
       pension: payslip.metrics.pension ?? null,
+      studentLoan: payslip.metrics.studentLoan ?? null,
+      totalDeductions: payslip.metrics.totalDeductions ?? null,
+      annualisedGross: payslip.metrics.annualisedGross ?? null,
+      effectiveMarginalRate: payslip.metrics.effectiveMarginalRate ?? null,
+      expectedMarginalRate: payslip.metrics.expectedMarginalRate ?? null,
+      marginalRateDelta: payslip.metrics.marginalRateDelta ?? null,
+      takeHomePercent: payslip.metrics.takeHomePercent ?? null,
+      payFrequency: payslip.metrics.payFrequency || null,
+      taxCode: payslip.metrics.taxCode || null,
+      deductions: Array.isArray(payslip.metrics.deductions) ? payslip.metrics.deductions : [],
+      earnings: Array.isArray(payslip.metrics.earnings) ? payslip.metrics.earnings : [],
+      allowances: Array.isArray(payslip.metrics.allowances) ? payslip.metrics.allowances : [],
+      extractionSource: payslip.metrics.extractionSource || null,
     };
+    if (payslip.metrics.notes) {
+      aggregates.income.notes = payslip.metrics.notes;
+    }
   }
 
   const currentAccount = sources.current_account_statement;
@@ -36,6 +54,8 @@ function buildAggregates(sources) {
       income: currentAccount.metrics.income ?? 0,
       spend: currentAccount.metrics.spend ?? 0,
       categories: currentAccount.metrics.categories || [],
+      topCategories: currentAccount.metrics.topCategories || [],
+      largestExpenses: currentAccount.metrics.largestExpenses || [],
     };
   }
 
@@ -60,9 +80,23 @@ function buildAggregates(sources) {
     };
   }
 
-  if (sources.hmrc_correspondence?.metrics?.taxDue != null) {
+  const hmrcMetrics = sources.hmrc_correspondence?.metrics || {};
+  if (hmrcMetrics.taxDue != null) {
     aggregates.tax = {
-      taxDue: sources.hmrc_correspondence.metrics.taxDue,
+      taxDue: hmrcMetrics.taxDue,
+    };
+  }
+  if ((aggregates.tax?.taxDue == null) && aggregates.income?.tax != null) {
+    aggregates.tax = {
+      ...aggregates.tax,
+      taxDue: aggregates.income.tax,
+    };
+  }
+  if (aggregates.income?.effectiveMarginalRate != null) {
+    aggregates.tax = {
+      ...aggregates.tax,
+      effectiveMarginalRate: aggregates.income.effectiveMarginalRate,
+      expectedMarginalRate: aggregates.income.expectedMarginalRate ?? null,
     };
   }
 
@@ -81,12 +115,21 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
     metrics: insights.metrics || existing.metrics || {},
     narrative: insights.narrative || existing.narrative || [],
     transactions: insights.transactions || existing.transactions || [],
-    files: mergeFileReference(existing.files, fileInfo),
+    files: fileInfo ? mergeFileReference(existing.files, fileInfo) : (existing.files || []),
+  };
+
+  const processing = { ...(current.processing || {}) };
+  processing[key] = {
+    ...(processing[key] || {}),
+    active: false,
+    message: fileInfo?.name ? `Updated from ${fileInfo.name}` : 'Analytics refreshed',
+    updatedAt: new Date(),
   };
 
   const newState = {
     sources,
     aggregates: buildAggregates(sources),
+    processing,
     updatedAt: new Date(),
   };
 
@@ -101,6 +144,30 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   return newState;
 }
 
+async function setInsightsProcessing(userId, key, state) {
+  if (!userId || !key) return null;
+  const path = `documentInsights.processing.${key}`;
+  try {
+    if (!state) {
+      await User.findByIdAndUpdate(userId, { $unset: { [path]: '' } }).exec();
+      return null;
+    }
+    const payload = {
+      active: Boolean(state.active),
+      message: state.message || null,
+      updatedAt: new Date(),
+    };
+    if (state.step) payload.step = state.step;
+    if (state.progress != null) payload.progress = state.progress;
+    await User.findByIdAndUpdate(userId, { $set: { [path]: payload } }).exec();
+    return payload;
+  } catch (err) {
+    console.warn('[documents:insightsStore] failed to set processing state', err);
+    return null;
+  }
+}
+
 module.exports = {
   applyDocumentInsights,
+  setInsightsProcessing,
 };

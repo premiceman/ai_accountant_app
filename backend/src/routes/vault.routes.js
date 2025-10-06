@@ -41,7 +41,7 @@ const {
   summarizeCatalogue,
 } = require('../services/documents/catalogue');
 const { analyseDocument } = require('../services/documents/ingest');
-const { applyDocumentInsights } = require('../services/documents/insightsStore');
+const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
 
 const REQUIRED_KEYS = getKeysByCategory('required');
 const HELPFUL_KEYS = getKeysByCategory('helpful');
@@ -595,47 +595,67 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
 
   const uploaded = [];
   const analyses = [];
-  for (const f of files) {
-    const ok = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
-    if (!ok) return res.status(400).json({ error: 'Only PDF files are allowed' });
+  await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+    active: true,
+    message: `Analysing ${entryForCatalogue?.label || 'document'}…`,
+  });
+  try {
+    for (const f of files) {
+      const ok = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
+      if (!ok) {
+        await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: 'Only PDF files are allowed.' });
+        return res.status(400).json({ error: 'Only PDF files are allowed' });
+      }
 
-    const analysis = await analyseDocument(entryForCatalogue, f.buffer, f.originalname || 'document.pdf');
-    if (!analysis.valid) {
-      return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
+      const analysis = await analyseDocument(entryForCatalogue, f.buffer, f.originalname || 'document.pdf');
+      if (!analysis.valid) {
+        await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
+        return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
+      }
+
+      const date = dayjs().format('YYYYMMDD');
+      const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
+      const key = `${u.id}/${storageCollectionId}/${date}-${randomUUID()}-${safeBase}`;
+      await putObject(key, f.buffer, 'application/pdf');
+      const id = keyToFileId(key);
+      uploaded.push({
+        id,
+        name: safeBase,
+        size: f.size || 0,
+        uploadedAt: new Date().toISOString(),
+        viewUrl: `/api/vault/files/${id}/view`,
+        downloadUrl: `/api/vault/files/${id}/download`,
+        catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
+      });
+      analyses.push({
+        fileId: id,
+        insights: analysis.insights,
+        fileName: safeBase,
+        uploadedAt: new Date(),
+      });
     }
-
-    const date = dayjs().format('YYYYMMDD');
-    const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
-    const key = `${u.id}/${storageCollectionId}/${date}-${randomUUID()}-${safeBase}`;
-    await putObject(key, f.buffer, 'application/pdf');
-    const id = keyToFileId(key);
-    uploaded.push({
-      id,
-      name: safeBase,
-      size: f.size || 0,
-      uploadedAt: new Date().toISOString(),
-      viewUrl: `/api/vault/files/${id}/view`,
-      downloadUrl: `/api/vault/files/${id}/download`,
-      catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
+    if (hasValidCatalogueKey) {
+      await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, storageCollectionId);
+    }
+    for (const item of analyses) {
+      await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
+        id: item.fileId,
+        name: item.fileName,
+        uploadedAt: item.uploadedAt,
+      });
+    }
+    await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+      active: false,
+      message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
     });
-    analyses.push({
-      fileId: id,
-      insights: analysis.insights,
-      fileName: safeBase,
-      uploadedAt: new Date(),
+    res.status(201).json({ uploaded });
+  } catch (err) {
+    await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+      active: false,
+      message: 'Document processing failed',
     });
+    throw err;
   }
-  if (hasValidCatalogueKey) {
-    await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, storageCollectionId);
-  }
-  for (const item of analyses) {
-    await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
-      id: item.fileId,
-      name: item.fileName,
-      uploadedAt: item.uploadedAt,
-    });
-  }
-  res.status(201).json({ uploaded });
 });
 
 router.delete('/files/:id', async (req, res) => {
