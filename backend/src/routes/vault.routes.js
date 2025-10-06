@@ -15,8 +15,6 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
-const { DOCS } = require('../data/vaultCatalogue');
-
 const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
 const {
   GetObjectCommand,
@@ -26,8 +24,14 @@ const {
 } = require('@aws-sdk/client-s3');
 const { getSignedUrl: presign } = require('@aws-sdk/s3-request-presigner');
 
-// NEW: for ZIP streaming
-const archiver = require('archiver');
+// NEW: for ZIP streaming (optional dependency)
+let archiver;
+try {
+  archiver = require('archiver');
+} catch (err) {
+  archiver = null;
+  console.warn('⚠️  archiver not available – collection ZIP exports disabled.');
+}
 
 const User = require('../../models/User');
 const {
@@ -37,6 +41,9 @@ const {
   getHelpfulKeys,
   summarizeCatalogue,
 } = require('../services/documents/catalogue');
+
+const REQUIRED_KEYS = getRequiredKeys();
+const HELPFUL_KEYS = getHelpfulKeys();
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
@@ -118,6 +125,136 @@ async function computeCollectionMetrics(userId, cols) {
   return out;
 }
 
+function normalizePerFile(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [idRaw, info] of Object.entries(raw)) {
+    const id = String(idRaw || '').trim();
+    if (!id) continue;
+    if (!info || typeof info !== 'object') continue;
+    const entry = getCatalogueEntry(info.key);
+    if (!entry) continue;
+    out[id] = {
+      key: entry.key,
+      collectionId: info.collectionId ? String(info.collectionId) : null,
+      uploadedAt: info.uploadedAt || null,
+      name: info.name || null,
+      size: Number.isFinite(info.size) ? info.size : Number(info.size) || 0,
+    };
+  }
+  return out;
+}
+
+function buildStateFromDoc(doc) {
+  const state = doc?.usageStats?.documentsCatalogue || {};
+  const perFile = normalizePerFile(state.perFile || {});
+  const summary = summarizeCatalogue(perFile);
+  return {
+    ...summary,
+    updatedAt: state.updatedAt || doc?.usageStats?.documentsProgressUpdatedAt || null,
+  };
+}
+
+async function persistCatalogueState(userId, perFile) {
+  const summary = summarizeCatalogue(perFile);
+  const nowIso = new Date().toISOString();
+  await User.findByIdAndUpdate(
+    userId,
+    {
+      $set: {
+        'usageStats.documentsCatalogue.perFile': summary.perFile,
+        'usageStats.documentsCatalogue.perKey': summary.perKey,
+        'usageStats.documentsCatalogue.requiredCompleted': summary.requiredCompleted,
+        'usageStats.documentsCatalogue.helpfulCompleted': summary.helpfulCompleted,
+        'usageStats.documentsCatalogue.updatedAt': nowIso,
+        'usageStats.documentsRequiredMet': summary.requiredCompleted,
+        'usageStats.documentsHelpfulMet': summary.helpfulCompleted,
+        'usageStats.documentsRequiredTotal': REQUIRED_KEYS.length,
+        'usageStats.documentsHelpfulTotal': HELPFUL_KEYS.length,
+        'usageStats.documentsProgressUpdatedAt': nowIso,
+      },
+    },
+    { strict: false }
+  ).exec().catch(() => {});
+  return { ...summary, updatedAt: nowIso };
+}
+
+async function updateCatalogueState(userId, mutator) {
+  if (!userId) return null;
+  const doc = await User.findById(userId, 'usageStats.documentsCatalogue').lean();
+  if (!doc) return null;
+  const perFile = normalizePerFile(doc?.usageStats?.documentsCatalogue?.perFile || {});
+  const changed = await mutator(perFile);
+  if (!changed) {
+    return buildStateFromDoc(doc);
+  }
+  return persistCatalogueState(userId, perFile);
+}
+
+async function getUserCatalogueState(userId) {
+  if (!userId) return { perFile: {}, perKey: {}, requiredCompleted: 0, helpfulCompleted: 0, updatedAt: null };
+  const doc = await User.findById(userId, 'usageStats.documentsCatalogue').lean();
+  if (!doc) return { perFile: {}, perKey: {}, requiredCompleted: 0, helpfulCompleted: 0, updatedAt: null };
+  return buildStateFromDoc(doc);
+}
+
+async function recordCatalogueUploads(userId, key, files, collectionId) {
+  if (!userId || !key || !Array.isArray(files) || !files.length) return;
+  await updateCatalogueState(userId, (perFile) => {
+    let changed = false;
+    for (const file of files) {
+      const id = String(file?.id || '').trim();
+      if (!id) continue;
+      perFile[id] = {
+        key,
+        collectionId: collectionId ? String(collectionId) : null,
+        uploadedAt: file?.uploadedAt || new Date().toISOString(),
+        name: file?.name || null,
+        size: Number.isFinite(file?.size) ? file.size : Number(file?.size) || 0,
+      };
+      changed = true;
+    }
+    return changed;
+  });
+}
+
+async function recordCatalogueDeletion(userId, fileId) {
+  if (!userId || !fileId) return;
+  await updateCatalogueState(userId, (perFile) => {
+    const id = String(fileId || '').trim();
+    if (!id || !perFile[id]) return false;
+    delete perFile[id];
+    return true;
+  });
+}
+
+async function replaceCatalogueFileId(userId, oldId, newId, name) {
+  if (!userId || !oldId || !newId) return;
+  await updateCatalogueState(userId, (perFile) => {
+    const oldKey = String(oldId || '').trim();
+    const newKey = String(newId || '').trim();
+    if (!oldKey || !newKey) return false;
+    const info = perFile[oldKey];
+    if (!info) return false;
+    delete perFile[oldKey];
+    perFile[newKey] = {
+      ...info,
+      name: name || info.name || null,
+    };
+    return true;
+  });
+}
+
+async function recordCatalogueRename(userId, fileId, name) {
+  if (!userId || !fileId) return;
+  await updateCatalogueState(userId, (perFile) => {
+    const id = String(fileId || '').trim();
+    if (!id || !perFile[id]) return false;
+    perFile[id] = { ...perFile[id], name: name || perFile[id].name || null };
+    return true;
+  });
+}
+
 // ---- stream helper with Range support ----
 async function streamR2Object(req, res, key, { inline = true, downloadName = null } = {}) {
   const params = { Bucket: BUCKET, Key: key };
@@ -154,9 +291,10 @@ router.get('/stats', async (req, res) => {
 router.get('/catalogue', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
-  const [cols, objects] = await Promise.all([
+  const [cols, objects, state] = await Promise.all([
     loadCollectionsDoc(u.id),
-    listAll(userPrefix(u.id))
+    listAll(userPrefix(u.id)),
+    getUserCatalogueState(u.id)
   ]);
 
   const colNameById = new Map(cols.map(c => [String(c.id), String(c.name || '')]));
@@ -179,35 +317,74 @@ router.get('/catalogue', async (req, res) => {
         viewUrl: `/api/vault/files/${id}/view`,
         downloadUrl: `/api/vault/files/${id}/download`
       };
-    })
-    .sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+    });
 
-  const docEntries = DOCS.map(doc => {
-    const matches = files.filter(f => docMatchesFile(doc, f)).map(f => ({
-      id: f.id,
-      name: f.name,
-      size: f.size,
-      uploadedAt: f.uploadedAt,
-      collectionId: f.collectionId,
-      collectionName: f.collectionName,
-      viewUrl: f.viewUrl
-    }));
+  const fileMap = new Map(files.map(f => [f.id, f]));
 
-    return {
+  const catalogue = [];
+  const entries = {};
+
+  for (const doc of DOCUMENT_CATALOGUE) {
+    const meta = {
       key: doc.key,
       label: doc.label,
       required: !!doc.required,
       cadence: doc.cadence || null,
       why: doc.why || '',
       where: doc.where || '',
-      matches
     };
-  });
+    catalogue.push(meta);
+
+    const tracked = Array.isArray(state?.perKey?.[doc.key]?.files)
+      ? state.perKey[doc.key].files
+      : [];
+
+    const trackedFiles = tracked.map(info => {
+      const stored = fileMap.get(info.id) || {};
+      return {
+        id: info.id,
+        name: info.name || stored.name || 'document.pdf',
+        size: Number.isFinite(info.size) ? info.size : stored.size || 0,
+        uploadedAt: info.uploadedAt || stored.uploadedAt || null,
+        collectionId: info.collectionId || stored.collectionId || null,
+        collectionName: stored.collectionName || null,
+        viewUrl: stored.viewUrl || `/api/vault/files/${info.id}/view`,
+        downloadUrl: stored.downloadUrl || `/api/vault/files/${info.id}/download`,
+      };
+    });
+
+    const trackedIds = new Set(trackedFiles.map(f => f.id));
+    const heuristicMatches = files
+      .filter(f => !trackedIds.has(f.id) && docMatchesFile(doc, f))
+      .map(f => ({
+        id: f.id,
+        name: f.name,
+        size: f.size,
+        uploadedAt: f.uploadedAt,
+        collectionId: f.collectionId,
+        collectionName: f.collectionName,
+        viewUrl: f.viewUrl,
+        downloadUrl: f.downloadUrl,
+      }));
+
+    const combined = [...trackedFiles, ...heuristicMatches]
+      .sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+
+    entries[doc.key] = {
+      files: combined,
+      latestFileId: state?.perKey?.[doc.key]?.latestFileId || combined[0]?.id || null,
+      latestUploadedAt: state?.perKey?.[doc.key]?.latestUploadedAt || combined[0]?.uploadedAt || null,
+    };
+  }
 
   res.json({
-    required: docEntries.filter(d => d.required),
-    helpful: docEntries.filter(d => !d.required),
-    files
+    catalogue,
+    entries,
+    progress: {
+      required: { total: REQUIRED_KEYS.length, completed: state?.requiredCompleted || 0 },
+      helpful: { total: HELPFUL_KEYS.length, completed: state?.helpfulCompleted || 0 },
+      updatedAt: state?.updatedAt || null,
+    },
   });
 });
 
@@ -398,6 +575,7 @@ router.get('/collections/:id/archive', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const colId = String(req.params.id || '');
   if (!colId) return res.status(400).json({ error: 'Missing collection id' });
+  if (!archiver) return res.status(503).json({ error: 'Archive support unavailable' });
 
   // Verify ownership and get collection name for filename
   const cols = await loadCollectionsDoc(u.id);
