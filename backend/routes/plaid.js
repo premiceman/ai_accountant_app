@@ -1,44 +1,39 @@
 // backend/routes/plaid.js
 const express = require('express');
-const { Configuration, PlaidApi, PlaidEnvironments } = require('plaid');
-
 const auth = require('../middleware/auth');
 const PlaidItem = require('../models/PlaidItem');
+const Transaction = require('../models/Transaction');
 const { encrypt, decrypt } = require('../utils/secure');
+const { syncTransactionsForItem } = require('../services/plaidSyncWorker');
+const {
+  getPlaidClient,
+  isSandbox,
+  allowLive,
+  productScopes,
+  countryCodes,
+  syncFreshnessMs,
+} = require('../utils/plaidConfig');
+
+let plaidClient = null;
+function ensureClient() {
+  if (plaidClient) return plaidClient;
+  plaidClient = getPlaidClient();
+  return plaidClient;
+}
 
 const router = express.Router();
 
-const plaidEnvName = (process.env.PLAID_ENV || 'sandbox').toLowerCase();
-const plaidEnv = PlaidEnvironments[plaidEnvName] || PlaidEnvironments.sandbox;
-
-if (!process.env.PLAID_CLIENT_ID || !process.env.PLAID_SECRET) {
-  console.warn('⚠️  PLAID_CLIENT_ID/PLAID_SECRET not fully configured. Plaid routes will fail until set.');
-}
-
-const configuration = new Configuration({
-  basePath: plaidEnv,
-  baseOptions: {
-    headers: {
-      'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID || '',
-      'PLAID-SECRET': process.env.PLAID_SECRET || '',
-    },
-  },
-});
-
-const plaidClient = new PlaidApi(configuration);
-
-const DEFAULT_PRODUCTS = ['transactions'];
-const DEFAULT_COUNTRIES = ['GB', 'US'];
-const SYNC_FRESHNESS_MS = Number(process.env.PLAID_SYNC_FRESHNESS_MS || (5 * 60 * 1000));
-
-function parseList(str, fallback) {
-  if (!str) return fallback;
-  const parts = String(str)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return parts.length ? parts : fallback;
-}
+const sandboxAccounts = (() => {
+  if (!isSandbox) return [];
+  try {
+    // eslint-disable-next-line global-require
+    const { accounts } = require('../../data/accounts.json');
+    return Array.isArray(accounts) ? accounts : [];
+  } catch (err) {
+    console.warn('⚠️  Sandbox accounts seed missing:', err.message);
+    return [];
+  }
+})();
 
 function plaidErrorMessage(err) {
   if (err?.response?.data?.error_message) return err.response.data.error_message;
@@ -119,21 +114,44 @@ function presentItem(doc) {
     lastFailedUpdate: doc.lastFailedUpdate ? doc.lastFailedUpdate.toISOString() : null,
     lastSyncAttempt: doc.lastSyncAttempt ? doc.lastSyncAttempt.toISOString() : null,
     lastSyncedAt: doc.lastSyncedAt ? doc.lastSyncedAt.toISOString() : null,
+    transactionsLastSyncedAt: doc.transactionsLastSyncedAt ? doc.transactionsLastSyncedAt.toISOString() : null,
+    transactionsFreshUntil: doc.transactionsFreshUntil ? doc.transactionsFreshUntil.toISOString() : null,
+    transactionCount: Array.isArray(doc.transactions) ? doc.transactions.length : 0,
     createdAt: doc.createdAt ? doc.createdAt.toISOString() : null,
     updatedAt: doc.updatedAt ? doc.updatedAt.toISOString() : null,
   };
 }
 
 async function syncItemFromPlaid(doc, { accessToken } = {}) {
-  const token = accessToken || decrypt(doc.accessToken);
-  if (!token) throw new Error('Missing Plaid access token for item.');
-
   const now = new Date();
   doc.lastSyncAttempt = now;
 
+  if (isSandbox) {
+    if (!doc.accounts || doc.accounts.length === 0) {
+      doc.accounts = sandboxAccounts.map((account) => ({
+        accountId: account.id,
+        name: account.name,
+        officialName: account.name,
+        mask: account.id ? String(account.id).slice(-4) : null,
+        subtype: account.type,
+        type: account.type,
+        balances: { current: account.balance, available: account.balance },
+        currency: 'GBP',
+      }));
+    }
+    doc.lastSyncedAt = now;
+    doc.status = { code: 'sandbox', description: 'Sandbox seed data' };
+    await doc.save();
+    return doc;
+  }
+
+  const client = ensureClient();
+  const token = accessToken || decrypt(doc.accessToken);
+  if (!client || !token) throw new Error('Missing Plaid client or access token for item.');
+
   const [balanceResp, itemResp] = await Promise.all([
-    plaidClient.accountsBalanceGet({ access_token: token }),
-    plaidClient.itemGet({ access_token: token }),
+    client.accountsBalanceGet({ access_token: token }),
+    client.itemGet({ access_token: token }),
   ]);
 
   const accounts = (balanceResp.data.accounts || []).map(mapAccount).filter(Boolean);
@@ -166,7 +184,7 @@ async function syncItemFromPlaid(doc, { accessToken } = {}) {
 }
 
 async function ensureFreshItem(doc, { force = false } = {}) {
-  const stale = !doc.lastSyncedAt || (Date.now() - doc.lastSyncedAt.getTime()) > SYNC_FRESHNESS_MS;
+  const stale = !doc.lastSyncedAt || (Date.now() - doc.lastSyncedAt.getTime()) > syncFreshnessMs;
   if (!force && !stale) return doc;
   try {
     await syncItemFromPlaid(doc);
@@ -184,11 +202,40 @@ async function ensureFreshItem(doc, { force = false } = {}) {
   return doc;
 }
 
+async function ensureTransactionsFresh(doc, { force = false } = {}) {
+  try {
+    await syncTransactionsForItem(doc, { force });
+  } catch (err) {
+    console.error('Plaid transaction sync failed', err);
+  }
+  return doc;
+}
+
 router.post('/link/launch', auth, async (req, res) => {
   const { mode = 'create', itemId = null } = req.body || {};
   try {
-    const products = parseList(process.env.PLAID_PRODUCTS, DEFAULT_PRODUCTS);
-    const countryCodes = parseList(process.env.PLAID_COUNTRY_CODES, DEFAULT_COUNTRIES);
+    if (!isSandbox && !allowLive) {
+      return res.status(412).json({
+        error: 'Live Plaid link creation disabled. Set PLAID_ENV_OVERRIDE to enable live mode.',
+      });
+    }
+
+    if (isSandbox) {
+      const docs = await PlaidItem.find({ userId: req.user.id }).sort({ createdAt: 1 });
+      const items = [];
+      for (const doc of docs) {
+        await ensureTransactionsFresh(doc, { force: false });
+        items.push(presentItem(doc));
+      }
+      return res.json({
+        token: null,
+        sandbox: true,
+        items,
+        message: 'Sandbox mode: seeded items are returned instead of launching Plaid Link.',
+      });
+    }
+
+    const products = productScopes.link;
 
     const request = {
       user: { client_user_id: String(req.user.id) },
@@ -215,7 +262,11 @@ router.post('/link/launch', auth, async (req, res) => {
       delete request.products; // Plaid requires omitting products when updating an existing item
     }
 
-    const response = await plaidClient.linkTokenCreate(request);
+    const client = ensureClient();
+    if (!client) {
+      return res.status(500).json({ error: 'Plaid client unavailable' });
+    }
+    const response = await client.linkTokenCreate(request);
     res.json({ token: response.data.link_token, expiration: response.data.expiration });
   } catch (err) {
     console.error('Plaid link launch failed', err);
@@ -229,7 +280,52 @@ router.post('/link/exchange', auth, async (req, res) => {
     return res.status(400).json({ error: 'publicToken is required' });
   }
   try {
-    const exchange = await plaidClient.itemPublicTokenExchange({ public_token: publicToken });
+    if (isSandbox) {
+      const seedId = metadata?.institution?.institution_id || 'sandbox';
+      const plaidItemId = `sandbox-${seedId}`;
+
+      let doc;
+      if (mode === 'update' && itemId) {
+        doc = await PlaidItem.findOne({ _id: itemId, userId: req.user.id });
+        if (!doc) return res.status(404).json({ error: 'Plaid connection not found' });
+      } else {
+        doc = await PlaidItem.findOne({ userId: req.user.id, plaidItemId });
+        if (!doc) {
+          doc = new PlaidItem({
+            userId: req.user.id,
+            plaidItemId,
+            accessToken: encrypt(`sandbox-token-${seedId}`),
+          });
+        }
+      }
+
+      if (metadata?.institution) {
+        doc.institution = normalizeInstitution(metadata.institution);
+      } else if (!doc.institution || Object.keys(doc.institution).length === 0) {
+        doc.institution = {
+          id: plaidItemId,
+          name: 'Sandbox Bank',
+        };
+      }
+
+      await syncItemFromPlaid(doc, { accessToken: `sandbox-token-${seedId}` });
+      await ensureTransactionsFresh(doc, { force: true });
+
+      const items = await PlaidItem.find({ userId: req.user.id }).sort({ createdAt: 1 });
+      const hydrated = [];
+      for (const itemDoc of items) {
+        await ensureTransactionsFresh(itemDoc, { force: false });
+        hydrated.push(presentItem(itemDoc));
+      }
+      return res.json({ ok: true, sandbox: true, item: presentItem(doc), items: hydrated });
+    }
+
+    const client = ensureClient();
+    if (!client) {
+      return res.status(500).json({ error: 'Plaid client unavailable' });
+    }
+
+    const exchange = await client.itemPublicTokenExchange({ public_token: publicToken });
     const accessToken = exchange.data.access_token;
     const plaidItemId = exchange.data.item_id;
 
@@ -257,6 +353,7 @@ router.post('/link/exchange', auth, async (req, res) => {
     }
 
     await syncItemFromPlaid(doc, { accessToken });
+    await ensureTransactionsFresh(doc, { force: true });
     res.json({ ok: true, item: presentItem(doc) });
   } catch (err) {
     console.error('Plaid token exchange failed', err);
@@ -270,6 +367,7 @@ router.get('/items', auth, async (req, res) => {
     const items = [];
     for (const doc of docs) {
       await ensureFreshItem(doc);
+      await ensureTransactionsFresh(doc);
       items.push(presentItem(doc));
     }
     res.json({ items });
@@ -285,14 +383,18 @@ router.delete('/items/:id', auth, async (req, res) => {
     const doc = await PlaidItem.findOne({ _id: id, userId: req.user.id });
     if (!doc) return res.status(404).json({ error: 'Plaid connection not found' });
     const token = decrypt(doc.accessToken);
-    if (token) {
-      try {
-        await plaidClient.itemRemove({ access_token: token });
-      } catch (err) {
-        console.warn('Plaid item removal warning', err?.response?.data || err.message);
+    if (!isSandbox && token) {
+      const client = ensureClient();
+      if (client) {
+        try {
+          await client.itemRemove({ access_token: token });
+        } catch (err) {
+          console.warn('Plaid item removal warning', err?.response?.data || err.message);
+        }
       }
     }
     await doc.deleteOne();
+    await Transaction.deleteMany({ itemId: doc._id });
     res.json({ ok: true });
   } catch (err) {
     console.error('Failed to delete Plaid item', err);
