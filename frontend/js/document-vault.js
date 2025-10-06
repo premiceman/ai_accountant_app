@@ -40,11 +40,33 @@
   // Sections
   const elCollectionsSection = $('#collections-section') || $('#collections');
 
+  // Catalogue checklist
+  const elCatalogueTableBody = $('#doc-catalogue-body');
+  const elCatalogueMsg = $('#doc-catalogue-msg');
+  const elDocProgressRequiredBar = $('#doc-progress-required-bar');
+  const elDocProgressRequiredCount = $('#doc-progress-required-count');
+  const elDocProgressHelpfulBar = $('#doc-progress-helpful-bar');
+  const elDocProgressHelpfulCount = $('#doc-progress-helpful-count');
+  const elDocProgressUpdated = $('#doc-progress-updated');
+  const elDocFilesPanel = $('#doc-files-panel');
+  const elDocFilesTitle = $('#doc-files-title');
+  const elDocFilesTableBody = $('#doc-files-table-body');
+  const elDocFilesClose = $('#doc-files-close');
+
   // State
   let collections = [];
   let currentCol = null;
   let _didFallbackStats = false;
   let _didFallbackCollectionMetrics = false;
+  let catalogue = [];
+  let catalogueByKey = new Map();
+  let catalogueEntries = {};
+  let catalogueProgress = {
+    required: { total: 0, completed: 0 },
+    helpful: { total: 0, completed: 0 },
+    updatedAt: null
+  };
+  let activeDocKey = null;
 
   // ---------------- Utilities ----------------
   function toNumber(x) {
@@ -83,6 +105,72 @@
     return `${(b / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${u[i]}`;
   }
   function niceDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
+  function fmtDateTime(d) {
+    try {
+      if (!d) return '—';
+      const date = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(date.getTime())) return '—';
+      return date.toLocaleString();
+    } catch { return '—'; }
+  }
+  function statusBadge(latest, overdue) {
+    if (!latest) return '<span class="badge text-bg-secondary">Missing</span>';
+    if (overdue) return '<span class="badge text-bg-warning">Overdue</span>';
+    return '<span class="badge text-bg-success">Up to date</span>';
+  }
+  function toDateLike(val) {
+    if (!val) return null;
+    if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : val;
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  function isOverdue(cadence, lastInput) {
+    if (!cadence || cadence.adhoc) return false;
+    const last = toDateLike(lastInput);
+    const now = new Date();
+    if (cadence.yearlyBy) {
+      const [mm, dd] = String(cadence.yearlyBy).split('-').map(Number);
+      const due = new Date(now.getFullYear(), (mm ? mm - 1 : 0), dd || 1);
+      if (now <= due) return false;
+      if (!last) return true;
+      return last < due;
+    }
+    if (cadence.months) {
+      if (!last) return true;
+      const next = new Date(last);
+      next.setMonth(next.getMonth() + cadence.months);
+      return now > next;
+    }
+    if (!last) return true;
+    const next = new Date(last);
+    next.setFullYear(next.getFullYear() + 1);
+    return now > next;
+  }
+  function dueLabel(cadence, lastInput) {
+    if (!cadence || cadence.adhoc) return 'As needed';
+    const last = toDateLike(lastInput);
+    const now = new Date();
+    if (cadence.yearlyBy) {
+      const [mm, dd] = String(cadence.yearlyBy).split('-').map(Number);
+      const due = new Date(now.getFullYear(), (mm ? mm - 1 : 0), dd || 1);
+      if (now > due && (!last || last < due)) {
+        return `Overdue (was due ${due.toLocaleDateString()})`;
+      }
+      return `Due by ${due.toLocaleDateString()}`;
+    }
+    if (cadence.months) {
+      if (!last) return 'Overdue (no upload yet)';
+      const next = new Date(last);
+      next.setMonth(next.getMonth() + cadence.months);
+      if (now > next) return `Overdue (was due ${next.toLocaleDateString()})`;
+      return `Due ${next.toLocaleDateString()}`;
+    }
+    if (!last) return 'Overdue (no upload yet)';
+    const next = new Date(last);
+    next.setFullYear(next.getFullYear() + 1);
+    if (now > next) return `Overdue (was due ${next.toLocaleDateString()})`;
+    return `Due ${next.toLocaleDateString()}`;
+  }
 
   // Normalize server payloads
   function normalizeStats(s) {
@@ -115,7 +203,8 @@
       size: pickNumber(f.size, f.bytes, f.length, f.fileSize),
       uploadedAt: pickString(f.uploadedAt, f.createdAt, f.timeCreated, f.timestamp),
       viewUrl: pickString(f.viewUrl, f.previewUrl, f.url, f.href),
-      downloadUrl: pickString(f.downloadUrl, f.url, f.href)
+      downloadUrl: pickString(f.downloadUrl, f.url, f.href),
+      catalogueKey: pickString(f.catalogueKey, f.catalog, f.docKey)
     }));
   }
 
@@ -192,12 +281,241 @@
     }
   }
 
+  // ---------------- Catalogue checklist ----------------
+  function updateCatalogueProgressDisplay() {
+    const req = catalogueProgress?.required || { total: 0, completed: 0 };
+    const help = catalogueProgress?.helpful || { total: 0, completed: 0 };
+    const reqPct = req.total ? Math.round((req.completed / req.total) * 100) : 0;
+    const helpPct = help.total ? Math.round((help.completed / help.total) * 100) : 0;
+
+    if (elDocProgressRequiredBar) {
+      elDocProgressRequiredBar.style.width = `${Math.max(0, Math.min(100, reqPct))}%`;
+      elDocProgressRequiredBar.setAttribute('aria-valuenow', String(reqPct));
+    }
+    if (elDocProgressRequiredCount) {
+      elDocProgressRequiredCount.textContent = `${req.completed} / ${req.total}`;
+    }
+    if (elDocProgressHelpfulBar) {
+      elDocProgressHelpfulBar.style.width = `${Math.max(0, Math.min(100, helpPct))}%`;
+      elDocProgressHelpfulBar.setAttribute('aria-valuenow', String(helpPct));
+    }
+    if (elDocProgressHelpfulCount) {
+      elDocProgressHelpfulCount.textContent = `${help.completed} / ${help.total}`;
+    }
+    if (elDocProgressUpdated) {
+      elDocProgressUpdated.textContent = catalogueProgress?.updatedAt
+        ? `Updated ${niceDate(catalogueProgress.updatedAt)}`
+        : 'Updated —';
+    }
+  }
+
+  function renderCatalogue() {
+    updateCatalogueProgressDisplay();
+    if (!elCatalogueTableBody) return;
+
+    if (!Array.isArray(catalogue) || !catalogue.length) {
+      elCatalogueTableBody.innerHTML = '<tr><td colspan="8" class="text-muted small">No document checklist configured.</td></tr>';
+      return;
+    }
+
+    elCatalogueTableBody.innerHTML = '';
+    for (const item of catalogue) {
+      const state = catalogueEntries[item.key] || {};
+      const files = Array.isArray(state.files) ? state.files : [];
+      const latest = files[0] || null;
+      const lastUploaded = latest?.uploadedAt ? toDateLike(latest.uploadedAt) : null;
+      const overdue = isOverdue(item.cadence, lastUploaded);
+
+      const row = document.createElement('tr');
+      row.dataset.key = item.key;
+      if (activeDocKey && activeDocKey === item.key) row.classList.add('table-active');
+      row.innerHTML = `
+        <td class="fw-semibold">${escapeHtml(item.label)}</td>
+        <td>${item.required ? '<span class="badge text-bg-danger">Required</span>' : '<span class="badge text-bg-secondary">Helpful</span>'}</td>
+        <td>${statusBadge(latest, overdue)}</td>
+        <td>${lastUploaded ? fmtDateTime(lastUploaded) : '—'}</td>
+        <td>${dueLabel(item.cadence, lastUploaded)}</td>
+        <td class="doc-why small text-muted">${escapeHtml(item.why)}</td>
+        <td class="doc-where small text-muted">${escapeHtml(item.where)}</td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm" role="group" aria-label="Actions">
+            <button type="button" class="btn btn-primary" data-doc-action="upload"><i class="bi bi-upload me-1"></i>Upload</button>
+            <button type="button" class="btn btn-outline-secondary" data-doc-action="view"><i class="bi bi-eye me-1"></i>View</button>
+            <button type="button" class="btn btn-outline-danger" data-doc-action="delete-latest" ${latest ? '' : 'disabled'}><i class="bi bi-trash3 me-1"></i>Delete</button>
+          </div>
+        </td>
+      `;
+
+      const uploadBtn = row.querySelector('[data-doc-action="upload"]');
+      const viewBtn = row.querySelector('[data-doc-action="view"]');
+      const deleteBtn = row.querySelector('[data-doc-action="delete-latest"]');
+
+      on(uploadBtn, 'click', () => triggerCatalogueUpload(item.key));
+      on(viewBtn, 'click', (e) => { e.preventDefault(); renderCatalogueFiles(item.key); });
+      if (deleteBtn && latest) {
+        on(deleteBtn, 'click', async () => {
+          if (!confirm('Delete the most recent upload for this document?')) return;
+          const resp = await Auth.fetch(`/api/vault/files/${latest.id}`, { method: 'DELETE' });
+          if (!resp.ok) {
+            const t = await resp.text().catch(() => '');
+            alert(t || 'Delete failed');
+            return;
+          }
+          await Promise.all([loadStats(), loadCollections(), loadCatalogue()]);
+          await ensureMetricsAndStats();
+          if (activeDocKey === item.key) {
+            renderCatalogueFiles(item.key);
+          }
+          setPreviewSrc('about:blank');
+        });
+      }
+
+      elCatalogueTableBody.appendChild(row);
+    }
+
+    if (elCatalogueMsg) {
+      elCatalogueMsg.textContent = currentCol
+        ? ''
+        : 'Select a collection on the left before uploading checklist items.';
+    }
+
+    if (activeDocKey) {
+      renderCatalogueFiles(activeDocKey);
+    }
+  }
+
+  function renderCatalogueFiles(key) {
+    if (!elDocFilesPanel || !elDocFilesTableBody) return;
+    activeDocKey = key;
+    const state = catalogueEntries[key] || {};
+    const files = Array.isArray(state.files) ? state.files : [];
+    const item = catalogueByKey.get(key);
+
+    if (elDocFilesTitle) {
+      elDocFilesTitle.textContent = item ? `Uploads — ${item.label}` : 'Uploads';
+    }
+
+    elDocFilesPanel.classList.remove('d-none');
+
+    if (!files.length) {
+      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">No uploads yet.</td></tr>';
+      return;
+    }
+
+    elDocFilesTableBody.innerHTML = '';
+    for (const file of files) {
+      const row = document.createElement('tr');
+      const collectionName = collections.find(c => String(c.id) === String(file.collectionId))?.name || '—';
+      row.innerHTML = `
+        <td>${escapeHtml(file.name || 'document.pdf')}</td>
+        <td>${fmtDateTime(file.uploadedAt)}</td>
+        <td>${fmtBytes(file.size)}</td>
+        <td>${escapeHtml(collectionName)}</td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-secondary" data-file-action="preview" title="Preview"><i class="bi bi-eye"></i></button>
+            <button type="button" class="btn btn-outline-secondary" data-file-action="download" title="Download"><i class="bi bi-download"></i></button>
+            <button type="button" class="btn btn-outline-danger" data-file-action="delete" title="Delete"><i class="bi bi-trash"></i></button>
+          </div>
+        </td>
+      `;
+
+      on(row.querySelector('[data-file-action="preview"]'), 'click', () => {
+        const url = file.viewUrl || file.downloadUrl;
+        if (!url) return alert('No preview URL available.');
+        previewFile(url, file.name);
+      });
+      on(row.querySelector('[data-file-action="download"]'), 'click', () => {
+        const url = file.downloadUrl || file.viewUrl;
+        if (!url) return alert('No download URL available.');
+        downloadFile(url, file.name);
+      });
+      on(row.querySelector('[data-file-action="delete"]'), 'click', async () => {
+        if (!confirm('Delete this file?')) return;
+        const resp = await Auth.fetch(`/api/vault/files/${file.id}`, { method: 'DELETE' });
+        if (!resp.ok) {
+          const t = await resp.text().catch(() => '');
+          alert(t || 'Delete failed');
+          return;
+        }
+        await Promise.all([loadStats(), loadCollections(), loadCatalogue()]);
+        await ensureMetricsAndStats();
+        renderCatalogueFiles(key);
+        setPreviewSrc('about:blank');
+      });
+
+      elDocFilesTableBody.appendChild(row);
+    }
+  }
+
+  function closeCatalogueFiles() {
+    activeDocKey = null;
+    if (elDocFilesPanel) elDocFilesPanel.classList.add('d-none');
+    if (elDocFilesTableBody) {
+      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">Select a document to preview uploads.</td></tr>';
+    }
+    renderCatalogue();
+  }
+
+  function triggerCatalogueUpload(key) {
+    if (!currentCol) {
+      alert('Please select a collection on the left before uploading.');
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.jpg,.jpeg,.png,.csv,.heic,.webp';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        await uploadFilesToCurrent([file], { catalogueKey: key });
+        if (activeDocKey === key) renderCatalogueFiles(key);
+      } catch (err) {
+        alert(err?.message || 'Upload failed');
+      } finally {
+        input.value = '';
+      }
+    };
+    input.click();
+  }
+
   // ---------------- API ----------------
   async function loadStats() {
     const r = await Auth.fetch('/api/vault/stats');
     if (!r.ok) return;
     const s = await r.json().catch(()=> ({}));
     updateKPIsFromStats(s);
+  }
+
+  async function loadCatalogue() {
+    try {
+      const r = await Auth.fetch('/api/vault/catalogue');
+      if (!r.ok) throw new Error('Failed to load catalogue');
+      const j = await r.json().catch(() => ({}));
+      catalogue = Array.isArray(j.catalogue) ? j.catalogue : [];
+      catalogueByKey = new Map(catalogue.map(item => [item.key, item]));
+      catalogueEntries = j.entries && typeof j.entries === 'object' ? j.entries : {};
+      const progress = j.progress && typeof j.progress === 'object' ? j.progress : {};
+      catalogueProgress = {
+        required: progress.required || { total: 0, completed: 0 },
+        helpful: progress.helpful || { total: 0, completed: 0 },
+        updatedAt: progress.updatedAt || null
+      };
+      renderCatalogue();
+    } catch (err) {
+      console.error('[document-vault] loadCatalogue failed', err);
+      catalogue = [];
+      catalogueEntries = {};
+      catalogueByKey = new Map();
+      catalogueProgress = {
+        required: { total: 0, completed: 0 },
+        helpful: { total: 0, completed: 0 },
+        updatedAt: null
+      };
+      if (elCatalogueMsg) elCatalogueMsg.textContent = 'Failed to load document checklist.';
+      renderCatalogue();
+    }
   }
 
   async function loadCollections() {
@@ -214,6 +532,7 @@
 
     renderCollections();
     if (elCollectionCount) elCollectionCount.textContent = String(collections.length);
+    if (activeDocKey) renderCatalogueFiles(activeDocKey);
   }
 
   function renderCollections(filterText = '') {
@@ -307,6 +626,7 @@
       elCollectionsSection.style.display = 'none';
     }
     await loadFiles();
+    renderCatalogue();
   }
 
   function exitCollectionView() {
@@ -319,6 +639,7 @@
     if (elCollectionsSection && elCollectionsSection.id === 'collections-section') {
       elCollectionsSection.style.display = '';
     }
+    renderCatalogue();
   }
 
   async function loadFiles() {
@@ -338,13 +659,17 @@
         const row = document.createElement('div');
         row.className = 'doc-row';
         row.dataset.id = f.id;
+        const docEntry = f.catalogueKey ? catalogueByKey.get(f.catalogueKey) : null;
+        const docBadge = docEntry
+          ? ` <span class="badge bg-light text-secondary border ms-1">${escapeHtml(docEntry.label)}</span>`
+          : '';
 
         row.innerHTML = `
           <div class="doc-main">
             <i class="bi bi-file-earmark-text text-primary"></i>
             <div class="min-w-0">
               <div class="doc-title" data-filename>${escapeHtml(f.name)}</div>
-              <div class="doc-sub">${fmtBytes(f.size)} · ${niceDate(f.uploadedAt)}</div>
+              <div class="doc-sub">${fmtBytes(f.size)} · ${niceDate(f.uploadedAt)}${docBadge}</div>
             </div>
           </div>
           <div class="doc-actions">
@@ -368,8 +693,9 @@
           if (!confirm('Delete this file?')) return;
           const del = await Auth.fetch(`/api/vault/files/${f.id}`, { method: 'DELETE' });
           if (!del.ok) { const t = await del.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
-          await Promise.all([loadFiles(), loadStats(), loadCollections()]);
+          await Promise.all([loadFiles(), loadStats(), loadCollections(), loadCatalogue()]);
           await ensureMetricsAndStats();
+          if (activeDocKey) renderCatalogueFiles(activeDocKey);
           setPreviewSrc('about:blank');
         });
 
@@ -400,6 +726,8 @@
 
               titleEl.textContent = f.name;
               row.dataset.id = f.id;
+              await loadCatalogue();
+              if (activeDocKey) renderCatalogueFiles(activeDocKey);
             } catch (e) {
               console.error(e);
               alert('Rename failed');
@@ -429,17 +757,25 @@
     return normalizeCollection(j.collection || j);
   }
 
-  async function uploadFilesToCurrent(files) {
+  async function uploadFilesToCurrent(filesLike, opts = {}) {
     if (!currentCol) {
       alert('Please select a collection first.');
       return;
     }
-    if (!files || !files.length) return;
+    const files = filesLike instanceof FileList
+      ? Array.from(filesLike)
+      : Array.isArray(filesLike)
+        ? filesLike
+        : filesLike
+          ? [filesLike]
+          : [];
+    if (!files.length) return;
 
     const fd = new FormData();
     for (const file of files) {
       fd.append('files', file);
     }
+    if (opts.catalogueKey) fd.append('catalogueKey', opts.catalogueKey);
 
     const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, {
       method: 'POST',
@@ -450,8 +786,13 @@
       alert(t || 'Upload failed');
       return;
     }
-    await Promise.all([loadFiles(), loadStats(), loadCollections()]);
+    const tasks = [loadFiles(), loadStats(), loadCollections()];
+    if (opts.catalogueKey) tasks.push(loadCatalogue());
+    await Promise.all(tasks);
     await ensureMetricsAndStats();
+    if (opts.catalogueKey && activeDocKey === opts.catalogueKey) {
+      renderCatalogueFiles(opts.catalogueKey);
+    }
   }
 
   // ---------------- Front-end fallbacks for counters ----------------
@@ -529,6 +870,8 @@
   }
 
   // ---------------- Event wiring ----------------
+  on(elDocFilesClose, 'click', (e) => { e.preventDefault(); closeCatalogueFiles(); });
+
   on(elCollectionSearch, 'input', (e) => renderCollections(e.target.value || ''));
 
   on(elNewCollectionBtn, 'click', () => {
@@ -582,7 +925,7 @@
       await Auth.requireAuth();
       Auth.setBannerTitle && Auth.setBannerTitle('Document Vault');
 
-      await Promise.all([loadStats(), loadCollections()]);
+      await Promise.all([loadStats(), loadCollections(), loadCatalogue()]);
       if (elBackToCollections) elBackToCollections.classList.add('d-none');
       setPreviewSrc('about:blank');
 

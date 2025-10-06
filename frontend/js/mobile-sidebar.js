@@ -15,7 +15,6 @@
 
   const TILE_COPY = {
     'home.html': 'Command centre for insights and AI commentary.',
-    'documents.html': 'Organise statements, receipts, and exports.',
     'compensation.html': 'Model remuneration paths and equity upside.',
     'wealth-lab.html': 'Experiment with investments and long-term goals.',
     'billing.html': 'Manage your subscription, invoices, and payments.',
