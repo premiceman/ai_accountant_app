@@ -1,0 +1,11 @@
+{
+  "name": "ai-accountant-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "worker:build": "npm --prefix services/worker run build",
+    "worker:start": "npm --prefix services/worker run start",
+    "worker:start:dev": "npm --prefix services/worker run start:dev",
+    "worker:test": "npm --prefix services/worker run test"
+  }
+}
