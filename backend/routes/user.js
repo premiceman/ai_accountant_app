@@ -275,8 +275,55 @@ function normaliseContributions(c = {}) {
   return { monthly: Number(c.monthly || 0) };
 }
 
-function decorateWealth(plan) {
+function decorateWealth(plan, docInsights = {}) {
   const data = normalisePlanForResponse(plan);
+  const aggregates = docInsights.aggregates || {};
+
+  const autoAssets = [];
+  if (aggregates.savings?.balance != null) {
+    autoAssets.push(normaliseAsset({
+      id: 'doc-savings',
+      name: 'Savings & ISA (documents)',
+      value: Number(aggregates.savings.balance),
+      category: 'cash',
+      notes: 'Auto-imported from savings and ISA statements.',
+    }));
+  }
+  if (aggregates.pension?.balance != null) {
+    autoAssets.push(normaliseAsset({
+      id: 'doc-pension',
+      name: 'Pension (documents)',
+      value: Number(aggregates.pension.balance),
+      category: 'pension',
+      notes: 'Auto-imported from pension statements.',
+    }));
+  }
+
+  autoAssets.forEach((asset) => {
+    const idx = data.assets.findIndex((item) => item.id === asset.id);
+    if (idx >= 0) {
+      data.assets[idx] = { ...data.assets[idx], ...asset };
+    } else {
+      data.assets.push(asset);
+    }
+  });
+
+  if (!data.contributions || data.contributions.monthly == null) {
+    data.contributions = { monthly: 0 };
+  }
+  if (aggregates.cashflow?.income != null && aggregates.cashflow?.spend != null) {
+    const free = Number(aggregates.cashflow.income) - Number(aggregates.cashflow.spend);
+    if (free > 0) data.contributions.monthly = Math.round(free);
+  }
+
+  if (!data.summary) data.summary = {};
+  if (!data.summary.affordability) data.summary.affordability = {};
+  if (aggregates.income?.net != null) data.summary.affordability.monthlyIncome = Number(aggregates.income.net);
+  if (aggregates.cashflow?.spend != null) data.summary.affordability.monthlySpend = Number(aggregates.cashflow.spend);
+  if (aggregates.cashflow?.income != null && aggregates.cashflow?.spend != null) {
+    data.summary.affordability.freeCashflow = Number(aggregates.cashflow.income) - Number(aggregates.cashflow.spend);
+  }
+
   if (!data.summary || !Object.keys(data.summary).length) {
     const computed = computeWealth(data);
     data.summary = computed.summary;
@@ -373,6 +420,11 @@ function publicUser(u) {
       documentsRequiredCompleted: usage.documentsRequiredCompleted || 0,
       documentsRequiredTotal: usage.documentsRequiredTotal || 0,
       documentsOutstanding: usage.documentsOutstanding || 0,
+      documentsHelpfulMet: usage.documentsHelpfulMet || 0,
+      documentsHelpfulTotal: usage.documentsHelpfulTotal || 0,
+      documentsAnalyticsMet: usage.documentsAnalyticsMet || 0,
+      documentsAnalyticsTotal: usage.documentsAnalyticsTotal || 0,
+      documentsProgressUpdatedAt: usage.documentsProgressUpdatedAt || null,
       moneySavedEstimate: usage.moneySavedEstimate || 0,
       moneySavedPrevSpend: usage.moneySavedPrevSpend || 0,
       moneySavedChangePct:
@@ -388,7 +440,8 @@ function publicUser(u) {
       updatedAt: usage.updatedAt || null
     },
     salaryNavigator: decorateSalaryNavigator(u.salaryNavigator || {}),
-    wealthPlan: decorateWealth(u.wealthPlan || {}),
+    wealthPlan: decorateWealth(u.wealthPlan || {}, u.documentInsights || {}),
+    documentInsights: u.documentInsights || {},
     integrations: u.integrations || [],
     eulaAcceptedAt: u.eulaAcceptedAt || null,
     eulaVersion: u.eulaVersion || null,
@@ -695,7 +748,7 @@ router.put('/wealth-plan', auth, async (req, res) => {
     user.wealthPlan = plan;
     user.markModified('wealthPlan');
     await user.save();
-    res.json({ wealthPlan: decorateWealth(user.wealthPlan) });
+    res.json({ wealthPlan: decorateWealth(user.wealthPlan, user.documentInsights || {}) });
   } catch (err) {
     console.error('PUT /user/wealth-plan error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -715,7 +768,7 @@ router.post('/wealth-plan/rebuild', auth, async (req, res) => {
     user.wealthPlan = plan;
     user.markModified('wealthPlan');
     await user.save();
-    res.json({ wealthPlan: decorateWealth(user.wealthPlan) });
+    res.json({ wealthPlan: decorateWealth(user.wealthPlan, user.documentInsights || {}) });
   } catch (err) {
     console.error('POST /user/wealth-plan/rebuild error:', err);
     res.status(500).json({ error: 'Server error' });
@@ -730,7 +783,7 @@ router.get('/wealth-plan/export', auth, async (req, res) => {
     }
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const plan = decorateWealth(user.wealthPlan || {});
+    const plan = decorateWealth(user.wealthPlan || {}, user.documentInsights || {});
     const doc = new PDFDocument({ margin: 48 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="phloat-wealth-plan.pdf"');

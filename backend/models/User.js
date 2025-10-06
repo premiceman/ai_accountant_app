@@ -128,14 +128,21 @@ const UserSchema = new mongoose.Schema({
     documentsUploaded:   { type: Number, default: 0 },
     documentsRequiredMet:{ type: Number, default: 0 },
     documentsHelpfulMet: { type: Number, default: 0 },
+    documentsAnalyticsMet: { type: Number, default: 0 },
+    documentsRequiredCompleted: { type: Number, default: 0 },
+    documentsHelpfulCompleted: { type: Number, default: 0 },
+    documentsAnalyticsCompleted: { type: Number, default: 0 },
     documentsRequiredTotal: { type: Number, default: 0 },
     documentsHelpfulTotal:  { type: Number, default: 0 },
+    documentsAnalyticsTotal: { type: Number, default: 0 },
     documentsProgressUpdatedAt: { type: Date, default: null },
     documentsCatalogue: { type: mongoose.Schema.Types.Mixed, default: {} },
     moneySavedEstimate:  { type: Number, default: 0 },
     hmrcFilingsComplete: { type: Number, default: 0 },
     minutesActive:       { type: Number, default: 0 }
   },
+
+  documentInsights: { type: mongoose.Schema.Types.Mixed, default: {} },
 
   salaryNavigator: { type: SalaryNavigatorSchema, default: () => ({}) },
   wealthPlan:      { type: WealthPlanSchema, default: () => ({}) },

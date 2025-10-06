@@ -37,16 +37,24 @@ const User = require('../../models/User');
 const {
   catalogue: DOCUMENT_CATALOGUE,
   getCatalogueEntry,
-  getRequiredKeys,
-  getHelpfulKeys,
+  getKeysByCategory,
   summarizeCatalogue,
 } = require('../services/documents/catalogue');
+const { analyseDocument } = require('../services/documents/ingest');
+const { applyDocumentInsights } = require('../services/documents/insightsStore');
 
-const REQUIRED_KEYS = getRequiredKeys();
-const HELPFUL_KEYS = getHelpfulKeys();
+const REQUIRED_KEYS = getKeysByCategory('required');
+const HELPFUL_KEYS = getKeysByCategory('helpful');
+const ANALYTICS_KEYS = getKeysByCategory('analytics');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
+
+const DEFAULT_COLLECTIONS = [
+  { id: 'default-required', name: 'Required evidence', locked: true, category: 'required' },
+  { id: 'default-analytics', name: 'Analytics sources', locked: true, category: 'analytics' },
+  { id: 'default-helpful', name: 'Helpful extras', locked: true, category: 'helpful' },
+];
 
 // ---- auth ----
 function getUser(req) {
@@ -68,6 +76,29 @@ function fileIdToKey(id) { return b64urlDecode(id); }
 const userPrefix = (userId) => `${userId}/`;
 const collectionsKey = (userId) => `${userId}/_collections.json`;
 const collectionPrefix = (userId, colId) => `${userId}/${colId}/`;
+
+function catalogueCollectionId(key) {
+  return `catalogue-${key}`;
+}
+
+async function ensureCatalogueStorageCollection(userId, key) {
+  const entry = getCatalogueEntry(key);
+  const storageId = catalogueCollectionId(key);
+  const cols = await loadCollectionsDoc(userId);
+  if (!cols.some((c) => c.id === storageId)) {
+    cols.push({
+      id: storageId,
+      name: `${entry?.label || key} storage`,
+      system: true,
+      hidden: true,
+      locked: true,
+      category: null,
+    });
+    await saveCollectionsDoc(userId, cols);
+    await putObject(collectionPrefix(userId, storageId), Buffer.alloc(0), 'application/x-directory').catch(() => {});
+  }
+  return storageId;
+}
 
 // Extract a user-facing filename from an R2 object key tail.
 // If the tail matches YYYYMMDD-UUID-name.pdf, return just "name.pdf".
@@ -107,20 +138,70 @@ async function loadCollectionsDoc(userId) {
     const res = await fetch(url);
     if (!res.ok) throw new Error('not found');
     const json = await res.json();
-    const arr = Array.isArray(json?.collections) ? json.collections : Array.isArray(json) ? json : [];
-    return arr.map(c => ({ id: String(c.id || c._id || c.collectionId || ''), name: String(c.name || c.title || 'Untitled') })).filter(c => c.id);
-  } catch { return []; }
+    const arrRaw = Array.isArray(json?.collections) ? json.collections : Array.isArray(json) ? json : [];
+    const cleaned = arrRaw
+      .map((c) => ({
+        id: String(c.id || c._id || c.collectionId || ''),
+        name: String(c.name || c.title || 'Untitled'),
+        locked: Boolean(c.locked),
+        category: c.category ? String(c.category) : null,
+        system: Boolean(c.system),
+        hidden: Boolean(c.hidden),
+      }))
+      .filter((c) => c.id);
+
+    const existingIds = new Set(cleaned.map((c) => c.id));
+    let mutated = false;
+    for (const def of DEFAULT_COLLECTIONS) {
+      if (existingIds.has(def.id)) continue;
+      cleaned.push({ ...def, system: true, hidden: false });
+      mutated = true;
+    }
+    if (mutated) await saveCollectionsDoc(userId, cleaned);
+    return cleaned;
+  } catch {
+    // ensure defaults persisted if doc missing
+    await saveCollectionsDoc(userId, DEFAULT_COLLECTIONS.map((c) => ({ ...c, system: true, hidden: false }))).catch(() => {});
+    return DEFAULT_COLLECTIONS.map((c) => ({ ...c, system: true, hidden: false }));
+  }
 }
 async function saveCollectionsDoc(userId, arr) {
   const payload = Buffer.from(JSON.stringify({ collections: arr }, null, 2));
   await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: collectionsKey(userId), Body: payload, ContentType: 'application/json' }));
 }
 async function computeCollectionMetrics(userId, cols) {
+  const state = await getUserCatalogueState(userId);
   const out = [];
   for (const c of cols) {
+    if (c.hidden) continue;
+    if (c.category) {
+      const categoryKey = String(c.category).toLowerCase();
+      const perFileEntries = Object.entries(state.perFile || {})
+        .map(([id, info]) => ({ id, info }))
+        .filter(({ info }) => Array.isArray(info.categories) && info.categories.includes(categoryKey));
+      const bytes = perFileEntries.reduce((total, { info }) => total + (Number(info.size) || 0), 0);
+      out.push({
+        id: c.id,
+        name: c.name,
+        fileCount: perFileEntries.length,
+        bytes,
+        locked: !!c.locked,
+        category: c.category,
+        system: true,
+      });
+      continue;
+    }
     const objs = await listAll(collectionPrefix(userId, c.id));
     const files = objs.filter(o => !String(o.Key).endsWith('/'));
-    out.push({ id: c.id, name: c.name, fileCount: files.length, bytes: files.reduce((n, o) => n + (o.Size || 0), 0) });
+    out.push({
+      id: c.id,
+      name: c.name,
+      fileCount: files.length,
+      bytes: files.reduce((n, o) => n + (o.Size || 0), 0),
+      locked: !!c.locked,
+      category: c.category || null,
+      system: !!c.system,
+    });
   }
   return out;
 }
@@ -140,6 +221,9 @@ function normalizePerFile(raw) {
       uploadedAt: info.uploadedAt || null,
       name: info.name || null,
       size: Number.isFinite(info.size) ? info.size : Number(info.size) || 0,
+      categories: Array.isArray(info.categories) && info.categories.length
+        ? Array.from(new Set(info.categories.map((c) => String(c || '').toLowerCase()).filter(Boolean)))
+        : entry.categories || [],
     };
   }
   return out;
@@ -166,11 +250,18 @@ async function persistCatalogueState(userId, perFile) {
         'usageStats.documentsCatalogue.perKey': summary.perKey,
         'usageStats.documentsCatalogue.requiredCompleted': summary.requiredCompleted,
         'usageStats.documentsCatalogue.helpfulCompleted': summary.helpfulCompleted,
+        'usageStats.documentsCatalogue.analyticsCompleted': summary.analyticsCompleted,
+        'usageStats.documentsCatalogue.categories': summary.categories,
         'usageStats.documentsCatalogue.updatedAt': nowIso,
         'usageStats.documentsRequiredMet': summary.requiredCompleted,
+        'usageStats.documentsRequiredCompleted': summary.requiredCompleted,
         'usageStats.documentsHelpfulMet': summary.helpfulCompleted,
+        'usageStats.documentsHelpfulCompleted': summary.helpfulCompleted,
+        'usageStats.documentsAnalyticsMet': summary.analyticsCompleted,
+        'usageStats.documentsAnalyticsCompleted': summary.analyticsCompleted,
         'usageStats.documentsRequiredTotal': REQUIRED_KEYS.length,
         'usageStats.documentsHelpfulTotal': HELPFUL_KEYS.length,
+        'usageStats.documentsAnalyticsTotal': ANALYTICS_KEYS.length,
         'usageStats.documentsProgressUpdatedAt': nowIso,
       },
     },
@@ -200,6 +291,7 @@ async function getUserCatalogueState(userId) {
 
 async function recordCatalogueUploads(userId, key, files, collectionId) {
   if (!userId || !key || !Array.isArray(files) || !files.length) return;
+  const entry = getCatalogueEntry(key);
   await updateCatalogueState(userId, (perFile) => {
     let changed = false;
     for (const file of files) {
@@ -211,6 +303,7 @@ async function recordCatalogueUploads(userId, key, files, collectionId) {
         uploadedAt: file?.uploadedAt || new Date().toISOString(),
         name: file?.name || null,
         size: Number.isFinite(file?.size) ? file.size : Number(file?.size) || 0,
+        categories: entry?.categories || [],
       };
       changed = true;
     }
@@ -328,10 +421,12 @@ router.get('/catalogue', async (req, res) => {
     const meta = {
       key: doc.key,
       label: doc.label,
-      required: !!doc.required,
+      required: doc.categories?.includes?.('required') || !!doc.required,
+      analytics: doc.categories?.includes?.('analytics') || false,
       cadence: doc.cadence || null,
       why: doc.why || '',
       where: doc.where || '',
+      categories: doc.categories || [],
     };
     catalogue.push(meta);
 
@@ -350,6 +445,7 @@ router.get('/catalogue', async (req, res) => {
         collectionName: stored.collectionName || null,
         viewUrl: stored.viewUrl || `/api/vault/files/${info.id}/view`,
         downloadUrl: stored.downloadUrl || `/api/vault/files/${info.id}/download`,
+        categories: Array.isArray(info.categories) ? info.categories : doc.categories || [],
       };
     });
 
@@ -374,6 +470,7 @@ router.get('/catalogue', async (req, res) => {
       files: combined,
       latestFileId: state?.perKey?.[doc.key]?.latestFileId || combined[0]?.id || null,
       latestUploadedAt: state?.perKey?.[doc.key]?.latestUploadedAt || combined[0]?.uploadedAt || null,
+      categories: doc.categories || [],
     };
   }
 
@@ -383,6 +480,8 @@ router.get('/catalogue', async (req, res) => {
     progress: {
       required: { total: REQUIRED_KEYS.length, completed: state?.requiredCompleted || 0 },
       helpful: { total: HELPFUL_KEYS.length, completed: state?.helpfulCompleted || 0 },
+      analytics: { total: ANALYTICS_KEYS.length, completed: state?.analyticsCompleted || 0 },
+      categories: state?.categories || {},
       updatedAt: state?.updatedAt || null,
     },
   });
@@ -390,15 +489,29 @@ router.get('/catalogue', async (req, res) => {
 
 router.get('/collections', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const withMetrics = await computeCollectionMetrics(u.id, await loadCollectionsDoc(u.id));
-  res.json({ collections: withMetrics });
+  const all = await loadCollectionsDoc(u.id);
+  const visible = all.filter((c) => !c.hidden);
+  const metrics = await computeCollectionMetrics(u.id, visible);
+  const metricMap = new Map(metrics.map((m) => [m.id, m]));
+  const collections = visible.map((c) => ({
+    id: c.id,
+    name: c.name,
+    locked: !!c.locked,
+    category: c.category || null,
+    system: !!c.system,
+    fileCount: metricMap.get(c.id)?.fileCount || 0,
+    bytes: metricMap.get(c.id)?.bytes || 0,
+  }));
+  res.json({ collections });
 });
 
 router.post('/collections', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const name = String(req.body?.name || '').trim() || 'Untitled';
   const id = randomUUID();
-  const curr = await loadCollectionsDoc(u.id); curr.push({ id, name }); await saveCollectionsDoc(u.id, curr);
+  const curr = await loadCollectionsDoc(u.id);
+  curr.push({ id, name, locked: false, system: false, hidden: false });
+  await saveCollectionsDoc(u.id, curr);
   await putObject(collectionPrefix(u.id, id), Buffer.alloc(0), 'application/x-directory').catch(() => {});
   res.json({ collection: { id, name, fileCount: 0, bytes: 0 } });
 });
@@ -407,11 +520,35 @@ router.get('/collections/:id/files', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const colId = String(req.params.id);
   const cols = await loadCollectionsDoc(u.id);
-  if (!cols.some(c => c.id === colId)) return res.status(404).json({ error: 'Collection not found' });
+  const collection = cols.find((c) => c.id === colId);
+  if (!collection || collection.hidden) return res.status(404).json({ error: 'Collection not found' });
+
+  const state = await getUserCatalogueState(u.id);
+  if (collection.category) {
+    const categoryKey = String(collection.category).toLowerCase();
+    const perFileEntries = Object.entries(state.perFile || {})
+      .map(([id, info]) => ({ id, info }))
+      .filter(({ info }) => Array.isArray(info.categories) && info.categories.includes(categoryKey));
+    const files = perFileEntries.map(({ id, info }) => {
+      const perKeyEntry = state.perKey?.[info.key];
+      const tracked = perKeyEntry?.files?.find?.((f) => f.id === id) || {};
+      return {
+        id,
+        name: info.name || tracked.name || 'document.pdf',
+        size: Number(info.size) || 0,
+        uploadedAt: info.uploadedAt || tracked.uploadedAt || null,
+        viewUrl: `/api/vault/files/${id}/view`,
+        downloadUrl: `/api/vault/files/${id}/download`,
+        catalogueKey: info.key,
+        categories: info.categories,
+      };
+    }).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+    return res.json(files);
+  }
 
   const pref = collectionPrefix(u.id, colId);
   const objs = (await listAll(pref)).filter(o => !String(o.Key).endsWith('/'));
-  const { perFile } = await getUserCatalogueState(u.id);
+  const { perFile } = state;
 
   const items = objs.map(o => {
     const key = String(o.Key);
@@ -435,7 +572,8 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const colId = String(req.params.id);
   const cols = await loadCollectionsDoc(u.id);
-  if (!cols.some(c => c.id === colId)) return res.status(404).json({ error: 'Collection not found' });
+  const targetCollection = cols.find((c) => c.id === colId && !c.hidden);
+  if (!targetCollection) return res.status(404).json({ error: 'Collection not found' });
 
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
@@ -447,14 +585,28 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
   const normalizedCatalogueKey = entryForCatalogue?.key || null;
   const hasValidCatalogueKey = Boolean(normalizedCatalogueKey);
 
+  if (!hasValidCatalogueKey) {
+    return res.status(400).json({ error: 'Select a document type before uploading.' });
+  }
+
+  const storageCollectionId = targetCollection.category
+    ? await ensureCatalogueStorageCollection(u.id, normalizedCatalogueKey)
+    : colId;
+
   const uploaded = [];
+  const analyses = [];
   for (const f of files) {
     const ok = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
     if (!ok) return res.status(400).json({ error: 'Only PDF files are allowed' });
 
+    const analysis = await analyseDocument(entryForCatalogue, f.buffer, f.originalname || 'document.pdf');
+    if (!analysis.valid) {
+      return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
+    }
+
     const date = dayjs().format('YYYYMMDD');
     const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
-    const key = `${u.id}/${colId}/${date}-${randomUUID()}-${safeBase}`;
+    const key = `${u.id}/${storageCollectionId}/${date}-${randomUUID()}-${safeBase}`;
     await putObject(key, f.buffer, 'application/pdf');
     const id = keyToFileId(key);
     uploaded.push({
@@ -466,9 +618,22 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       downloadUrl: `/api/vault/files/${id}/download`,
       catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
     });
+    analyses.push({
+      fileId: id,
+      insights: analysis.insights,
+      fileName: safeBase,
+      uploadedAt: new Date(),
+    });
   }
   if (hasValidCatalogueKey) {
-    await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, colId);
+    await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, storageCollectionId);
+  }
+  for (const item of analyses) {
+    await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
+      id: item.fileId,
+      name: item.fileName,
+      uploadedAt: item.uploadedAt,
+    });
   }
   res.status(201).json({ uploaded });
 });
@@ -548,7 +713,9 @@ router.delete('/collections/:id', async (req, res) => {
 
   // Ensure the collection exists for this user
   const cols = await loadCollectionsDoc(u.id);
-  if (!cols.some(c => c.id === colId)) return res.status(404).json({ error: 'Collection not found' });
+  const col = cols.find(c => c.id === colId);
+  if (!col) return res.status(404).json({ error: 'Collection not found' });
+  if (col.locked) return res.status(403).json({ error: 'Default collections cannot be deleted' });
 
   // List all objects with this prefix
   const prefix = collectionPrefix(u.id, colId);

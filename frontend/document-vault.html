@@ -94,10 +94,14 @@
     .doc-progress-meta{ color: var(--muted); font-size:.85rem; }
     #doc-progress-updated{ color: var(--muted); font-size:.85rem; }
 
-    .doc-table tbody tr{ transition: background-color .15s ease; }
-    .doc-table tbody tr:hover{ background: rgba(111,66,193,.05); }
-    .doc-table .doc-why,
-    .doc-table .doc-where{ min-width: 180px; max-width: 240px; }
+    .doc-accordion{ display:flex; flex-direction:column; gap:10px; }
+    .doc-accordion details{ border:1px solid var(--bs-border-color); border-radius:12px; background: var(--bs-body-bg); box-shadow:var(--tile-shadow); padding:12px 14px; }
+    .doc-accordion summary{ font-weight:600; cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:10px; list-style:none; }
+    .doc-accordion summary::-webkit-details-marker{ display:none; }
+    .doc-accordion .doc-meta{ color: var(--muted); font-size:.85rem; display:flex; flex-wrap:wrap; gap:14px; }
+    .doc-accordion .doc-meta span{ display:flex; align-items:center; gap:6px; }
+    .doc-accordion .doc-body{ margin-top:10px; font-size:.9rem; color: var(--muted); }
+    .doc-accordion .doc-actions{ margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
 
     .doc-files-panel{ border:1px solid var(--bs-border-color); border-radius:12px; padding:12px; background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
     .doc-files-panel table{ margin-bottom:0; }
@@ -167,26 +171,20 @@
             </div>
             <div class="doc-progress-meta">Extras that accelerate advice and prep.</div>
           </div>
+          <div class="doc-progress-card">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <span class="fw-semibold">Analytics</span>
+              <span id="doc-progress-analytics-count" class="doc-progress-meta">0 / 0</span>
+            </div>
+            <div class="progress mb-1">
+              <div id="doc-progress-analytics-bar" class="progress-bar bg-info" style="width:0%"></div>
+            </div>
+            <div class="doc-progress-meta">Fuel dashboards and labs with source data.</div>
+          </div>
         </div>
 
-        <div class="table-responsive mb-3">
-          <table class="table table-hover align-middle doc-table">
-            <thead class="table-light">
-              <tr>
-                <th>Document</th>
-                <th>Required?</th>
-                <th>Status</th>
-                <th>Last uploaded</th>
-                <th>Next due</th>
-                <th class="doc-why">Why we need it</th>
-                <th class="doc-where">Where to find it</th>
-                <th class="text-end">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="doc-catalogue-body">
-              <tr><td colspan="8" class="text-muted small">Loading…</td></tr>
-            </tbody>
-          </table>
+        <div class="doc-accordion" id="doc-catalogue-body">
+          <div class="text-muted small">Loading…</div>
         </div>
         <div id="doc-catalogue-msg" class="small text-muted"></div>
 
@@ -203,11 +201,11 @@
                   <th>Uploaded</th>
                   <th>Size</th>
                   <th>Collection</th>
-                  <th class="text-end">Actions</th>
+                  <th class="text-end">Manage</th>
                 </tr>
               </thead>
               <tbody id="doc-files-table-body">
-                <tr><td colspan="5" class="text-muted small">Select a document to preview uploads.</td></tr>
+                <tr><td colspan="5" class="text-muted small">Select a document to see uploads. Manage previews or deletions from the collections panel.</td></tr>
               </tbody>
             </table>
           </div>
