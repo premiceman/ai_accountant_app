@@ -1,5 +1,5 @@
 import { Queue, Worker, JobsOptions, Job } from 'bullmq';
-import IORedis, { RedisOptions } from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 
 export type ProcessorFn<T = unknown> = (data: T) => Promise<void> | void;
 
@@ -8,15 +8,11 @@ export interface BullQueueDriverOptions {
   defaultJobOptions?: JobsOptions;
 }
 
-interface RegisteredWorker<T = unknown> {
-  worker: Worker<T, void, string>;
-}
-
 export class BullQueueDriver {
   private queues = new Map<string, Queue>();
-  private workers = new Map<string, RegisteredWorker>();
+  private workers = new Map<string, Worker<any, void, string>>();
   private readonly options: BullQueueDriverOptions;
-  private connection?: IORedis;
+  private connection?: Redis;
 
   constructor(options: BullQueueDriverOptions = {}) {
     this.options = options;
@@ -27,13 +23,13 @@ export class BullQueueDriver {
     await connection.ping();
   }
 
-  private getConnection(): IORedis {
+  private getConnection(): Redis {
     if (!this.connection) {
       const redisUrl = process.env.REDIS_URL;
       if (!redisUrl) {
         throw new Error('REDIS_URL must be defined to use BullMQ driver');
       }
-      this.connection = new IORedis(redisUrl, {
+      this.connection = new Redis(redisUrl, {
         maxRetriesPerRequest: null,
         enableReadyCheck: false,
         ...this.options.connection,
@@ -69,7 +65,7 @@ export class BullQueueDriver {
       { connection }
     );
 
-    this.workers.set(name, { worker });
+    this.workers.set(name, worker as Worker<any, void, string>);
   }
 
   async enqueue<T>(name: string, data: T, options?: JobsOptions) {
@@ -79,7 +75,7 @@ export class BullQueueDriver {
 
   async close() {
     await Promise.all(
-      Array.from(this.workers.values()).map(async ({ worker }) => {
+      Array.from(this.workers.values()).map(async (worker) => {
         await worker.close();
       })
     );
