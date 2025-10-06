@@ -97,7 +97,7 @@
     .landing-bento__dots{ display:grid; grid-template-columns:repeat(3,6px); grid-auto-rows:6px; gap:4px; }
     .landing-bento__dots span{ display:block; width:6px; height:6px; border-radius:50%; background:color-mix(in oklab, var(--brand) 22%, white); box-shadow:0 2px 4px rgba(12,21,32,0.18); }
 
-    .landing-menu{ position:fixed; inset:0; background:linear-gradient(140deg, color-mix(in oklab, var(--bg-body) 88%, transparent) 0%, color-mix(in oklab, var(--bg-surface-2) 96%, transparent) 50%, color-mix(in oklab, var(--brand) 12%, transparent) 100%); backdrop-filter:blur(16px); padding-top:clamp(1rem, 4vw, 1.5rem); display:flex; flex-direction:column; gap:clamp(1rem, 4vw, 1.5rem); opacity:0; transform:translateY(16px); pointer-events:none; transition:opacity .3s ease, transform .3s ease; z-index:1200; }
+    .landing-menu{ position:fixed; inset:0; background:linear-gradient(140deg, color-mix(in oklab, var(--bg-body) 88%, transparent) 0%, color-mix(in oklab, var(--bg-surface-2) 96%, transparent) 50%, color-mix(in oklab, var(--brand) 12%, transparent) 100%); backdrop-filter:blur(16px); padding-top:clamp(1rem, 4vw, 1.5rem); display:flex; flex-direction:column; gap:clamp(1rem, 4vw, 1.5rem); opacity:0; transform:translateY(16px); pointer-events:none; transition:opacity .3s ease, transform .3s ease; z-index:1200; overflow-y:auto; -webkit-overflow-scrolling:touch; scrollbar-gutter:stable both-edges; }
     .landing-menu::before{ content:""; position:absolute; inset:12% 8% auto 8%; height:280px; background:radial-gradient(circle at top, color-mix(in oklab, var(--brand) 32%, transparent), transparent 68%); opacity:.55; filter:blur(20px); pointer-events:none; }
     .landing-menu.is-open{ opacity:1; transform:translateY(0); pointer-events:auto; }
     .landing-menu__header, .landing-menu__tiles{ position:relative; z-index:1; }
@@ -118,7 +118,7 @@
     .landing-menu__tile--accent{ background:linear-gradient(160deg, color-mix(in oklab, var(--brand) 14%, white) 0%, color-mix(in oklab, var(--brand-hover) 18%, white) 100%); color:#0E151A; box-shadow:0 24px 46px rgba(0,194,168,0.25); }
     .landing-menu__tile--accent .landing-menu__tile-icon{ background:rgba(255,255,255,0.85); color:var(--brand); box-shadow:0 12px 28px rgba(255,255,255,0.3); }
 
-    body.landing-menu-open{ overflow:hidden; }
+    html.landing-menu-open, body.landing-menu-open{ overflow:hidden; height:100%; }
 
     @media (max-width: 991.98px){
       .landing-nav-actions{ display:none; }
@@ -708,11 +708,21 @@
       const getFocusable = () => Array.from(menu.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'));
       let lastActive = null;
       let restoreId;
+      let scrollOffset = 0;
 
       const closeMenu = () => {
         menu.classList.remove('is-open');
         document.body.classList.remove('landing-menu-open');
+        document.documentElement.classList.remove('landing-menu-open');
         toggle.setAttribute('aria-expanded', 'false');
+        document.body.style.removeProperty('position');
+        document.body.style.removeProperty('width');
+        document.body.style.removeProperty('top');
+        document.body.style.removeProperty('left');
+        document.body.style.removeProperty('right');
+        window.scrollTo(0, scrollOffset);
+        scrollOffset = 0;
+
         const finish = () => {
           menu.hidden = true;
         };
@@ -730,10 +740,18 @@
       const openMenu = () => {
         lastActive = document.activeElement;
         menu.hidden = false;
+        menu.scrollTop = 0;
         window.requestAnimationFrame(() => {
           menu.classList.add('is-open');
         });
         document.body.classList.add('landing-menu-open');
+        document.documentElement.classList.add('landing-menu-open');
+        scrollOffset = window.scrollY || document.documentElement.scrollTop || 0;
+        document.body.style.position = 'fixed';
+        document.body.style.width = '100%';
+        document.body.style.top = `-${scrollOffset}px`;
+        document.body.style.left = '0';
+        document.body.style.right = '0';
         toggle.setAttribute('aria-expanded', 'true');
         const [first] = getFocusable();
         if(first){ first.focus({ preventScroll: true }); }
