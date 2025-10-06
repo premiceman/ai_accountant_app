@@ -197,19 +197,143 @@
 
   function renderAccounting(data) {
     const metrics = data.accounting?.metrics || [];
-    applyMetric('kpi-tax-band', metrics.find((m) => m.key === 'taxBand'));
-    applyMetric('kpi-tax-pos', metrics.find((m) => m.key === 'hmrcBalance'), { subId: 'kpi-tax-pos-sub' });
+    applyMetric('kpi-savings', metrics.find((m) => m.key === 'savingsCapacity'), { subId: 'kpi-savings-sub', deltaId: 'kpi-savings-delta' });
+    applyMetric('kpi-hmrc', metrics.find((m) => m.key === 'hmrcBalance'), { subId: 'kpi-hmrc-sub' });
     applyMetric('kpi-income', metrics.find((m) => m.key === 'income'), { deltaId: 'kpi-income-delta' });
     applyMetric('kpi-spend', metrics.find((m) => m.key === 'spend'), { deltaId: 'kpi-spend-delta' });
-    setText('comparison-label', data.accounting?.comparatives?.label || 'Comparing to previous period');
+    const comparatives = data.accounting?.comparatives || {};
+    setText('comparison-label', comparatives.label || 'Comparing to previous period');
 
-    renderWaterfall('chart-waterfall', data.accounting?.waterfall || []);
-    renderEMTR('chart-emtr', data.accounting?.emtr || []);
-    renderGauges('gauges', data.accounting?.allowances || {});
+    renderSpendCategory(data.accounting?.spendByCategory || []);
+    renderInflationTrend(data.accounting?.inflationTrend || []);
+    renderMerchants(data.accounting?.merchants || []);
+    renderDuplicates(data.accounting?.duplicates || []);
+    renderGauges('gauges', data.accounting?.allowances || []);
+    renderObligations(data.accounting?.obligations || [], data.accounting?.hmrcBalance);
+    renderAlerts(data.accounting?.alerts || []);
+  }
 
-    const defaults = defaultUkEvents2025_26();
-    const userEvents = loadUserEvents();
-    renderEventsTable(defaults, userEvents, data.hasData);
+  function renderSpendCategory(categories) {
+    const total = categories.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+    setText('spend-category-total', categories.length ? money(total) : '£—');
+    renderDonut('chart-spend-category', categories.map((c) => Math.round(Number(c.amount || 0))), categories.map((c) => c.label || c.category));
+    const tbody = byId('spend-category-table');
+    const empty = byId('spend-category-empty');
+    if (tbody) {
+      tbody.innerHTML = '';
+      categories.forEach((cat) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(cat.label || cat.category || 'Category')}</td>
+          <td class="text-end">${money(cat.amount)}</td>
+          <td class="text-end">${((cat.share || 0) * 100).toFixed(1)}%</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    if (!categories.length) empty?.classList.remove('d-none');
+    else empty?.classList.add('d-none');
+  }
+
+  function renderInflationTrend(points) {
+    const labels = points.map((p) => p.label);
+    const nominal = points.map((p) => p.nominal);
+    const real = points.map((p) => p.real);
+    renderLineMulti('chart-inflation-trend', labels, [
+      { label: 'Nominal', data: nominal },
+      { label: 'Real', data: real }
+    ]);
+  }
+
+  function renderMerchants(merchants) {
+    const list = byId('merchant-list');
+    const empty = byId('merchant-empty');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!Array.isArray(merchants) || !merchants.length) {
+      empty?.classList.remove('d-none');
+      return;
+    }
+    empty?.classList.add('d-none');
+    const total = merchants.reduce((acc, item) => acc + Number(item.amount || 0), 0) || 1;
+    merchants.forEach((merchant) => {
+      const share = (Number(merchant.amount || 0) / total) * 100;
+      const li = document.createElement('li');
+      li.className = 'list-group-item d-flex justify-content-between align-items-center';
+      li.innerHTML = `
+        <div>
+          <div class="fw-semibold">${escapeHtml(merchant.name || 'Merchant')}</div>
+          <div class="text-muted small">${merchant.transactions || 0} transactions</div>
+        </div>
+        <div class="text-end">
+          <div class="fw-semibold">${money(merchant.amount)}</div>
+          <div class="text-muted small">${share.toFixed(1)}%</div>
+        </div>`;
+      list.appendChild(li);
+    });
+  }
+
+  function renderDuplicates(duplicates) {
+    const table = byId('duplicates-table');
+    const empty = byId('duplicates-empty');
+    const tbody = table?.querySelector('tbody');
+    if (tbody) tbody.innerHTML = '';
+    if (!Array.isArray(duplicates) || !duplicates.length) {
+      empty?.classList.remove('d-none');
+      return;
+    }
+    empty?.classList.add('d-none');
+    duplicates.slice(0, 8).forEach((dup) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHtml(dup.date || '')}</td>
+        <td>${escapeHtml(dup.description || 'Transaction')}</td>
+        <td class="text-end">${money(dup.amount)}</td>
+        <td class="text-end">${dup.count || 0}</td>`;
+      tbody?.appendChild(tr);
+    });
+  }
+
+  function renderObligations(obligations, hmrcBalance) {
+    const badge = byId('hmrc-balance');
+    if (badge) badge.textContent = hmrcBalance ? money(hmrcBalance.value) : '£—';
+    const tbody = byId('obligations-table')?.querySelector('tbody');
+    const empty = byId('obligations-empty');
+    if (tbody) tbody.innerHTML = '';
+    if (!Array.isArray(obligations) || !obligations.length) {
+      empty?.classList.remove('d-none');
+      return;
+    }
+    empty?.classList.add('d-none');
+    obligations.forEach((item) => {
+      const tr = document.createElement('tr');
+      const due = item.dueDate ? new Date(item.dueDate).toLocaleDateString() : '—';
+      tr.innerHTML = `
+        <td>${due}</td>
+        <td>${escapeHtml(item.title || 'Obligation')}</td>
+        <td class="text-end">${money(item.amountDue)}</td>`;
+      tbody?.appendChild(tr);
+    });
+  }
+
+  function renderAlerts(alerts) {
+    const wrap = byId('alert-queue');
+    const empty = byId('alerts-empty');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    if (!Array.isArray(alerts) || !alerts.length) {
+      empty?.classList.remove('d-none');
+      return;
+    }
+    empty?.classList.add('d-none');
+    const severityClass = (sev) => ({ danger: 'alert-danger', warning: 'alert-warning', info: 'alert-info', success: 'alert-success' }[sev] || 'alert-secondary');
+    alerts.forEach((alert) => {
+      const div = document.createElement('div');
+      div.className = `alert ${severityClass(alert.severity)} mb-0`;
+      div.innerHTML = `
+        <div class="fw-semibold">${escapeHtml(alert.title || 'Alert')}</div>
+        <div class="small mb-0">${escapeHtml(alert.body || '')}</div>`;
+      wrap.appendChild(div);
+    });
   }
 
   function applyMetric(id, metric, opts = {}) {
@@ -242,7 +366,7 @@
 
   function renderFinancialPosture(data) {
     const fp = data.financialPosture || {};
-    setText('fp-networth-date', fp.asOf || '—');
+    setText('fp-networth-date', fp.netWorth?.asOf || '—');
     setText('fp-networth-total', money(fp.netWorth?.total));
     const breakdown = Array.isArray(fp.breakdown) ? fp.breakdown : [];
     const list = byId('fp-networth-breakdown');
@@ -255,22 +379,24 @@
       });
     }
     toggleEmpty('fp-networth-empty', !breakdown.length);
-
-    setText('fp-inc-total', money(fp.income?.total));
-    setText('fp-inc-notes', fp.income?.note || '');
-    setText('fp-spend-total', money(fp.spend?.total));
-    setText('fp-spend-notes', fp.spend?.note || '');
-    toggleEmpty('fp-income-empty', !Array.isArray(fp.income?.series) || !fp.income.series.length);
-
     renderDonut('fp-networth-chart', breakdown.map((b) => b.value), breakdown.map((b) => b.label));
-    renderBar('fp-incspend-chart', (fp.income?.series || []).map((d) => d.label), (fp.income?.series || []).map((d) => d.value));
-    renderDonut('fp-allocation-chart', (fp.investments?.allocation || []).map((a) => a.value), (fp.investments?.allocation || []).map((a) => a.label));
-    renderLine('fp-portfolio-line', (fp.investments?.history || []).map((h) => h.label), (fp.investments?.history || []).map((h) => h.value));
+    renderDonut('fp-allocation-chart', (fp.assetMix || []).map((a) => a.value), (fp.assetMix || []).map((a) => a.label));
+    setText('liquidity-note', fp.liquidity?.label || '—');
+
+    setMoneyOrDash('savings-monthly', fp.savings?.monthlyCapacity);
+    const note = byId('savings-note');
+    if (note) note.textContent = fp.savings?.note || 'Connect accounts to track affordability.';
+    setMoneyOrDash('savings-essentials', fp.savings?.essentials);
+    setMoneyOrDash('savings-discretionary', fp.savings?.discretionary);
+    setMoneyOrDash('savings-contributions', fp.savings?.contributions);
+    const rateEl = byId('savings-rate');
+    if (rateEl) rateEl.textContent = fp.savings?.savingsRate != null ? `${(fp.savings.savingsRate * 100).toFixed(1)}%` : '—%';
+    toggleEmpty('savings-empty', !data.hasData);
 
     const topCostsBody = byId('fp-top-costs-body');
     if (topCostsBody) {
       topCostsBody.innerHTML = '';
-      (data.financialPosture?.topCosts || []).forEach((item) => {
+      (fp.topCosts || []).forEach((item) => {
         const ch = Number(item.change || 0);
         const cls = ch > 0 ? 'text-danger' : ch < 0 ? 'text-success' : 'text-muted';
         const arrow = ch > 0 ? '▲' : ch < 0 ? '▼' : '•';
@@ -282,8 +408,6 @@
         topCostsBody.appendChild(tr);
       });
     }
-
-    setText('fp-perf-ytd', fp.investments?.ytd != null ? `YTD ${Number(fp.investments.ytd).toFixed(1)}%` : 'YTD —%');
   }
 
   function toggleDashboardEmpty(hasData) {
@@ -400,6 +524,35 @@
     });
   }
 
+  function renderLineMulti(id, labels, datasets) {
+    const el = byId(id);
+    if (!el || !window.Chart) return;
+    if (el._chart) el._chart.destroy();
+    if (!Array.isArray(datasets) || !datasets.length || !labels.length) {
+      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
+      return;
+    }
+    const palette = themeColors(datasets.length);
+    const ds = datasets.map((series, idx) => ({
+      label: series.label || `Series ${idx + 1}`,
+      data: Array.isArray(series.data) ? series.data : [],
+      borderColor: series.borderColor || palette[idx % palette.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      tension: 0.2,
+      fill: false,
+    }));
+    el._chart = new Chart(el, {
+      type: 'line',
+      data: { labels, datasets: ds },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true, position: 'bottom' } },
+        scales: { y: { ticks: { callback: (v) => money(v) } } }
+      }
+    });
+  }
+
   function renderLine(id, labels, values) {
     const el = byId(id);
     if (!el || !window.Chart) return;
@@ -471,6 +624,11 @@
   // ----- Utilities -----
   function byId(id) { return document.getElementById(id); }
   function setText(id, value) { const el = byId(id); if (el) el.textContent = value ?? '—'; }
+  function setMoneyOrDash(id, value) {
+    const el = byId(id);
+    if (!el) return;
+    el.textContent = value == null ? '£—' : money(value);
+  }
   function toggleEmpty(id, show) {
     const el = byId(id);
     if (!el) return;

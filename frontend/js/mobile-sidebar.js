@@ -19,6 +19,7 @@
     'wealth-lab.html': 'Experiment with investments and long-term goals.',
     'billing.html': 'Manage your subscription, invoices, and payments.',
     'scenario-lab.html': 'Test tax and cashflow outcomes before you commit.',
+    'tax-lab.html': 'Summarise HMRC balances, allowances, and filing tasks.',
     'document-vault.html': 'Secure repository for statements and evidence.',
     'gifts.html': 'Track gifting, IHT allowances, and beneficiaries.',
     'profile.html': 'Edit contact details, preferences, and security.'

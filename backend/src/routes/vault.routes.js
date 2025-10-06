@@ -15,6 +15,7 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
+const { DOCS } = require('../data/vaultCatalogue');
 
 const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
 const {

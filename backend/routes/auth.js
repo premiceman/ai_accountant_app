@@ -205,9 +205,21 @@ router.post('/signup', async (req, res) => {
       usageStats: {
         documentsUploaded: 0,
         documentsRequiredMet: 0,
+        documentsRequiredCompleted: 0,
+        documentsRequiredTotal: 0,
+        documentsOutstanding: 0,
         moneySavedEstimate: 0,
+        moneySavedPrevSpend: 0,
+        moneySavedChangePct: null,
+        debtOutstanding: 0,
+        debtReduced: 0,
+        debtReductionDelta: 0,
+        netCashFlow: 0,
+        netCashPrev: 0,
+        usageWindowDays: 0,
         hmrcFilingsComplete: 0,
-        minutesActive: 0
+        minutesActive: 0,
+        updatedAt: null
       },
       // uid auto-generates via schema default
     });

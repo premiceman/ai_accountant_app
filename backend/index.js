@@ -29,7 +29,10 @@ const billingRouter = safeRequire('./routes/billing')               || safeRequi
 const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
+const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
 const truelayerRouter  = safeRequire('./routes/truelayer')          || safeRequire('./src/routes/truelayer');
+
+const plaidSyncWorker = safeRequire('./services/plaidSyncWorker');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -84,6 +87,8 @@ mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
 mount('/api/plaid', plaidRouter, 'plaid');
+mount('/api/analytics', analyticsRouter, 'analytics');
+mount('/api/tax', taxRouter, 'tax');
 
 
 
@@ -118,6 +123,9 @@ mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
     app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+    if (plaidSyncWorker?.startPlaidSyncWorker) {
+      plaidSyncWorker.startPlaidSyncWorker({ force: true });
+    }
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err);

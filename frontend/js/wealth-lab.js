@@ -7,7 +7,7 @@
       liabilities: [],
       goals: [],
       contributions: { monthly: 0 },
-      summary: {},
+      summary: { assetAllocation: [], liabilitySchedule: [], projections: { horizonMonths: 0, monthly: [], yearly: [], assumptions: {} }, affordability: { advisories: [], goalScenarios: [] } },
       strategy: { steps: [], milestones: [] }
     }
   };
@@ -178,6 +178,22 @@
     byId('wealth-export')?.addEventListener('click', () => {
       window.open('/api/user/wealth-plan/export', '_blank', 'noopener');
     });
+
+    const plannerForm = byId('affordability-form');
+    if (plannerForm) {
+      plannerForm.addEventListener('input', handlePlannerChange);
+      plannerForm.addEventListener('change', handlePlannerChange);
+    }
+
+    byId('planner-goal-scenarios')?.addEventListener('click', (ev) => {
+      const link = ev.target.closest('button[data-scenario]');
+      if (!link) return;
+      const amount = Number(link.dataset.amount || 0);
+      const months = Number(link.dataset.months || 0);
+      if (amount) setValue('planner-goal-amount', amount);
+      if (months) setValue('planner-goal-months', months);
+      handlePlannerChange();
+    });
   }
 
   function renderAll() {
@@ -186,6 +202,7 @@
     renderLiabilities();
     renderGoals();
     renderStrategy();
+    renderAffordabilityPlanner();
     renderAllocationChart();
   }
 
@@ -197,6 +214,10 @@
     setText('wealth-updated-label', summary.lastComputed ? new Date(summary.lastComputed).toLocaleString() : '—');
     setText('wealth-runway', summary.runwayMonths ? `${summary.runwayMonths} months` : '—');
     setValue('wealth-monthly', state.plan.contributions?.monthly || 0);
+    const affordability = summary.affordability || {};
+    setText('wealth-safe-rate', affordability.recommendedSavingsRate != null ? formatPercent(affordability.recommendedSavingsRate) : '—');
+    setText('wealth-recommended', affordability.recommendedContribution != null ? `£${Number(affordability.recommendedContribution).toLocaleString()}` : '—');
+    setText('wealth-free-cashflow', affordability.freeCashflow != null ? `${money(affordability.freeCashflow)}/mo` : '—');
   }
 
   function renderAssets() {
@@ -351,6 +372,79 @@
     }
   }
 
+  function renderAffordabilityPlanner() {
+    const summary = state.plan.summary || {};
+    const affordability = summary.affordability || {};
+    const income = affordability.monthlyIncome != null ? `${money(affordability.monthlyIncome)}/mo` : '—';
+    const spend = affordability.monthlySpend != null ? `${money(affordability.monthlySpend)}/mo` : '—';
+    const debtService = affordability.debtService != null ? `${money(affordability.debtService)}/mo` : '—';
+    const freeCash = affordability.freeCashflow != null ? `${money(affordability.freeCashflow)}/mo` : '—';
+    const safeRate = affordability.recommendedSavingsRate != null ? formatPercent(affordability.recommendedSavingsRate) : '—';
+    const safeMonthly = affordability.recommendedContribution != null
+      ? `£${Number(affordability.recommendedContribution).toLocaleString()}/mo`
+      : (affordability.safeMonthlySavings != null ? `£${Number(affordability.safeMonthlySavings).toLocaleString()}/mo` : '—');
+
+    setText('planner-income', income);
+    setText('planner-spend', spend);
+    setText('planner-debt-service', debtService);
+    setText('planner-free-cashflow', freeCash);
+    setText('planner-safe-rate', safeRate);
+    setText('planner-safe-monthly', safeMonthly);
+
+    const scenarioList = byId('planner-goal-scenarios');
+    if (scenarioList) {
+      scenarioList.innerHTML = '';
+      const scenarios = Array.isArray(affordability.goalScenarios) ? affordability.goalScenarios : [];
+      if (!scenarios.length) {
+        const li = document.createElement('li');
+        li.className = 'text-muted';
+        li.textContent = 'Log goals to benchmark savings timelines.';
+        scenarioList.appendChild(li);
+      } else {
+        scenarios.forEach((scenario) => {
+          const li = document.createElement('li');
+          li.className = 'mb-2';
+          const months = scenario.recommendedMonths;
+          const timeline = months ? `${months} months` : 'No timeline available';
+          const target = scenario.targetDate ? new Date(scenario.targetDate) : null;
+          const targetLabel = target ? target.toLocaleDateString() : '';
+          li.innerHTML = `
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <div class="fw-semibold">${escapeHtml(scenario.name || 'Goal')}</div>
+                <div class="small text-muted">£${Number(scenario.amount || 0).toLocaleString()} • ${timeline}${targetLabel ? ` • target ${targetLabel}` : ''}</div>
+              </div>
+              <button class="btn btn-link btn-sm text-decoration-none" data-scenario data-amount="${Math.round(Number(scenario.amount || 0))}" data-months="${months || ''}">Use</button>
+            </div>`;
+          scenarioList.appendChild(li);
+        });
+      }
+    }
+
+    const advisories = Array.isArray(affordability.advisories) ? affordability.advisories : [];
+    const advisoryWrap = byId('planner-advisories');
+    if (advisoryWrap) {
+      advisoryWrap.innerHTML = '';
+      if (!advisories.length) {
+        const info = document.createElement('div');
+        info.className = 'alert alert-light border mb-0';
+        info.textContent = 'Connect spend analytics to surface affordability advisories.';
+        advisoryWrap.appendChild(info);
+      } else {
+        advisories.forEach((adv) => {
+          const alert = document.createElement('div');
+          alert.className = 'alert alert-warning border-start border-3 border-warning-subtle';
+          alert.textContent = adv;
+          advisoryWrap.appendChild(alert);
+        });
+      }
+    }
+
+    // Ensure planner inputs have sensible defaults before recalculating
+    if (!byId('planner-goal-months')?.value) setValue('planner-goal-months', 18);
+    handlePlannerChange();
+  }
+
   function renderAllocationChart() {
     const ctx = document.getElementById('wealth-allocation-chart');
     if (!ctx || !window.Chart) return;
@@ -370,6 +464,65 @@
     } else {
       charts.allocation.data.datasets[0].data = data;
       charts.allocation.update();
+    }
+  }
+
+  function handlePlannerChange() {
+    recalcPlanner();
+  }
+
+  function recalcPlanner() {
+    const summaryBox = byId('planner-summary');
+    if (!summaryBox) return;
+    const amount = Number(byId('planner-goal-amount')?.value || 0);
+    const months = Number(byId('planner-goal-months')?.value || 0);
+    const startVal = byId('planner-goal-start')?.value;
+    const startDate = startVal ? new Date(startVal) : null;
+    const affordability = state.plan.summary?.affordability || {};
+    const safeBase = affordability.safeMonthlySavings != null ? Number(affordability.safeMonthlySavings) : Number(affordability.recommendedContribution || 0);
+    const freeCash = Number(affordability.freeCashflow || 0);
+    const fallbackContribution = Number(state.plan.contributions?.monthly || 0);
+    const safeMonthly = safeBase > 0 ? safeBase : Math.max(0, fallbackContribution + Math.max(0, freeCash));
+
+    const details = [];
+    let statusMessage = '';
+    let statusClass = 'small mt-2 text-muted';
+
+    if (amount > 0 && months > 0) {
+      const requiredMonthly = amount / months;
+      details.push(`This goal requires around £${Math.round(requiredMonthly).toLocaleString()} per month to meet a ${months}-month target.`);
+      if (safeMonthly > 0) {
+        const safeMonths = Math.ceil(amount / safeMonthly);
+        details.push(`At your safe savings capacity (£${Math.round(safeMonthly).toLocaleString()} per month) you'd reach the target in about ${safeMonths} months.`);
+        if (safeMonths > months) {
+          const extra = safeMonths - months;
+          const uplift = requiredMonthly - safeMonthly;
+          statusMessage = `Expect to extend the timeline by roughly ${extra} month${extra === 1 ? '' : 's'}${uplift > 0 ? ` or increase monthly savings by about £${Math.max(0, Math.round(uplift)).toLocaleString()}.` : '.'}`;
+          statusClass = 'small mt-2 text-danger';
+        } else {
+          statusMessage = 'This goal is achievable within your current savings capacity.';
+        }
+        if (startDate && Number.isFinite(safeMonths)) {
+          const completion = addMonths(startDate, safeMonths);
+          details.push(`Projected completion using safe savings: ${completion.toLocaleDateString()}.`);
+        }
+      } else {
+        statusMessage = 'Set a monthly contribution to generate a forecast for this goal.';
+      }
+    } else if (amount > 0 && !months) {
+      statusMessage = 'Specify a target timeline to evaluate affordability.';
+    } else {
+      statusMessage = 'Enter a target amount to generate recommendations.';
+    }
+
+    summaryBox.innerHTML = details.length
+      ? details.map((line) => `<p class="mb-1">${escapeHtml(line)}</p>`).join('')
+      : '<p class="mb-1 text-muted">Enter a target amount to generate recommendations.</p>';
+
+    const outcome = byId('planner-outcome');
+    if (outcome) {
+      outcome.textContent = statusMessage;
+      outcome.className = statusClass;
     }
   }
 
@@ -419,6 +572,13 @@
     merged.assets = Array.isArray(plan.assets) ? plan.assets.map(normaliseItem) : [];
     merged.liabilities = Array.isArray(plan.liabilities) ? plan.liabilities.map(normaliseItem) : [];
     merged.goals = Array.isArray(plan.goals) ? plan.goals.map(normaliseItem) : [];
+    merged.summary = { ...(plan.summary || {}) };
+    merged.summary.assetAllocation = Array.isArray(merged.summary.assetAllocation) ? merged.summary.assetAllocation : [];
+    merged.summary.liabilitySchedule = Array.isArray(merged.summary.liabilitySchedule) ? merged.summary.liabilitySchedule : [];
+    merged.summary.projections = merged.summary.projections || { horizonMonths: 0, monthly: [], yearly: [], assumptions: {} };
+    merged.summary.affordability = merged.summary.affordability || {};
+    merged.summary.affordability.goalScenarios = Array.isArray(merged.summary.affordability.goalScenarios) ? merged.summary.affordability.goalScenarios : [];
+    merged.summary.affordability.advisories = Array.isArray(merged.summary.affordability.advisories) ? merged.summary.affordability.advisories : [];
     merged.strategy = { steps: Array.isArray(plan.strategy?.steps) ? plan.strategy.steps : [], milestones: Array.isArray(plan.strategy?.milestones) ? plan.strategy.milestones : [] };
     merged.contributions = { monthly: Number(plan.contributions?.monthly || 0) };
     return merged;
@@ -520,6 +680,12 @@
     return Math.max(0, Math.round(months));
   }
 
+  function addMonths(date, months) {
+    const copy = new Date(date.getTime());
+    copy.setMonth(copy.getMonth() + months);
+    return copy;
+  }
+
   function formAsset() { return document.getElementById('form-asset'); }
   function formLiability() { return document.getElementById('form-liability'); }
   function formGoal() { return document.getElementById('form-goal'); }
@@ -530,6 +696,10 @@
 
   function escapeHtml(str) { return String(str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function money(value) { const num = Number(value || 0); const prefix = num < 0 ? '-£' : '£'; return `${prefix}${Math.abs(num).toLocaleString()}`; }
+  function formatPercent(value, decimals = 1) {
+    if (value == null || Number.isNaN(Number(value))) return '—';
+    return `${(Number(value) * 100).toFixed(decimals)}%`;
+  }
 
   function softError(message) {
     const main = document.querySelector('main');
