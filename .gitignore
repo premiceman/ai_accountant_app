@@ -13,4 +13,5 @@ frontend/.env
 # Uploads / generated
 uploads/
 backend/uploads/
+services/worker/dist/
 *.DS_Store
