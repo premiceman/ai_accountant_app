@@ -23,10 +23,10 @@
     <div id="dashboard-empty-state" class="alert alert-warning border border-warning-subtle d-none" role="alert">
       <div class="d-flex flex-wrap align-items-center gap-3">
         <div>
-          <strong>No data</strong> — set up your integrations to get started.
-          <div class="small text-muted">Connect your bank feeds and HMRC portal from the integrations hub in your profile.</div>
+          <strong>No data</strong> — upload your core documents to get started.
+          <div class="small text-muted">Add payslips, bank and savings statements, ISA summaries and more from the document vault.</div>
         </div>
-        <a class="btn btn-sm btn-outline-primary ms-auto" href="/profile.html#integrations">Open integrations</a>
+        <a class="btn btn-sm btn-outline-primary ms-auto" href="/document-vault.html">Open document vault</a>
       </div>
     </div>
 
@@ -86,7 +86,7 @@
         </div>
 
         <div id="ai-suggestions" class="row g-3 mt-3"></div>
-        <div id="ai-suggestions-empty" class="text-muted small mt-3">Insights will appear here once your integrations are connected.</div>
+        <div id="ai-suggestions-empty" class="text-muted small mt-3">Insights will appear here once you upload supporting documents.</div>
       </div>
     </section>
 
@@ -101,7 +101,7 @@
 
       <div class="row g-3 mb-3">
         <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm">
+          <div class="card h-100 shadow-sm" data-metric-card>
             <div class="card-body">
               <div class="text-muted small">Savings capacity</div>
               <div class="h4 m-0" id="kpi-savings">£—</div>
@@ -111,7 +111,7 @@
           </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm">
+          <div class="card h-100 shadow-sm" data-metric-card>
             <div class="card-body">
               <div class="text-muted small">HMRC balance</div>
               <div class="h4 m-0" id="kpi-hmrc">—</div>
@@ -120,7 +120,7 @@
           </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm">
+          <div class="card h-100 shadow-sm" data-metric-card>
             <div class="card-body">
               <div class="text-muted small">Gross income</div>
               <div class="h4 m-0" id="kpi-income">£—</div>
@@ -129,7 +129,7 @@
           </div>
         </div>
         <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm">
+          <div class="card h-100 shadow-sm" data-metric-card>
             <div class="card-body">
               <div class="text-muted small">Total spend</div>
               <div class="h4 m-0" id="kpi-spend">£—</div>
@@ -263,7 +263,7 @@
                   <canvas id="fp-networth-chart" height="160"></canvas>
                 </div>
               </div>
-              <div class="alert alert-light border mt-3 d-none" id="fp-networth-empty">No data — set up your integrations to get started.</div>
+              <div class="alert alert-light border mt-3 d-none" id="fp-networth-empty">No data — upload recent documents to get started.</div>
             </div>
           </div>
         </div>

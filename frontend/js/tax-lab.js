@@ -189,18 +189,19 @@
       return;
     }
     wrap.innerHTML = '';
-    docs.forEach((doc) => {
-      const div = document.createElement('div');
-      div.className = `doc-status ${doc.status}`;
-      div.innerHTML = `
-        <div>
-          <div class="label">${escapeHtml(doc.label)}</div>
+      docs.forEach((doc) => {
+        const div = document.createElement('div');
+        div.className = `doc-status ${doc.status}`;
+        div.innerHTML = `
+          <div>
+            <div class="label">${escapeHtml(doc.label)}</div>
           <div class="small text-muted">${doc.lastUploadedAt ? `Last uploaded ${formatDate(doc.lastUploadedAt)}` : 'No upload yet'}</div>
-        </div>
-        <span class="badge bg-${badgeFromStatus(doc.status)}">${statusLabel(doc.status)}</span>
-      `;
-      wrap.appendChild(div);
-    });
+          ${doc.sourceNote ? `<div class="small text-muted">Sources: ${escapeHtml(doc.sourceNote)}</div>` : ''}
+          </div>
+          <span class="badge bg-${badgeFromStatus(doc.status)}">${statusLabel(doc.status)}</span>
+        `;
+        wrap.appendChild(div);
+      });
   }
 
   function renderScenarios() {

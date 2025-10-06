@@ -47,6 +47,8 @@
   const elDocProgressRequiredCount = $('#doc-progress-required-count');
   const elDocProgressHelpfulBar = $('#doc-progress-helpful-bar');
   const elDocProgressHelpfulCount = $('#doc-progress-helpful-count');
+  const elDocProgressAnalyticsBar = $('#doc-progress-analytics-bar');
+  const elDocProgressAnalyticsCount = $('#doc-progress-analytics-count');
   const elDocProgressUpdated = $('#doc-progress-updated');
   const elDocFilesPanel = $('#doc-files-panel');
   const elDocFilesTitle = $('#doc-files-title');
@@ -64,6 +66,7 @@
   let catalogueProgress = {
     required: { total: 0, completed: 0 },
     helpful: { total: 0, completed: 0 },
+    analytics: { total: 0, completed: 0 },
     updatedAt: null
   };
   let activeDocKey = null;
@@ -192,7 +195,10 @@
     const name = pickString(c.name, c.title, c.label, `Collection ${id || ''}`) || 'Untitled';
     const fileCount = pickNumber(c.fileCount, c.files, c.count, c.stats?.files, c.totalFiles);
     const bytes = pickNumber(c.bytes, c.totalBytes, c.sizeBytes, c.storageBytes, c.usage?.bytes, c.size);
-    return { id, name, fileCount, bytes, _raw: c };
+    const locked = !!(c.locked || c.readOnly);
+    const category = c.category ? String(c.category) : null;
+    const system = !!c.system;
+    return { id, name, fileCount, bytes, locked, category, system, _raw: c };
   }
 
   function normalizeFilesPayload(j) {
@@ -285,8 +291,10 @@
   function updateCatalogueProgressDisplay() {
     const req = catalogueProgress?.required || { total: 0, completed: 0 };
     const help = catalogueProgress?.helpful || { total: 0, completed: 0 };
+    const analytics = catalogueProgress?.analytics || { total: 0, completed: 0 };
     const reqPct = req.total ? Math.round((req.completed / req.total) * 100) : 0;
     const helpPct = help.total ? Math.round((help.completed / help.total) * 100) : 0;
+    const analyticsPct = analytics.total ? Math.round((analytics.completed / analytics.total) * 100) : 0;
 
     if (elDocProgressRequiredBar) {
       elDocProgressRequiredBar.style.width = `${Math.max(0, Math.min(100, reqPct))}%`;
@@ -302,6 +310,13 @@
     if (elDocProgressHelpfulCount) {
       elDocProgressHelpfulCount.textContent = `${help.completed} / ${help.total}`;
     }
+    if (elDocProgressAnalyticsBar) {
+      elDocProgressAnalyticsBar.style.width = `${Math.max(0, Math.min(100, analyticsPct))}%`;
+      elDocProgressAnalyticsBar.setAttribute('aria-valuenow', String(analyticsPct));
+    }
+    if (elDocProgressAnalyticsCount) {
+      elDocProgressAnalyticsCount.textContent = `${analytics.completed} / ${analytics.total}`;
+    }
     if (elDocProgressUpdated) {
       elDocProgressUpdated.textContent = catalogueProgress?.updatedAt
         ? `Updated ${niceDate(catalogueProgress.updatedAt)}`
@@ -314,7 +329,7 @@
     if (!elCatalogueTableBody) return;
 
     if (!Array.isArray(catalogue) || !catalogue.length) {
-      elCatalogueTableBody.innerHTML = '<tr><td colspan="8" class="text-muted small">No document checklist configured.</td></tr>';
+      elCatalogueTableBody.innerHTML = '<div class="text-muted small">No document checklist configured.</div>';
       return;
     }
 
@@ -326,57 +341,52 @@
       const lastUploaded = latest?.uploadedAt ? toDateLike(latest.uploadedAt) : null;
       const overdue = isOverdue(item.cadence, lastUploaded);
 
-      const row = document.createElement('tr');
-      row.dataset.key = item.key;
-      if (activeDocKey && activeDocKey === item.key) row.classList.add('table-active');
-      row.innerHTML = `
-        <td class="fw-semibold">${escapeHtml(item.label)}</td>
-        <td>${item.required ? '<span class="badge text-bg-danger">Required</span>' : '<span class="badge text-bg-secondary">Helpful</span>'}</td>
-        <td>${statusBadge(latest, overdue)}</td>
-        <td>${lastUploaded ? fmtDateTime(lastUploaded) : '—'}</td>
-        <td>${dueLabel(item.cadence, lastUploaded)}</td>
-        <td class="doc-why small text-muted">${escapeHtml(item.why)}</td>
-        <td class="doc-where small text-muted">${escapeHtml(item.where)}</td>
-        <td class="text-end">
-          <div class="btn-group btn-group-sm" role="group" aria-label="Actions">
-            <button type="button" class="btn btn-primary" data-doc-action="upload"><i class="bi bi-upload me-1"></i>Upload</button>
-            <button type="button" class="btn btn-outline-secondary" data-doc-action="view"><i class="bi bi-eye me-1"></i>View</button>
-            <button type="button" class="btn btn-outline-danger" data-doc-action="delete-latest" ${latest ? '' : 'disabled'}><i class="bi bi-trash3 me-1"></i>Delete</button>
-          </div>
-        </td>
+      const details = document.createElement('details');
+      details.dataset.key = item.key;
+      if (activeDocKey && activeDocKey === item.key) details.setAttribute('open', 'open');
+
+      const summary = document.createElement('summary');
+      summary.innerHTML = `
+        <span>${escapeHtml(item.label)}</span>
+        <div class="doc-meta">
+          <span><i class="bi bi-check-circle"></i>${item.required ? 'Required' : 'Helpful'}</span>
+          ${item.analytics ? '<span><i class="bi bi-bar-chart"></i>Analytics source</span>' : ''}
+          <span>${statusBadge(latest, overdue)}</span>
+          <span><i class="bi bi-clock-history"></i>${lastUploaded ? fmtDateTime(lastUploaded) : 'No upload yet'}</span>
+          <span><i class="bi bi-calendar-event"></i>${dueLabel(item.cadence, lastUploaded)}</span>
+        </div>
+      `;
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.className = 'doc-body';
+      body.innerHTML = `
+        <div class="mb-2"><strong>Why:</strong> ${escapeHtml(item.why)}</div>
+        <div class="mb-2"><strong>Where:</strong> ${escapeHtml(item.where)}</div>
       `;
 
-      const uploadBtn = row.querySelector('[data-doc-action="upload"]');
-      const viewBtn = row.querySelector('[data-doc-action="view"]');
-      const deleteBtn = row.querySelector('[data-doc-action="delete-latest"]');
+      const actions = document.createElement('div');
+      actions.className = 'doc-actions';
+      const uploadBtn = document.createElement('button');
+      uploadBtn.type = 'button';
+      uploadBtn.className = 'btn btn-sm btn-primary';
+      uploadBtn.innerHTML = '<i class="bi bi-upload me-1"></i>Upload';
+      on(uploadBtn, 'click', (e) => { e.preventDefault(); triggerCatalogueUpload(item.key); });
+      const reviewBtn = document.createElement('button');
+      reviewBtn.type = 'button';
+      reviewBtn.className = 'btn btn-sm btn-outline-secondary';
+      reviewBtn.innerHTML = '<i class="bi bi-folder2-open me-1"></i>Review uploads';
+      on(reviewBtn, 'click', (e) => { e.preventDefault(); renderCatalogueFiles(item.key); });
+      actions.appendChild(uploadBtn);
+      actions.appendChild(reviewBtn);
 
-      on(uploadBtn, 'click', () => triggerCatalogueUpload(item.key));
-      on(viewBtn, 'click', (e) => { e.preventDefault(); renderCatalogueFiles(item.key); });
-      if (deleteBtn && latest) {
-        on(deleteBtn, 'click', async () => {
-          if (!confirm('Delete the most recent upload for this document?')) return;
-          const resp = await Auth.fetch(`/api/vault/files/${latest.id}`, { method: 'DELETE' });
-          if (!resp.ok) {
-            const t = await resp.text().catch(() => '');
-            alert(t || 'Delete failed');
-            return;
-          }
-          await Promise.all([loadStats(), loadCollections(), loadCatalogue()]);
-          await ensureMetricsAndStats();
-          if (activeDocKey === item.key) {
-            renderCatalogueFiles(item.key);
-          }
-          setPreviewSrc('about:blank');
-        });
-      }
-
-      elCatalogueTableBody.appendChild(row);
+      body.appendChild(actions);
+      details.appendChild(body);
+      elCatalogueTableBody.appendChild(details);
     }
 
     if (elCatalogueMsg) {
-      elCatalogueMsg.textContent = currentCol
-        ? ''
-        : 'Select a collection on the left before uploading checklist items.';
+      elCatalogueMsg.textContent = 'Uploads are automatically stored in their matching default collections.';
     }
 
     if (activeDocKey) {
@@ -398,50 +408,39 @@
     elDocFilesPanel.classList.remove('d-none');
 
     if (!files.length) {
-      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">No uploads yet.</td></tr>';
+      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">No uploads yet. Upload from the checklist or collections to get started.</td></tr>';
       return;
     }
 
     elDocFilesTableBody.innerHTML = '';
     for (const file of files) {
       const row = document.createElement('tr');
-      const collectionName = collections.find(c => String(c.id) === String(file.collectionId))?.name || '—';
+      const collection = collections.find(c => String(c.id) === String(file.collectionId));
+      const collectionName = collection?.name || '—';
       row.innerHTML = `
         <td>${escapeHtml(file.name || 'document.pdf')}</td>
         <td>${fmtDateTime(file.uploadedAt)}</td>
         <td>${fmtBytes(file.size)}</td>
         <td>${escapeHtml(collectionName)}</td>
         <td class="text-end">
-          <div class="btn-group btn-group-sm" role="group">
-            <button type="button" class="btn btn-outline-secondary" data-file-action="preview" title="Preview"><i class="bi bi-eye"></i></button>
-            <button type="button" class="btn btn-outline-secondary" data-file-action="download" title="Download"><i class="bi bi-download"></i></button>
-            <button type="button" class="btn btn-outline-danger" data-file-action="delete" title="Delete"><i class="bi bi-trash"></i></button>
-          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-file-action="manage">
+            <i class="bi bi-folder-symlink"></i> Manage
+          </button>
         </td>
       `;
 
-      on(row.querySelector('[data-file-action="preview"]'), 'click', () => {
-        const url = file.viewUrl || file.downloadUrl;
-        if (!url) return alert('No preview URL available.');
-        previewFile(url, file.name);
-      });
-      on(row.querySelector('[data-file-action="download"]'), 'click', () => {
-        const url = file.downloadUrl || file.viewUrl;
-        if (!url) return alert('No download URL available.');
-        downloadFile(url, file.name);
-      });
-      on(row.querySelector('[data-file-action="delete"]'), 'click', async () => {
-        if (!confirm('Delete this file?')) return;
-        const resp = await Auth.fetch(`/api/vault/files/${file.id}`, { method: 'DELETE' });
-        if (!resp.ok) {
-          const t = await resp.text().catch(() => '');
-          alert(t || 'Delete failed');
+      const manageBtn = row.querySelector('[data-file-action="manage"]');
+      on(manageBtn, 'click', async (event) => {
+        event.preventDefault();
+        if (!collection) {
+          alert('This upload is not linked to a visible collection yet.');
           return;
         }
-        await Promise.all([loadStats(), loadCollections(), loadCatalogue()]);
-        await ensureMetricsAndStats();
-        renderCatalogueFiles(key);
-        setPreviewSrc('about:blank');
+        try {
+          await openCollection(collection);
+        } finally {
+          closeCatalogueFiles();
+        }
       });
 
       elDocFilesTableBody.appendChild(row);
@@ -452,12 +451,26 @@
     activeDocKey = null;
     if (elDocFilesPanel) elDocFilesPanel.classList.add('d-none');
     if (elDocFilesTableBody) {
-      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">Select a document to preview uploads.</td></tr>';
+      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">Select a document above to see recent uploads. Previewing or deleting files happens from the collections panel.</td></tr>';
     }
     renderCatalogue();
   }
 
+  function ensureCollectionForDocKey(key) {
+    const doc = catalogueByKey.get(key);
+    if (!doc) return;
+    const categories = Array.isArray(doc.categories) ? doc.categories : [];
+    for (const cat of categories) {
+      const match = collections.find((c) => c.category === cat);
+      if (match) {
+        if (!currentCol || currentCol.id !== match.id) openCollection(match);
+        return;
+      }
+    }
+  }
+
   function triggerCatalogueUpload(key) {
+    ensureCollectionForDocKey(key);
     if (!currentCol) {
       alert('Please select a collection on the left before uploading.');
       return;
@@ -500,6 +513,7 @@
       catalogueProgress = {
         required: progress.required || { total: 0, completed: 0 },
         helpful: progress.helpful || { total: 0, completed: 0 },
+        analytics: progress.analytics || { total: 0, completed: 0 },
         updatedAt: progress.updatedAt || null
       };
       renderCatalogue();
@@ -511,6 +525,7 @@
       catalogueProgress = {
         required: { total: 0, completed: 0 },
         helpful: { total: 0, completed: 0 },
+        analytics: { total: 0, completed: 0 },
         updatedAt: null
       };
       if (elCatalogueMsg) elCatalogueMsg.textContent = 'Failed to load document checklist.';
@@ -550,6 +565,9 @@
     }
 
     for (const c of filtered) {
+      const categoryLabel = c.category
+        ? `<span class="badge bg-light text-dark border">${escapeHtml(c.category)}</span>`
+        : '';
       const row = document.createElement('div');
       row.className = 'collection-item d-flex justify-content-between align-items-center';
       row.dataset.id = c.id;
@@ -563,10 +581,11 @@
           <div class="collection-meta text-muted small flex-shrink-0 ms-2" data-meta-for="${escapeHtml(c.id)}">
             ${(c.fileCount || 0)} files · ${fmtBytes(c.bytes || 0)}
           </div>
+          ${categoryLabel}
         </div>
         <div class="collection-actions ms-2 flex-shrink-0">
           <button class="btn btn-sm btn-light border me-1" data-col-action="download" title="Download as .zip"><i class="bi bi-download"></i></button>
-          <button class="btn btn-sm btn-light border text-danger" data-col-action="delete" title="Delete collection"><i class="bi bi-trash"></i></button>
+          ${c.locked ? '' : '<button class="btn btn-sm btn-light border text-danger" data-col-action="delete" title="Delete collection"><i class="bi bi-trash"></i></button>'}
         </div>
       `;
 
@@ -595,25 +614,31 @@
       });
 
       // Delete collection (with confirmation text exactly as requested)
-      on(row.querySelector('[data-col-action="delete"]'), 'click', async (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const ok = confirm('Are you sure you want to delete this collection and all contained files. This action is irreversible');
-        if (!ok) return;
-        try {
-          const resp = await Auth.fetch(`/api/vault/collections/${c.id}`, { method: 'DELETE' });
-          if (!resp.ok) { const t = await resp.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
-          // If we are currently viewing this collection, exit to collections view
-          if (currentCol && String(currentCol.id) === String(c.id)) {
-            exitCollectionView();
+      if (!c.locked) {
+        on(row.querySelector('[data-col-action="delete"]'), 'click', async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const ok = confirm('Are you sure you want to delete this collection and all contained files. This action is irreversible');
+          if (!ok) return;
+          try {
+            const resp = await Auth.fetch(`/api/vault/collections/${c.id}`, { method: 'DELETE' });
+            if (!resp.ok) { const t = await resp.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
+            if (currentCol && String(currentCol.id) === String(c.id)) {
+              exitCollectionView();
+            }
+            await Promise.all([loadCollections(), loadStats()]);
+          } catch (err) {
+            console.error(err);
+            alert('Delete failed');
           }
-          await Promise.all([loadCollections(), loadStats()]);
-        } catch (err) {
-          console.error(err);
-          alert('Delete failed');
-        }
-      });
+        });
+      }
 
       elCollectionsList.appendChild(row);
+    }
+
+    if (!currentCol && !filterText) {
+      const preferred = collections.find((c) => c.category === 'required') || collections[0];
+      if (preferred) openCollection(preferred);
     }
   }
 
