@@ -4,7 +4,12 @@ const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const PaymentMethod = require('../models/PaymentMethod');
-const PDFDocument = require('pdfkit');
+let PDFDocument = null;
+try {
+  PDFDocument = require('pdfkit');
+} catch (err) {
+  console.warn('⚠️  pdfkit not available – PDF exports will be disabled.');
+}
 const { randomUUID } = require('crypto');
 
 const router = express.Router();
@@ -502,6 +507,9 @@ router.post('/salary-navigator/benchmark', auth, async (req, res) => {
 // GET /api/user/salary-navigator/export
 router.get('/salary-navigator/export', auth, async (req, res) => {
   try {
+    if (!PDFDocument) {
+      return res.status(503).json({ error: 'PDF export is unavailable on this server.' });
+    }
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     const nav = decorateSalaryNavigator(user.salaryNavigator || {});
@@ -616,6 +624,9 @@ router.post('/wealth-plan/rebuild', auth, async (req, res) => {
 // GET /api/user/wealth-plan/export
 router.get('/wealth-plan/export', auth, async (req, res) => {
   try {
+    if (!PDFDocument) {
+      return res.status(503).json({ error: 'PDF export is unavailable on this server.' });
+    }
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     const plan = decorateWealth(user.wealthPlan || {});

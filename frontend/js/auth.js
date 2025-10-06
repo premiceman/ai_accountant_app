@@ -51,7 +51,11 @@
     const token = getToken();
     const headers = new Headers(options.headers || {});
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    return fetch(window.API ? window.API.url(url) : url, { ...options, headers });
+    const response = await fetch(window.API ? window.API.url(url) : url, { ...options, headers });
+    if (response.status === 401 || response.status === 403) {
+      clearTokens();
+    }
+    return response;
   }
 
   // ---------- Tolerant user load (keeps your current behaviour) ----------
@@ -75,6 +79,10 @@
         headers: { Authorization: `Bearer ${t}` },
         cache: 'no-store'
       });
+      if (res.status === 401 || res.status === 403) {
+        clearTokens();
+        return null;
+      }
       if (!res.ok) return null;
       const me = await res.json();
       window.__ME__ = me;
@@ -87,17 +95,19 @@
 
   async function requireAuth() {
     const t = getToken();
-    try {
-      const me = await loadUser(true) || { firstName: 'Guest' };
-      window.__ME__ = me;
-      const g = document.getElementById('greeting-name');
-      if (g && me?.firstName) g.textContent = me.firstName;
-      return { me, token: t };
-    } catch {
-      const me = { firstName: 'Guest' };
-      window.__ME__ = me;
-      return { me, token: t };
+    if (!t || isExpired(t)) {
+      clearTokens();
+      throw new Error('Not authenticated');
     }
+    const me = await loadUser(true);
+    if (!me) {
+      clearTokens();
+      throw new Error('Not authenticated');
+    }
+    window.__ME__ = me;
+    const g = document.getElementById('greeting-name');
+    if (g && me?.firstName) g.textContent = me.firstName;
+    return { me, token: t };
   }
 
   // ---------- Strict gate for protected pages ----------
