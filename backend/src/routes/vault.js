@@ -1,10 +1,8 @@
-// backend/routes/vault.js
-// Compatibility shim: delegate Document Vault to the R2-native router.
 let router;
 try {
-  router = require('../src/routes/vault.routes');
+  router = require('./vault.routes');
 } catch (err) {
-  console.error('⚠️  Falling back to stub vault router:', err);
+  console.error('⚠️  Failed to load vault.routes:', err);
   try {
     const express = require('express');
     router = express.Router();
@@ -12,7 +10,6 @@ try {
       res.status(503).json({ error: 'Vault service unavailable', details: err?.message || 'Failed to initialize vault router' });
     });
   } catch {
-    // As a last resort, expose a noop middleware so mounting succeeds
     router = (_req, _res, next) => next();
   }
 }
