@@ -188,16 +188,40 @@ html.app-bento-open, body.app-bento-open{ overflow:hidden; height:100%; }
   .gradient-card.gradient-card--comp::before{background:radial-gradient(circle at top left, color-mix(in oklab, var(--brand) 45%, white) 0%, transparent 68%);}
   .gradient-card.gradient-card--comp::after{background:radial-gradient(circle at bottom right, color-mix(in oklab, #6c63ff 45%, white) 0%, transparent 70%);}
   .gradient-card .card-body{position:relative; z-index:1;}
-  .card.locked{filter:grayscale(.5); opacity:.6}
+.card.locked{filter:grayscale(.5); opacity:.6}
 
-  .locked-overlay{
-    position:absolute; inset:0;
-    background:rgba(8,16,32,0.68);
-    color:#fff;
-    display:flex; align-items:center; justify-content:center;
-    text-align:center; padding:2rem;
-  }
-  .locked-overlay__content{max-width:320px;}
+.locked-overlay{
+  position:absolute; inset:0;
+  background:rgba(8,16,32,0.68);
+  color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  text-align:center; padding:2rem;
+}
+.locked-overlay__content{max-width:320px;}
+
+.dashboard-loading-overlay{
+  position:absolute;
+  inset:0;
+  border-radius:var(--radius);
+  background:rgba(12,21,32,0.45);
+  backdrop-filter:blur(3px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:20;
+}
+.dashboard-loading-overlay__content{
+  text-align:center;
+  color:#fff;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:0.5rem;
+}
+#accounting-section.is-loading .card{
+  opacity:0.5;
+  pointer-events:none;
+}
   [data-required-tier]{position:relative;}
   [data-required-tier] .card{position:relative; overflow:hidden;}
   

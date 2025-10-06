@@ -178,6 +178,7 @@ router.get('/dashboard', auth, async (req, res) => {
   const docInsights = user.documentInsights || {};
   const docSources = docInsights.sources || {};
   const docAggregates = docInsights.aggregates || {};
+  const docProcessing = docInsights.processing || {};
   const hasData = Object.keys(docSources).length > 0;
   const wealthPlan = user.wealthPlan || {};
   const summary = wealthPlan.summary || {};
@@ -208,7 +209,17 @@ router.get('/dashboard', auth, async (req, res) => {
       key: 'income',
       value: Number(docAggregates.income.gross),
       format: 'currency',
-      subLabel: docAggregates.income.net != null ? `Net pay ${Number(docAggregates.income.net).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })}` : 'Derived from latest payslip upload.',
+      subLabel: (() => {
+        const net = docAggregates.income.net;
+        const pct = docAggregates.income.takeHomePercent;
+        if (net != null && pct != null) {
+          return `Take-home ${Number(net).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })} (${(pct * 100).toFixed(1)}% of gross).`;
+        }
+        if (net != null) {
+          return `Net pay ${Number(net).toLocaleString('en-GB', { style: 'currency', currency: 'GBP' })}.`;
+        }
+        return 'Derived from latest payslip upload.';
+      })(),
       sourceNote: 'Derived from payslip uploads in the document vault.',
     });
   }
@@ -240,19 +251,59 @@ router.get('/dashboard', auth, async (req, res) => {
     });
   }
 
-  const spendCategories = Array.isArray(docAggregates.cashflow?.categories)
-    ? docAggregates.cashflow.categories
-        .filter((cat) => cat.outflow)
-        .map((cat) => ({
-          label: cat.category,
-          amount: cat.outflow,
-          share: 0,
-        }))
-    : [];
-  const totalSpend = spendCategories.reduce((acc, item) => acc + Number(item.amount || 0), 0) || 1;
-  spendCategories.forEach((item) => {
-    item.share = Number(item.amount || 0) / totalSpend;
-  });
+  const categorySource = Array.isArray(docAggregates.cashflow?.topCategories) && docAggregates.cashflow.topCategories.length
+    ? docAggregates.cashflow.topCategories
+    : Array.isArray(docAggregates.cashflow?.categories)
+      ? docAggregates.cashflow.categories
+      : [];
+  const totalSpend = Number(docAggregates.cashflow?.spend || 0) || categorySource.reduce((acc, item) => acc + Number(item.outflow || item.amount || 0), 0) || 1;
+  const spendCategories = categorySource
+    .filter((cat) => (cat.outflow || cat.amount))
+    .map((cat) => ({
+      label: cat.category || cat.label || 'Category',
+      amount: Number(cat.outflow ?? cat.amount ?? 0),
+      share: totalSpend ? Number(cat.outflow ?? cat.amount ?? 0) / totalSpend : 0,
+    }));
+
+  const processingStates = Object.entries(docProcessing).map(([k, state]) => ({ key: k, ...(state || {}) }));
+  const processingActive = processingStates.some((state) => state.active);
+  const processingMessage = processingStates.find((state) => state.active && state.message)?.message
+    || (processingActive ? 'Updating analytics…' : null);
+
+  const payslipAnalytics = docAggregates.income && Object.keys(docAggregates.income).length
+    ? {
+        gross: docAggregates.income.gross ?? null,
+        grossYtd: docAggregates.income.grossYtd ?? null,
+        net: docAggregates.income.net ?? null,
+        netYtd: docAggregates.income.netYtd ?? null,
+        tax: docAggregates.income.tax ?? null,
+        ni: docAggregates.income.ni ?? null,
+        pension: docAggregates.income.pension ?? null,
+        studentLoan: docAggregates.income.studentLoan ?? null,
+        totalDeductions: docAggregates.income.totalDeductions ?? null,
+        annualisedGross: docAggregates.income.annualisedGross ?? null,
+        effectiveMarginalRate: docAggregates.income.effectiveMarginalRate ?? null,
+        expectedMarginalRate: docAggregates.income.expectedMarginalRate ?? null,
+        marginalRateDelta: docAggregates.income.marginalRateDelta ?? null,
+        takeHomePercent: docAggregates.income.takeHomePercent ?? null,
+        payFrequency: docAggregates.income.payFrequency || null,
+        taxCode: docAggregates.income.taxCode || null,
+        deductions: Array.isArray(docAggregates.income.deductions) ? docAggregates.income.deductions : [],
+        earnings: Array.isArray(docAggregates.income.earnings) ? docAggregates.income.earnings : [],
+        allowances: Array.isArray(docAggregates.income.allowances) ? docAggregates.income.allowances : [],
+        notes: docAggregates.income.notes || [],
+        extractionSource: docAggregates.income.extractionSource || null,
+      }
+    : null;
+
+  const statementHighlights = docAggregates.cashflow && Object.keys(docAggregates.cashflow).length
+    ? {
+        totalIncome: docAggregates.cashflow.income ?? null,
+        totalSpend: docAggregates.cashflow.spend ?? null,
+        topCategories: Array.isArray(docAggregates.cashflow.topCategories) ? docAggregates.cashflow.topCategories : [],
+        largestExpenses: Array.isArray(docAggregates.cashflow.largestExpenses) ? docAggregates.cashflow.largestExpenses : [],
+      }
+    : null;
 
   const usage = user.usageStats || {};
   const documentsProgress = {
@@ -282,6 +333,11 @@ router.get('/dashboard', auth, async (req, res) => {
       metrics,
       allowances: [],
       obligations: [],
+      processing: {
+        active: processingActive,
+        message: processingMessage,
+        states: processingStates,
+      },
       documents: {
         required: [],
         helpful: [],
@@ -294,6 +350,9 @@ router.get('/dashboard', auth, async (req, res) => {
         values: []
       },
       spendByCategory: spendCategories,
+      largestExpenses: Array.isArray(docAggregates.cashflow?.largestExpenses) ? docAggregates.cashflow.largestExpenses : [],
+      payslipAnalytics,
+      statementHighlights,
       hmrcBalance: docAggregates.tax?.taxDue != null ? { value: Number(docAggregates.tax.taxDue) } : null,
     },
     financialPosture: {
