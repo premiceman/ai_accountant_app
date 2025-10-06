@@ -11,6 +11,7 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   const moneyFormatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 });
+  const intFormatter = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 });
 
   function fmtMoney(amount, currency = 'GBP') {
     try {
@@ -18,6 +19,10 @@
     } catch {
       return moneyFormatter.format(Number(amount || 0));
     }
+  }
+
+  function fmtInt(value) {
+    return intFormatter.format(Math.round(Number(value || 0)));
   }
 
   function isoToNice(value) {
@@ -91,14 +96,49 @@
     wrap.innerHTML = '';
     tiles.forEach((tile) => {
       const node = document.createElement('div');
-      node.className = 'tile';
-      node.innerHTML = `
-        <div class="k">${tile.label}</div>
-        <div class="v">
-          <span>${tile.value}</span>
-          ${tile.meta ? `<span class="delta ${tile.metaTone || ''}">${tile.meta}</span>` : ''}
-        </div>
-      `;
+      node.className = ['tile', tile.className || ''].join(' ').trim();
+
+      const head = document.createElement('div');
+      head.className = 'tile-head';
+      const label = document.createElement('div');
+      label.className = 'k';
+      label.textContent = tile.label;
+      head.appendChild(label);
+      if (tile.tooltip) {
+        const tip = document.createElement('span');
+        tip.className = 'tile-tip';
+        tip.setAttribute('role', 'img');
+        tip.setAttribute('aria-label', 'More information');
+        tip.title = tile.tooltip;
+        tip.textContent = 'ℹ︎';
+        head.appendChild(tip);
+      }
+      node.appendChild(head);
+
+      const valueWrap = document.createElement('div');
+      valueWrap.className = 'v';
+      const valueSpan = document.createElement('span');
+      valueSpan.textContent = tile.value;
+      valueWrap.appendChild(valueSpan);
+      if (tile.meta) {
+        const meta = document.createElement('span');
+        meta.className = ['delta', tile.metaTone || ''].join(' ').trim();
+        meta.textContent = tile.meta;
+        valueWrap.appendChild(meta);
+      }
+      node.appendChild(valueWrap);
+
+      if (tile.cta) {
+        const link = document.createElement('a');
+        link.className = 'tile-cta';
+        link.href = tile.cta.href;
+        link.textContent = tile.cta.label;
+        link.setAttribute('aria-label', tile.cta.ariaLabel || tile.cta.label);
+        if (tile.cta.target) link.target = tile.cta.target;
+        if (tile.cta.rel) link.rel = tile.cta.rel;
+        node.appendChild(link);
+      }
+
       wrap.appendChild(node);
     });
   }
@@ -123,14 +163,80 @@
     const emailTone = state.user.emailVerified ? 'up' : 'down';
     const emailMeta = state.user.emailVerified ? 'All secure' : 'Verify in settings';
 
-    const tiles = [
+    const usage = state.user.usageStats || {};
+    const saved = Number(usage.moneySavedEstimate || 0);
+    const savedDelta = usage.moneySavedChangePct;
+    const savedTone = savedDelta == null ? 'info' : savedDelta >= 0 ? 'up' : 'down';
+    let savedMeta = '';
+    if (savedDelta == null) {
+      savedMeta = usage.moneySavedPrevSpend
+        ? `£${fmtInt(usage.moneySavedPrevSpend)} spent last period`
+        : 'Baseline established';
+    } else if (savedDelta === 0) {
+      savedMeta = 'Level vs last period';
+    } else {
+      savedMeta = `${savedDelta > 0 ? '▲' : '▼'} ${fmtInt(Math.abs(savedDelta))}% vs last period`;
+    }
+
+    const docsProgress = Number(usage.documentsRequiredMet || 0);
+    const docsTone = docsProgress >= 80 ? 'up' : docsProgress < 50 ? 'down' : 'info';
+    const docsTotal = Number(usage.documentsRequiredTotal || 5);
+    const docsMeta = `${fmtInt(usage.documentsRequiredCompleted || 0)} of ${fmtInt(docsTotal)} submitted`;
+
+    const debtPaid = Number(usage.debtReduced || 0);
+    const debtDelta = Number(usage.debtReductionDelta || 0);
+    let debtMeta = '';
+    let debtTone = 'info';
+    if (debtDelta === 0) {
+      debtMeta = 'Level vs last period';
+      debtTone = 'info';
+    } else {
+      debtTone = debtDelta > 0 ? 'up' : 'down';
+      debtMeta = `${debtDelta > 0 ? '▲' : '▼'} ${fmtMoney(Math.abs(debtDelta))} vs last period`;
+    }
+
+    const roiTiles = [
+      {
+        label: 'Money saved',
+        value: fmtMoney(saved),
+        meta: savedMeta,
+        metaTone: savedTone,
+        tooltip: 'Estimated reduction in outgoings compared to the previous reporting window.',
+        cta: { href: './scenario-lab.html', label: 'Open scenario lab', rel: 'noopener' }
+      },
+      {
+        label: 'Required docs complete',
+        value: `${fmtInt(Math.min(100, docsProgress))}%`,
+        meta: docsMeta,
+        metaTone: docsTone,
+        tooltip: 'We track your key compliance uploads so you are HMRC-ready when filings are due.',
+        cta: { href: './document-vault.html', label: 'Go to document vault', rel: 'noopener' }
+      },
+      {
+        label: 'Debt paid down',
+        value: fmtMoney(debtPaid),
+        meta: debtMeta,
+        metaTone: debtTone,
+        tooltip: 'Positive cash flow is earmarked against outstanding credit and loan balances.',
+        cta: { href: './wealth-lab.html', label: 'Explore wealth lab', rel: 'noopener' }
+      }
+    ];
+
+    const planTiles = [
       { label: 'Plan', value: planLabel },
       { label: 'Billing cadence', value: cadenceLabel },
-      { label: 'Plan cost', value: priceDisplay, meta: plan ? (interval === 'yearly' ? 'Best value' : 'Switch to yearly and save') : null, metaTone: interval === 'yearly' ? 'up' : 'info' },
+      {
+        label: 'Plan cost',
+        value: priceDisplay,
+        meta: plan ? (interval === 'yearly' ? 'Best value' : 'Switch to yearly and save') : null,
+        metaTone: interval === 'yearly' ? 'up' : 'info'
+      },
       { label: 'Days with Phloat', value: `${daysBetween(state.user.createdAt)} days` },
       { label: 'Email status', value: emailStatus, meta: emailMeta, metaTone: emailTone },
       { label: 'Profile refreshed', value: isoToDate(state.user.updatedAt) }
     ];
+
+    const tiles = [...roiTiles, ...planTiles];
 
     setTileGrid(tiles);
   }
