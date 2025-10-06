@@ -134,6 +134,8 @@
   }
 
   async function reloadDashboard() {
+    // TODO(analytics-cache): Once worker-backed cache is live, detect stale payloads and
+    // surface a "refreshing" indicator while background recompute runs.
     setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
     const st = loadRange();
     const params = new URLSearchParams();
