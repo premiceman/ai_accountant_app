@@ -31,6 +31,8 @@ const integrationsRouter = safeRequire('./routes/integrations')     || safeRequi
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const truelayerRouter  = safeRequire('./routes/truelayer')          || safeRequire('./src/routes/truelayer');
 
+const plaidSyncWorker = safeRequire('./services/plaidSyncWorker');
+
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
 
@@ -118,6 +120,9 @@ mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
     app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+    if (plaidSyncWorker?.startPlaidSyncWorker) {
+      plaidSyncWorker.startPlaidSyncWorker({ force: true });
+    }
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err);

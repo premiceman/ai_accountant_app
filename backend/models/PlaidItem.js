@@ -22,6 +22,10 @@ const PlaidItemSchema = new Schema({
   lastFailedUpdate: { type: Date },
   lastSyncAttempt: { type: Date },
   lastSyncedAt: { type: Date },
+  transactions: { type: [Schema.Types.ObjectId], ref: 'Transaction', default: [] },
+  transactionsCursor: { type: String },
+  transactionsLastSyncedAt: { type: Date },
+  transactionsFreshUntil: { type: Date },
 }, { timestamps: true });
 
 PlaidItemSchema.index({ userId: 1, plaidItemId: 1 }, { unique: true });
