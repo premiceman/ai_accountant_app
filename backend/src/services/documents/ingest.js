@@ -1,4 +1,6 @@
 const pdfParse = require('pdf-parse');
+const { analysePayslip } = require('./parsers/payslip');
+const { analyseCurrentAccountStatement } = require('./parsers/statement');
 
 function normalise(text) {
   return String(text || '').toLowerCase();
@@ -27,89 +29,112 @@ function extractNumber(text, labels) {
   for (const label of labels) {
     const idx = lower.indexOf(label);
     if (idx === -1) continue;
-    const snippet = text.slice(Math.max(0, idx - 12), idx + 60);
-    const match = snippet.match(/(-?\d[\d,.]*)(?:\s*(?:£|gbp))?/i) || snippet.match(/£\s*(-?[\d,.]+)/i);
+    const snippet = text.slice(Math.max(0, idx - 12), idx + 80);
+    const match = snippet.match(/£\s*(-?[\d,.]+)/i)
+      || snippet.match(/(-?\d[\d,.]*)(?:\s*(?:£|gbp))?/i);
     if (match) {
-      return Number(match[1].replace(/[,£\s]/g, ''));
+      const cleaned = match[1].replace(/[,£\s]/g, '');
+      const value = Number.parseFloat(cleaned);
+      if (Number.isFinite(value)) return value;
     }
   }
   return null;
 }
 
-function parseStatementTransactions(text) {
-  const lines = String(text || '').split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
-  const categories = {
-    income: ['salary', 'payroll', 'payslip', 'hmrc', 'bonus'],
-    housing: ['rent', 'mortgage'],
-    groceries: ['tesco', 'sainsbury', 'waitrose', 'aldi', 'lidl', 'morrison'],
-    subscriptions: ['netflix', 'spotify', 'prime', 'icloud', 'google'],
-    utilities: ['edf', 'octopus', 'british gas', 'thames water', 'ee', 'o2', 'vodafone'],
-    savings: ['transfer', 'savings', 'isa'],
-    shopping: ['amazon', 'apple', 'currys', 'argos'],
-  };
-  const transactions = [];
-  for (const line of lines) {
-    const amountMatch = line.match(/(-?£?\d[\d,]*\.?\d{0,2})$/);
-    if (!amountMatch) continue;
-    const amount = Number(amountMatch[1].replace(/[,£]/g, ''));
-    const description = line.replace(amountMatch[0], '').trim();
-    const descLower = normalise(description);
-    let category = 'other';
-    for (const [cat, probes] of Object.entries(categories)) {
-      if (probes.some((probe) => descLower.includes(probe))) {
-        category = cat;
-        break;
-      }
-    }
-    const direction = amount >= 0 ? 'inflow' : 'outflow';
-    transactions.push({ description, amount, category, direction });
-  }
-  const totals = transactions.reduce((acc, tx) => {
-    if (tx.direction === 'inflow') acc.income += tx.amount;
-    else acc.spend += Math.abs(tx.amount);
-    return acc;
-  }, { income: 0, spend: 0 });
-  return { transactions, totals };
-}
-
-function summariseTransactions(transactions) {
-  const groups = {};
-  for (const tx of transactions) {
-    const key = tx.category || 'other';
-    if (!groups[key]) groups[key] = { category: key, inflow: 0, outflow: 0 };
-    if (tx.direction === 'inflow') groups[key].inflow += tx.amount;
-    else groups[key].outflow += Math.abs(tx.amount);
-  }
-  return Object.values(groups).sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
-}
-
-function buildInsights(entry, text) {
+async function buildInsights(entry, text, context = {}) {
   const key = entry.key;
   const insights = { key, metrics: {}, narrative: [] };
+  const originalName = context.originalName || null;
 
   if (key === 'payslip') {
-    const gross = extractNumber(text, ['gross pay', 'total gross']);
-    const net = extractNumber(text, ['net pay', 'take home']);
-    const tax = extractNumber(text, ['tax', 'income tax']);
-    const ni = extractNumber(text, ['national insurance']);
-    const pension = extractNumber(text, ['pension', 'employee pension']);
-    insights.metrics = {
-      gross,
-      net,
-      tax,
-      ni,
-      pension,
+    const breakdown = await analysePayslip(text || '');
+    const periodKey = breakdown.payDate || breakdown.periodEnd || breakdown.periodStart || null;
+    if (periodKey) {
+      insights.storeKey = `payslip:${periodKey}`;
+    }
+    insights.baseKey = key;
+    insights.metadata = {
+      payDate: breakdown.payDate || null,
+      periodStart: breakdown.periodStart || null,
+      periodEnd: breakdown.periodEnd || null,
+      extractionSource: breakdown.extractionSource || null,
     };
-    insights.narrative.push('Earnings and deductions extracted from payslip.');
+    insights.metrics = {
+      gross: breakdown.gross ?? null,
+      grossYtd: breakdown.grossYtd ?? null,
+      net: breakdown.net ?? null,
+      netYtd: breakdown.netYtd ?? null,
+      tax: breakdown.tax ?? null,
+      ni: breakdown.ni ?? null,
+      pension: breakdown.pension ?? null,
+      studentLoan: breakdown.studentLoan ?? null,
+      totalDeductions: breakdown.totalDeductions ?? null,
+      annualisedGross: breakdown.annualisedGross ?? null,
+      effectiveMarginalRate: breakdown.effectiveMarginalRate ?? null,
+      expectedMarginalRate: breakdown.expectedMarginalRate ?? null,
+      marginalRateDelta: breakdown.marginalRateDelta ?? null,
+      takeHomePercent: breakdown.takeHomePercent ?? null,
+      payFrequency: breakdown.payFrequency || null,
+      taxCode: breakdown.taxCode || null,
+      deductions: breakdown.deductions || [],
+      earnings: breakdown.earnings || [],
+      allowances: breakdown.allowances || [],
+      notes: breakdown.notes || [],
+      extractionSource: breakdown.extractionSource || 'heuristic',
+      llmNotes: breakdown.llmNotes || [],
+      payDate: breakdown.payDate || null,
+      periodStart: breakdown.periodStart || null,
+      periodEnd: breakdown.periodEnd || null,
+    };
+    if (insights.metrics.notes.length) {
+      insights.narrative.push(...insights.metrics.notes);
+    } else {
+      insights.narrative.push('Earnings and deductions extracted from payslip.');
+    }
   } else if (key === 'current_account_statement') {
-    const parsed = parseStatementTransactions(text);
-    insights.transactions = parsed.transactions;
-    insights.metrics = {
-      income: parsed.totals.income,
-      spend: parsed.totals.spend,
-      categories: summariseTransactions(parsed.transactions),
+    const analysed = await analyseCurrentAccountStatement(text || '');
+    const metadata = analysed.metadata || {};
+    const periodKey = [metadata.accountId, metadata.period?.start, metadata.period?.end]
+      .filter(Boolean)
+      .join(':');
+    if (periodKey) {
+      insights.storeKey = `${key}:${periodKey}`;
+    } else if (metadata.accountId) {
+      insights.storeKey = `${key}:${metadata.accountId}`;
+    }
+    insights.baseKey = key;
+    insights.metadata = {
+      ...metadata,
+      extractionSource: analysed.extractionSource || null,
+      originalName,
     };
-    insights.narrative.push('Classified inflows and outflows from current account statement.');
+    const transactions = (analysed.transactions || []).map((tx) => ({
+      ...tx,
+      amount: Number(tx.amount),
+      direction: tx.direction || (Number(tx.amount) >= 0 ? 'inflow' : 'outflow'),
+      accountId: metadata.accountId || null,
+      accountName: metadata.accountName || null,
+      bankName: metadata.bankName || null,
+      accountType: metadata.accountType || null,
+      statementPeriod: metadata.period || null,
+    }));
+    insights.transactions = transactions;
+    insights.metrics = {
+      income: analysed.summary?.totals?.income ?? 0,
+      spend: analysed.summary?.totals?.spend ?? 0,
+      categories: analysed.summary?.categories || [],
+      topCategories: analysed.summary?.topCategories || [],
+      largestExpenses: analysed.summary?.largestExpenses || [],
+      extractionSource: analysed.extractionSource || null,
+      account: metadata,
+    };
+    const accountLabel = [metadata.accountName, metadata.accountNumberMasked].filter(Boolean).join(' ');
+    insights.narrative.push(accountLabel
+      ? `Classified inflows and outflows for ${accountLabel}.`
+      : 'Classified inflows and outflows from current account statement.');
+    if (insights.metrics.topCategories?.length) {
+      insights.narrative.push('Identified top spending categories from the latest bank statement.');
+    }
   } else if (key === 'savings_account_statement' || key === 'isa_statement') {
     const balance = extractNumber(text, ['balance', 'closing balance']);
     const interest = extractNumber(text, ['interest', 'gross interest']);
@@ -167,7 +192,7 @@ async function analyseDocument(entry, buffer, originalName) {
   }
   return {
     valid: true,
-    insights: buildInsights(entry, text),
+    insights: await buildInsights(entry, text, { originalName }),
     text,
   };
 }

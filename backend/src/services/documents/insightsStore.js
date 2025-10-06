@@ -10,6 +10,149 @@ function mergeFileReference(existing = [], fileInfo) {
   return filtered.slice(0, 5);
 }
 
+function normaliseDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) return date.toISOString();
+  const match = String(value).match(/(\d{4}-\d{2}-\d{2})/);
+  if (match) return `${match[1]}T00:00:00.000Z`;
+  return null;
+}
+
+function indexByBaseKey(sources = {}) {
+  const grouped = {};
+  for (const entry of Object.values(sources)) {
+    if (!entry) continue;
+    const baseKey = entry.baseKey || entry.key;
+    if (!baseKey) continue;
+    if (!grouped[baseKey]) grouped[baseKey] = [];
+    grouped[baseKey].push(entry);
+  }
+  return grouped;
+}
+
+function summariseStatementEntries(entries = []) {
+  const transactions = [];
+  const accounts = new Map();
+  entries.forEach((entry) => {
+    const meta = entry.metadata || {};
+    const accountId = meta.accountId || entry.key;
+    const accountName = meta.accountName || 'Account';
+    const accountSummary = accounts.get(accountId) || {
+      accountId,
+      accountName,
+      bankName: meta.bankName || null,
+      accountType: meta.accountType || null,
+      accountNumberMasked: meta.accountNumberMasked || null,
+      period: meta.period || entry.period || null,
+      totals: { income: 0, spend: 0 },
+      extractionSource: meta.extractionSource || entry.metrics?.extractionSource || null,
+    };
+    accounts.set(accountId, accountSummary);
+
+    const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
+    txList.forEach((tx, idx) => {
+      const amount = Number(tx.amount);
+      if (!Number.isFinite(amount)) return;
+      const direction = tx.direction || (amount >= 0 ? 'inflow' : 'outflow');
+      const id = `${entry.key}:${idx}`;
+      transactions.push({
+        ...tx,
+        __id: id,
+        amount,
+        direction,
+        accountId: tx.accountId || accountId,
+        accountName: tx.accountName || accountName,
+        bankName: tx.bankName || meta.bankName || null,
+        accountType: tx.accountType || meta.accountType || null,
+        statementPeriod: tx.statementPeriod || meta.period || entry.period || null,
+        statementKey: entry.key,
+        date: tx.date || meta.period?.end || meta.period?.start || null,
+      });
+    });
+  });
+
+  const signatureMap = new Map();
+  const transferIds = new Set();
+  transactions.forEach((tx) => {
+    if (tx.transfer) transferIds.add(tx.__id);
+    const dateKey = tx.date ? String(tx.date).slice(0, 10) : 'unknown';
+    const descriptionKey = String(tx.description || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const key = `${dateKey}|${Math.abs(tx.amount).toFixed(2)}|${descriptionKey}`;
+    const bucket = signatureMap.get(key) || { inflow: [], outflow: [] };
+    if (tx.amount >= 0) bucket.inflow.push(tx);
+    else bucket.outflow.push(tx);
+    signatureMap.set(key, bucket);
+  });
+
+  for (const bucket of signatureMap.values()) {
+    if (bucket.inflow.length && bucket.outflow.length) {
+      bucket.inflow.forEach((tx) => transferIds.add(tx.__id));
+      bucket.outflow.forEach((tx) => transferIds.add(tx.__id));
+    }
+  }
+
+  const filtered = transactions.filter((tx) => !transferIds.has(tx.__id));
+
+  filtered.forEach((tx) => {
+    const summary = accounts.get(tx.accountId);
+    if (!summary) return;
+    if (tx.amount >= 0) summary.totals.income += tx.amount;
+    else summary.totals.spend += Math.abs(tx.amount);
+  });
+
+  const totals = filtered.reduce((acc, tx) => {
+    if (tx.amount >= 0) acc.income += tx.amount;
+    else acc.spend += Math.abs(tx.amount);
+    return acc;
+  }, { income: 0, spend: 0 });
+
+  const categoryGroups = {};
+  filtered.forEach((tx) => {
+    const key = tx.category || 'Other';
+    if (!categoryGroups[key]) categoryGroups[key] = { category: key, inflow: 0, outflow: 0 };
+    if (tx.amount >= 0) categoryGroups[key].inflow += tx.amount;
+    else categoryGroups[key].outflow += Math.abs(tx.amount);
+  });
+  const categories = Object.values(categoryGroups)
+    .sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
+  const topCategories = categories
+    .filter((cat) => cat.outflow)
+    .slice(0, 5)
+    .map((cat) => ({
+      category: cat.category,
+      outflow: cat.outflow,
+      inflow: cat.inflow,
+    }));
+  const largestExpenses = filtered
+    .filter((tx) => tx.amount < 0)
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+    .slice(0, 5)
+    .map((tx) => ({
+      description: tx.description,
+      amount: Math.abs(tx.amount),
+      category: tx.category,
+      date: tx.date || null,
+      accountName: tx.accountName || null,
+    }));
+
+  return {
+    totals,
+    categories,
+    topCategories,
+    largestExpenses,
+    accounts: Array.from(accounts.values()).map((acc) => ({
+      ...acc,
+      totals: {
+        income: Math.round(acc.totals.income * 100) / 100,
+        spend: Math.round(acc.totals.spend * 100) / 100,
+      },
+    })),
+    transactions: filtered,
+    transferCount: transferIds.size,
+  };
+}
+
 function buildAggregates(sources) {
   const aggregates = {
     income: {},
@@ -19,50 +162,116 @@ function buildAggregates(sources) {
     tax: {},
   };
 
-  const payslip = sources.payslip;
-  if (payslip?.metrics) {
+  const grouped = indexByBaseKey(sources);
+
+  const payslipEntries = Array.isArray(grouped.payslip) ? grouped.payslip : [];
+  let latestPayslip = null;
+  if (payslipEntries.length) {
+    latestPayslip = payslipEntries.slice().sort((a, b) => {
+      const aDate = normaliseDate(a.metadata?.payDate || a.metrics?.payDate || a.files?.[0]?.uploadedAt);
+      const bDate = normaliseDate(b.metadata?.payDate || b.metrics?.payDate || b.files?.[0]?.uploadedAt);
+      return (bDate || '').localeCompare(aDate || '');
+    })[0];
+  }
+
+  if (latestPayslip?.metrics) {
     aggregates.income = {
-      gross: payslip.metrics.gross ?? null,
-      net: payslip.metrics.net ?? null,
-      tax: payslip.metrics.tax ?? null,
-      ni: payslip.metrics.ni ?? null,
-      pension: payslip.metrics.pension ?? null,
+      gross: latestPayslip.metrics.gross ?? null,
+      grossYtd: latestPayslip.metrics.grossYtd ?? null,
+      net: latestPayslip.metrics.net ?? null,
+      netYtd: latestPayslip.metrics.netYtd ?? null,
+      tax: latestPayslip.metrics.tax ?? null,
+      ni: latestPayslip.metrics.ni ?? null,
+      pension: latestPayslip.metrics.pension ?? null,
+      studentLoan: latestPayslip.metrics.studentLoan ?? null,
+      totalDeductions: latestPayslip.metrics.totalDeductions ?? null,
+      annualisedGross: latestPayslip.metrics.annualisedGross ?? null,
+      effectiveMarginalRate: latestPayslip.metrics.effectiveMarginalRate ?? null,
+      expectedMarginalRate: latestPayslip.metrics.expectedMarginalRate ?? null,
+      marginalRateDelta: latestPayslip.metrics.marginalRateDelta ?? null,
+      takeHomePercent: latestPayslip.metrics.takeHomePercent ?? null,
+      payFrequency: latestPayslip.metrics.payFrequency || null,
+      taxCode: latestPayslip.metrics.taxCode || null,
+      deductions: Array.isArray(latestPayslip.metrics.deductions) ? latestPayslip.metrics.deductions : [],
+      earnings: Array.isArray(latestPayslip.metrics.earnings) ? latestPayslip.metrics.earnings : [],
+      allowances: Array.isArray(latestPayslip.metrics.allowances) ? latestPayslip.metrics.allowances : [],
+      extractionSource: latestPayslip.metrics.extractionSource || null,
+      payDate: latestPayslip.metrics.payDate || latestPayslip.metadata?.payDate || null,
+      periodStart: latestPayslip.metrics.periodStart || latestPayslip.metadata?.periodStart || null,
+      periodEnd: latestPayslip.metrics.periodEnd || latestPayslip.metadata?.periodEnd || null,
     };
+    if (latestPayslip.metrics.notes) {
+      aggregates.income.notes = latestPayslip.metrics.notes;
+    }
   }
 
-  const currentAccount = sources.current_account_statement;
-  if (currentAccount?.metrics) {
+  const statementEntries = Array.isArray(grouped.current_account_statement)
+    ? grouped.current_account_statement
+    : [];
+  if (statementEntries.length) {
+    const summary = summariseStatementEntries(statementEntries);
     aggregates.cashflow = {
-      income: currentAccount.metrics.income ?? 0,
-      spend: currentAccount.metrics.spend ?? 0,
-      categories: currentAccount.metrics.categories || [],
+      income: summary.totals.income,
+      spend: summary.totals.spend,
+      categories: summary.categories,
+      topCategories: summary.topCategories,
+      largestExpenses: summary.largestExpenses,
+      accounts: summary.accounts,
+      transferCount: summary.transferCount,
     };
   }
 
+  const savingsSources = [
+    ...(Array.isArray(grouped.savings_account_statement) ? grouped.savings_account_statement : []),
+    ...(Array.isArray(grouped.isa_statement) ? grouped.isa_statement : []),
+  ];
   const savingsBalance = [];
-  if (sources.savings_account_statement?.metrics?.balance != null) {
-    savingsBalance.push(sources.savings_account_statement.metrics.balance);
-  }
-  if (sources.isa_statement?.metrics?.balance != null) {
-    savingsBalance.push(sources.isa_statement.metrics.balance);
-  }
+  savingsSources.forEach((entry) => {
+    if (entry?.metrics?.balance != null) savingsBalance.push(entry.metrics.balance);
+  });
   if (savingsBalance.length) {
     aggregates.savings = {
       balance: savingsBalance.reduce((acc, v) => acc + (Number(v) || 0), 0),
-      interest: sources.savings_account_statement?.metrics?.interest ?? null,
+      interest: savingsSources.find((entry) => entry?.metrics?.interest != null)?.metrics?.interest ?? null,
     };
   }
 
-  if (sources.pension_statement?.metrics) {
+  const pensionEntries = Array.isArray(grouped.pension_statement) ? grouped.pension_statement : [];
+  const latestPension = pensionEntries.slice().sort((a, b) => {
+    const aDate = normaliseDate(a.files?.[0]?.uploadedAt);
+    const bDate = normaliseDate(b.files?.[0]?.uploadedAt);
+    return (bDate || '').localeCompare(aDate || '');
+  })[0];
+  if (latestPension?.metrics) {
     aggregates.pension = {
-      balance: sources.pension_statement.metrics.balance ?? null,
-      contributions: sources.pension_statement.metrics.contributions ?? null,
+      balance: latestPension.metrics.balance ?? null,
+      contributions: latestPension.metrics.contributions ?? null,
     };
   }
 
-  if (sources.hmrc_correspondence?.metrics?.taxDue != null) {
+  const hmrcEntries = Array.isArray(grouped.hmrc_correspondence) ? grouped.hmrc_correspondence : [];
+  const latestHmrc = hmrcEntries.slice().sort((a, b) => {
+    const aDate = normaliseDate(a.files?.[0]?.uploadedAt);
+    const bDate = normaliseDate(b.files?.[0]?.uploadedAt);
+    return (bDate || '').localeCompare(aDate || '');
+  })[0];
+  const hmrcMetrics = latestHmrc?.metrics || {};
+  if (hmrcMetrics.taxDue != null) {
     aggregates.tax = {
-      taxDue: sources.hmrc_correspondence.metrics.taxDue,
+      taxDue: hmrcMetrics.taxDue,
+    };
+  }
+  if ((aggregates.tax?.taxDue == null) && aggregates.income?.tax != null) {
+    aggregates.tax = {
+      ...aggregates.tax,
+      taxDue: aggregates.income.tax,
+    };
+  }
+  if (aggregates.income?.effectiveMarginalRate != null) {
+    aggregates.tax = {
+      ...aggregates.tax,
+      effectiveMarginalRate: aggregates.income.effectiveMarginalRate,
+      expectedMarginalRate: aggregates.income.expectedMarginalRate ?? null,
     };
   }
 
@@ -74,19 +283,33 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   const doc = await User.findById(userId, 'documentInsights').lean();
   const current = doc?.documentInsights || {};
   const sources = { ...(current.sources || {}) };
-  const existing = sources[key] || {};
-  sources[key] = {
+  const storeKey = insights.storeKey || key;
+  const baseKey = insights.baseKey || key;
+  const existing = sources[storeKey] || {};
+  sources[storeKey] = {
     ...existing,
-    key,
+    key: storeKey,
+    baseKey,
     metrics: insights.metrics || existing.metrics || {},
     narrative: insights.narrative || existing.narrative || [],
     transactions: insights.transactions || existing.transactions || [],
-    files: mergeFileReference(existing.files, fileInfo),
+    metadata: insights.metadata || existing.metadata || {},
+    period: insights.metadata?.period || insights.metrics?.period || existing.period || null,
+    files: fileInfo ? mergeFileReference(existing.files, fileInfo) : (existing.files || []),
+  };
+
+  const processing = { ...(current.processing || {}) };
+  processing[baseKey] = {
+    ...(processing[baseKey] || {}),
+    active: false,
+    message: fileInfo?.name ? `Updated from ${fileInfo.name}` : 'Analytics refreshed',
+    updatedAt: new Date(),
   };
 
   const newState = {
     sources,
     aggregates: buildAggregates(sources),
+    processing,
     updatedAt: new Date(),
   };
 
@@ -101,6 +324,30 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   return newState;
 }
 
+async function setInsightsProcessing(userId, key, state) {
+  if (!userId || !key) return null;
+  const path = `documentInsights.processing.${key}`;
+  try {
+    if (!state) {
+      await User.findByIdAndUpdate(userId, { $unset: { [path]: '' } }).exec();
+      return null;
+    }
+    const payload = {
+      active: Boolean(state.active),
+      message: state.message || null,
+      updatedAt: new Date(),
+    };
+    if (state.step) payload.step = state.step;
+    if (state.progress != null) payload.progress = state.progress;
+    await User.findByIdAndUpdate(userId, { $set: { [path]: payload } }).exec();
+    return payload;
+  } catch (err) {
+    console.warn('[documents:insightsStore] failed to set processing state', err);
+    return null;
+  }
+}
+
 module.exports = {
   applyDocumentInsights,
+  setInsightsProcessing,
 };
