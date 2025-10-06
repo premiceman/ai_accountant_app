@@ -1,4 +1,4 @@
-import mongoose, { Connection } from 'mongoose';
+import mongoose, { Connection, type ConnectOptions } from 'mongoose';
 import { JobsOptions } from 'bullmq';
 import pino from 'pino';
 import { BullQueueDriver, ProcessorFn } from './bull.js';
@@ -104,10 +104,12 @@ class MongoOutboxDriver implements QueueDriver {
       throw new Error('MONGODB_URI must be defined when REDIS_URL is not set');
     }
 
-    this.connection = await mongoose.createConnection(uri, {
+    const options: ConnectOptions = {
       maxPoolSize: 4,
       minPoolSize: 1,
-    }).asPromise();
+    };
+
+    this.connection = await mongoose.createConnection(uri, options).asPromise();
 
     this.model = this.connection.model<OutboxDocument>('WorkerOutbox', outboxSchema);
   }
