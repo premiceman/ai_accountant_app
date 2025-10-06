@@ -15,6 +15,7 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
+const { DOCS } = require('../data/vaultCatalogue');
 
 const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
 const {
@@ -69,107 +70,27 @@ function extractDisplayNameFromKey(key) {
   return m ? m[3] : tail;
 }
 
-const REQUIRED_KEYS = getRequiredKeys();
-const HELPFUL_KEYS = getHelpfulKeys();
-
-async function mutateUserCatalogue(userId, mutator) {
-  if (!userId) return null;
-  try {
-    const user = await User.findById(userId);
-    if (!user) return null;
-
-    user.usageStats = user.usageStats || {};
-    const stats = user.usageStats;
-    const state = (stats.documentsCatalogue && typeof stats.documentsCatalogue === 'object')
-      ? stats.documentsCatalogue
-      : {};
-    const perFile = { ...(state.perFile || {}) };
-
-    const shouldSave = await mutator({ user, stats, perFile });
-    if (!shouldSave) return null;
-
-    const summary = summarizeCatalogue(perFile);
-    stats.documentsCatalogue = { perFile, perKey: summary.perKey };
-    stats.documentsRequiredMet = summary.requiredCompleted;
-    stats.documentsHelpfulMet = summary.helpfulCompleted;
-    stats.documentsRequiredTotal = REQUIRED_KEYS.length;
-    stats.documentsHelpfulTotal = HELPFUL_KEYS.length;
-    stats.documentsProgressUpdatedAt = new Date();
-    user.markModified('usageStats');
-    await user.save();
-    return { summary };
-  } catch (err) {
-    console.error('Vault catalogue mutation failed:', err);
-    return null;
+function docMatchesFile(doc, file) {
+  const hay = `${file.name || ''} ${file.collectionName || ''}`.toLowerCase();
+  if (!hay.trim()) return false;
+  const probes = new Set();
+  const key = String(doc.key || '');
+  if (key) probes.add(key.toLowerCase().replace(/_/g, ' '));
+  const label = String(doc.label || '');
+  if (label) probes.add(label.toLowerCase());
+  const aliases = Array.isArray(doc.aliases) ? doc.aliases : [];
+  aliases.forEach(a => probes.add(String(a || '').toLowerCase()));
+  // Individual words from label (>=3 chars) to widen match but avoid noise
+  label
+    .split(/[^a-z0-9]+/i)
+    .map(w => w.toLowerCase())
+    .filter(w => w.length >= 3)
+    .forEach(w => probes.add(w));
+  for (const probe of probes) {
+    if (!probe) continue;
+    if (hay.includes(probe)) return true;
   }
-}
-
-async function recordCatalogueUploads(userId, catalogueKey, uploads, collectionId) {
-  if (!catalogueKey || !Array.isArray(uploads) || !uploads.length) return;
-  if (!getCatalogueEntry(catalogueKey)) return;
-
-  await mutateUserCatalogue(userId, ({ perFile, stats }) => {
-    const timestamp = new Date().toISOString();
-    for (const upload of uploads) {
-      if (!upload?.id) continue;
-      perFile[upload.id] = {
-        key: catalogueKey,
-        collectionId: collectionId || null,
-        uploadedAt: upload.uploadedAt || timestamp,
-        name: upload.name || 'document.pdf',
-        size: Number.isFinite(upload.size) ? upload.size : Number(upload.size) || 0,
-      };
-    }
-    stats.documentsUploaded = (stats.documentsUploaded || 0) + uploads.length;
-    return true;
-  });
-}
-
-async function recordCatalogueDeletion(userId, fileId) {
-  if (!fileId) return;
-  await mutateUserCatalogue(userId, ({ perFile, stats }) => {
-    if (!perFile[fileId]) return false;
-    delete perFile[fileId];
-    if (stats.documentsUploaded) {
-      stats.documentsUploaded = Math.max(0, (stats.documentsUploaded || 0) - 1);
-    }
-    return true;
-  });
-}
-
-async function recordCatalogueRename(userId, fileId, newName) {
-  if (!fileId || !newName) return;
-  await mutateUserCatalogue(userId, ({ perFile }) => {
-    const entry = perFile[fileId];
-    if (!entry) return false;
-    entry.name = newName;
-    return true;
-  });
-}
-
-async function replaceCatalogueFileId(userId, oldId, newId, newName) {
-  if (!oldId || !newId) return;
-  await mutateUserCatalogue(userId, ({ perFile }) => {
-    const entry = perFile[oldId];
-    if (!entry) return false;
-    delete perFile[oldId];
-    perFile[newId] = {
-      ...entry,
-      name: newName || entry.name,
-    };
-    return true;
-  });
-}
-
-async function getUserCatalogueState(userId) {
-  if (!userId) return { perFile: {}, summary: summarizeCatalogue({}), updatedAt: null };
-  const user = await User.findById(userId).lean();
-  if (!user) return { perFile: {}, summary: summarizeCatalogue({}), updatedAt: null };
-  const perFile =
-    (user.usageStats && user.usageStats.documentsCatalogue && user.usageStats.documentsCatalogue.perFile) || {};
-  const summary = summarizeCatalogue(perFile);
-  const updatedAt = user.usageStats?.documentsProgressUpdatedAt || null;
-  return { perFile, summary, updatedAt };
+  return false;
 }
 
 // ---- collections control doc ----
@@ -232,33 +153,61 @@ router.get('/stats', async (req, res) => {
 
 router.get('/catalogue', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const { summary, updatedAt } = await getUserCatalogueState(u.id);
-  const entries = {};
-  for (const [key, data] of Object.entries(summary.perKey || {})) {
-    entries[key] = {
-      latestFileId: data.latestFileId || null,
-      latestUploadedAt: data.latestUploadedAt || null,
-      files: (data.files || []).map(file => ({
-        id: file.id,
-        name: file.name,
-        size: file.size,
-        uploadedAt: file.uploadedAt,
-        collectionId: file.collectionId,
-        viewUrl: `/api/vault/files/${file.id}/view`,
-        downloadUrl: `/api/vault/files/${file.id}/download`,
-        catalogueKey: key,
-      })),
+
+  const [cols, objects] = await Promise.all([
+    loadCollectionsDoc(u.id),
+    listAll(userPrefix(u.id))
+  ]);
+
+  const colNameById = new Map(cols.map(c => [String(c.id), String(c.name || '')]));
+
+  const files = objects
+    .filter(o => !String(o.Key).endsWith('/'))
+    .map(o => {
+      const key = String(o.Key);
+      const id = keyToFileId(key);
+      const parts = key.split('/');
+      const collectionId = parts[1] || '';
+      const name = extractDisplayNameFromKey(key);
+      return {
+        id,
+        name,
+        size: o.Size || 0,
+        uploadedAt: o.LastModified ? new Date(o.LastModified).toISOString() : null,
+        collectionId,
+        collectionName: colNameById.get(collectionId) || null,
+        viewUrl: `/api/vault/files/${id}/view`,
+        downloadUrl: `/api/vault/files/${id}/download`
+      };
+    })
+    .sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+
+  const docEntries = DOCS.map(doc => {
+    const matches = files.filter(f => docMatchesFile(doc, f)).map(f => ({
+      id: f.id,
+      name: f.name,
+      size: f.size,
+      uploadedAt: f.uploadedAt,
+      collectionId: f.collectionId,
+      collectionName: f.collectionName,
+      viewUrl: f.viewUrl
+    }));
+
+    return {
+      key: doc.key,
+      label: doc.label,
+      required: !!doc.required,
+      cadence: doc.cadence || null,
+      why: doc.why || '',
+      where: doc.where || '',
+      matches
     };
-  }
+  });
 
   res.json({
-    catalogue: DOCUMENT_CATALOGUE,
-    entries,
-    progress: {
-      required: { total: REQUIRED_KEYS.length, completed: summary.requiredCompleted },
-      helpful: { total: HELPFUL_KEYS.length, completed: summary.helpfulCompleted },
-      updatedAt,
-    },
+    required: docEntries.filter(d => d.required),
+    helpful: docEntries.filter(d => !d.required),
+    files
   });
 });
 
