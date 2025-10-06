@@ -3,6 +3,7 @@ const express = require('express');
 const dayjs = require('dayjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const { computePersonalFinance } = require('../services/analytics/personalFinance');
 
 const router = express.Router();
 
@@ -65,40 +66,21 @@ router.get('/dashboard', auth, async (req, res) => {
   const range = parseRange(req.query);
   const integrations = Array.isArray(user.integrations) ? user.integrations : [];
   const hasData = integrations.some((i) => i.status === 'connected');
-  const payload = {
-    range,
-    preferences: user.preferences || {},
-    hasData,
-    accounting: {
-      metrics: [],
-      allowances: [],
-      obligations: [],
-      documents: {
-        required: [],
-        helpful: [],
-        progress: user.usageStats?.documentsRequiredMet || 0
-      },
-      comparatives: {
-        mode: (user.preferences?.deltaMode || 'absolute'),
-        values: []
-      }
-    },
-    financialPosture: {
-      netWorth: null,
-      breakdown: [],
-      liquidity: null,
-      trends: [],
-      savingsRate: null
-    },
-    salaryNavigator: user.salaryNavigator || {},
-    wealthPlan: user.wealthPlan || {},
-    aiInsights: [],
-    gating: {
-      tier: user.licenseTier || 'free'
-    }
-  };
+  try {
+    const analytics = await computePersonalFinance({
+      user,
+      range,
+      deltaMode: (user.preferences?.deltaMode || 'absolute')
+    });
 
-  res.json(payload);
+    analytics.hasData = analytics.hasData || hasData;
+    analytics.range = { ...range };
+
+    res.json(analytics);
+  } catch (err) {
+    console.error('Dashboard analytics error', err);
+    res.status(500).json({ error: 'Unable to build analytics dashboard' });
+  }
 });
 
 module.exports = router;
