@@ -7,6 +7,9 @@ const { paths, readJsonSafe } = require('../src/store/jsondb');
 
 const router = express.Router();
 
+// TODO(analytics-cache): Swap range parsing + payload assembly to read from AnalyticsCache
+// and trigger background recompute via /_internal/analytics/recompute (see docs/compatibility-map.md).
+
 const REQUIRED_DOC_TYPES = [
   { type: 'p60', label: 'P60' },
   { type: 'p45', label: 'P45 / starter checklist' },
@@ -79,6 +82,7 @@ function prevComparableRange(range) {
   return { start: prevStart, end: prevEnd };
 }
 
+// TODO(analytics-cache): Retire ad-hoc usage stats once DocChecklist + AnalyticsCache models land.
 async function computeUsageStats(userId, range) {
   try {
     const [txAll, docsIndex, accounts] = await Promise.all([

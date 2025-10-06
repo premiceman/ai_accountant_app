@@ -14,6 +14,10 @@ dayjs.extend(isSameOrBefore);
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map();
 
+// TODO(worker-refactor): Extract pure analytics modules (ranges, cashflow, hmrc, etc.)
+// so the worker service (via the Mongo outbox) can compute and persist AnalyticsCache payloads
+// independent of Express.
+
 const CPI_INDEX = new Map([
   ['2023-10', 127.4],
   ['2023-11', 127.7],
