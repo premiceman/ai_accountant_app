@@ -84,11 +84,17 @@ document.addEventListener('click', (ev) => {
     } else {
       // Hard fallback: clear tokens + go to login
       ['token','jwt','authToken','me'].forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} });
-      const next = encodeURIComponent(location.pathname + location.search);
-      location.href = `./login.html?next=${next}`;
+      const nextPath = location.pathname + location.search;
+      const url = (window.Auth && typeof Auth.buildWorkOSUrl === 'function')
+        ? Auth.buildWorkOSUrl({ intent: 'login', next: nextPath })
+        : `/api/auth/workos/login?next=${encodeURIComponent(nextPath)}`;
+      location.href = url;
     }
   } catch {
-    location.href = './login.html';
+    const url = (window.Auth && typeof Auth.buildWorkOSUrl === 'function')
+      ? Auth.buildWorkOSUrl({ intent: 'login' })
+      : '/api/auth/workos/login';
+    location.href = url;
   }
 });
 

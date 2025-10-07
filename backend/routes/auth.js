@@ -25,8 +25,12 @@ const WORKOS_DEFAULT_ORGANIZATION_ID = process.env.WORKOS_DEFAULT_ORGANIZATION_I
 
 const workos = (WorkOS && WORKOS_API_KEY) ? new WorkOS(WORKOS_API_KEY) : null;
 
+if (workos && WORKOS_CLIENT_ID) {
+  console.log("✅ WorkOS AuthKit provider correctly configured (provider='authkit')");
+}
+
 const OAUTH_PROVIDER_MAP = {
-  authkit: 'AuthKit',
+  authkit: 'authkit',
   google: 'GoogleOAuth',
   apple: 'AppleOAuth',
   microsoft: 'MicrosoftOAuth'
@@ -146,7 +150,9 @@ async function buildAuthorizationUrl({
   if (organization) params.organizationId = organization;
 
   if (!params.provider && !params.connectionId && !params.organizationId) {
-    params.provider = 'AuthKit';
+    // WorkOS AuthKit expects provider to be 'authkit' (lowercase).
+    // 'AuthKit' (capitalized) will throw “provider not valid”.
+    params.provider = 'authkit';
   }
 
   return workos.userManagement.getAuthorizationUrl(params);

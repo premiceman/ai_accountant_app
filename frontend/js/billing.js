@@ -30,8 +30,11 @@ const money  = (sym, n) => `${sym}${Number(n||0).toFixed(2)}`;
 const plansContainer = () => $id('plans-row') || $id('plans-grid') || $id('billing-plans');
 
 function hardRedirectToLogin() {
-  const next = encodeURIComponent(location.pathname + location.search);
-  location.href = `./login.html?next=${next}`;
+  const nextPath = location.pathname + location.search;
+  const url = (window.Auth && typeof Auth.buildWorkOSUrl === 'function')
+    ? Auth.buildWorkOSUrl({ intent: 'login', next: nextPath })
+    : `/api/auth/workos/login?next=${encodeURIComponent(nextPath)}`;
+  location.href = url;
 }
 
 /* -------------------------- cycle toggle -------------------------- */
