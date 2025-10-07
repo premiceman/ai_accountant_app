@@ -70,6 +70,7 @@
     .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg); color:#fff }
     .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
     .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
+    .oauth-icon.email{ background: var(--brand); color:#fff; border-radius:50% }
     .btn-oauth.btn-outline .oauth-icon{ background: var(--bg-surface-2); color:var(--brand); border-radius:50% }
 
     .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
@@ -147,66 +148,48 @@
         <!-- Card side -->
         <section class="reveal">
           <div class="auth-card">
-            <h2 class="h5 mb-2 text-center">Sign in</h2>
+            <h2 class="h5 mb-2 text-center">Sign in securely</h2>
 
-            <!-- Social sign-in -->
+            <p id="login-status" class="small text-secondary text-center mb-3">
+              We’ll redirect you to the WorkOS hosted login to finish signing in.
+            </p>
+
+            <div id="login-error" class="alert alert-danger d-none small" role="alert"></div>
+
             <div class="d-grid gap-2 mb-3">
+              <button class="btn btn-oauth btn-primary" type="button" id="workosLoginBtn">
+                <span class="oauth-icon email" aria-hidden="true"><i class="bi bi-envelope-at"></i></span>
+                <span>Continue with email, passkey, or magic link</span>
+              </button>
               <button class="btn btn-oauth btn-google" type="button" id="googleBtn">
                 <span class="oauth-icon google" aria-hidden="true"></span>
-                <span>Sign in with Google</span>
+                <span>Continue with Google</span>
               </button>
               <button class="btn btn-oauth btn-microsoft" type="button" id="microsoftBtn">
                 <span class="oauth-icon microsoft" aria-hidden="true"></span>
-                <span>Sign in with Microsoft</span>
+                <span>Continue with Microsoft</span>
               </button>
               <button class="btn btn-oauth btn-apple" type="button" id="appleBtn">
                 <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
-                <span>Sign in with Apple</span>
-              </button>
-              <button class="btn btn-oauth btn-outline" type="button" id="passkeyBtn">
-                <span class="oauth-icon" aria-hidden="true"><i class="bi bi-fingerprint"></i></span>
-                <span>Use a passkey or magic link</span>
+                <span>Continue with Apple</span>
               </button>
             </div>
 
-            <div class="divider small text-muted text-center"><span>or</span></div>
+            <div class="form-check form-switch text-start mb-3">
+              <input id="rememberDevice" class="form-check-input" type="checkbox" checked>
+              <label class="form-check-label small" for="rememberDevice">Keep me signed in on this device</label>
+            </div>
 
-            <!-- Login form (ALL IDs preserved) -->
-            <form id="login-form" novalidate>
-              <div class="form-floating mb-2">
-                <input id="identifier" class="form-control" type="email" placeholder="name@domain.com" autocomplete="username" required>
-                <label for="identifier">Email</label>
-                <div class="invalid-feedback">Enter a valid email address.</div>
-              </div>
+            <p class="small text-center text-secondary mb-3">
+              By continuing you agree to our <a href="/legal.html#terms">Terms</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
+            </p>
 
-              <div class="form-floating mb-2 position-relative">
-                <input id="password" class="form-control" type="password" placeholder="••••••••" autocomplete="current-password" minlength="6" required>
-                <label for="password">Password</label>
-                <button type="button" class="btn btn-sm btn-outline position-absolute end-0 top-50 translate-middle-y me-2" id="togglePw" aria-label="Show password">
-                  <i class="bi bi-eye"></i>
-                </button>
-                <div class="invalid-feedback">Password is required.</div>
-              </div>
+            <div class="text-center small text-secondary">
+              Trouble signing in?
+              <a href="https://versatile-refuge-31.authkit.app/reset-password" target="_blank" rel="noopener">Reset your password</a>.
+            </div>
 
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="form-check">
-                  <input id="remember" class="form-check-input" type="checkbox">
-                  <label class="form-check-label" for="remember">Remember me</label>
-                </div>
-                <a class="small" href="/forgot.html">Forgot password?</a>
-              </div>
-
-              <div id="login-error" class="alert alert-danger d-none small" role="alert"></div>
-
-              <button id="login-btn" class="btn btn-primary w-100" type="submit">Sign in</button>
-
-              <p class="small text-center mt-2 text-secondary">
-                By continuing you agree to our
-                <a href="/legal.html#terms">Terms</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
-              </p>
-            </form>
-
-            <div class="text-center mt-2">
+            <div class="text-center mt-3">
               <span class="text-secondary small">New here?</span>
               <a class="small ms-1" href="/signup.html">Create an account</a>
             </div>
@@ -244,16 +227,6 @@
 
     // Year in footer
     document.getElementById('y').textContent = new Date().getFullYear();
-
-    // Show/hide password (aesthetic convenience)
-    const pw = document.getElementById('password');
-    const toggle = document.getElementById('togglePw');
-    toggle?.addEventListener('click', () => {
-      const show = pw.type === 'password';
-      pw.type = show ? 'text' : 'password';
-      toggle.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
-      toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
-    });
 
   </script>
 </body>

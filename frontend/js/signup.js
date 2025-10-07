@@ -1,184 +1,75 @@
 // frontend/js/signup.js
-// Simplified signup flow wired to WorkOS AuthKit-backed backend endpoints.
-
-(function () {
-  const $ = (sel, root = document) => root.querySelector(sel);
-
-  const form = $('#signupForm');
-  if (!form) return;
-
-  const fields = {
-    firstName: $('#firstName'),
-    lastName: $('#lastName'),
-    email: $('#email'),
-    dateOfBirth: $('#dateOfBirth'),
-    password: $('#password'),
-    passwordConfirm: $('#passwordConfirm'),
-    agreeLegal: $('#agreeLegal'),
-  };
-
-  const signupBtn = $('#signupBtn');
-  const globalError = $('#signup-error');
-  const params = new URLSearchParams(location.search);
+// Routes sign-up flows through the WorkOS hosted experience so the backend receives the callback.
+(function(){
+  const params = new URLSearchParams(window.location.search || '');
   const next = params.get('next') || './home.html';
-  const passkeyBtn = $('#signupPasskey');
+  const error = params.get('error');
+  const manual = params.get('manual');
+  const emailHint = (params.get('email') || '').trim();
 
-  const setFieldError = (name, message) => {
-    const input = fields[name];
-    const helper = document.querySelector(`[data-error-for="${name}"]`);
-    if (helper) helper.textContent = message || '';
-    if (input) {
-      if (message) {
-        input.classList.add('is-invalid');
-        input.classList.remove('is-valid');
-      } else {
-        input.classList.remove('is-invalid');
-      }
-    }
-  };
+  const statusEl = document.getElementById('signup-status');
+  const errorEl = document.getElementById('signup-error');
 
-  const clearAllErrors = () => {
-    Object.keys(fields).forEach((key) => setFieldError(key, ''));
-    if (globalError) {
-      globalError.textContent = '';
-      globalError.classList.add('d-none');
-    }
-  };
+  const primaryBtn = document.getElementById('signupWorkOSBtn');
+  const googleBtn = document.getElementById('signupGoogle');
+  const microsoftBtn = document.getElementById('signupMicrosoft');
+  const appleBtn = document.getElementById('signupApple');
 
-  const showGlobalError = (message) => {
-    if (!globalError) {
+  let redirected = false;
+
+  function showError(message) {
+    if (!message) return;
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.classList.remove('d-none');
+    } else {
       alert(message);
-      return;
     }
-    globalError.textContent = message;
-    globalError.classList.remove('d-none');
-  };
-
-  function isEmail(value) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
-  }
-
-  async function startProvider(provider, button, options = {}) {
-    if (!button) return;
-    clearAllErrors();
-    const original = button.innerHTML;
-    button.disabled = true;
-    button.innerHTML = '<span>Redirecting…</span>';
-    try {
-      const url = new URL('/api/auth/workos/authorize', location.origin);
-      if (provider) url.searchParams.set('provider', provider);
-      url.searchParams.set('next', next);
-      url.searchParams.set('remember', 'true');
-      if (options.intent) url.searchParams.set('intent', options.intent);
-      const emailValue = typeof options.email === 'string' ? options.email.trim() : '';
-      if (emailValue) url.searchParams.set('email', emailValue);
-      if (options.connectionId) url.searchParams.set('connection', options.connectionId);
-      const res = await fetch(url.toString(), { credentials: 'include' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.authorizationUrl) {
-        showGlobalError(data?.error || 'Unable to start single sign-on. Please try again.');
-        return;
-      }
-      location.href = data.authorizationUrl;
-    } catch (err) {
-      console.error('Signup provider error:', err);
-      showGlobalError('Network error. Please try again.');
-    } finally {
-      button.disabled = false;
-      if (original !== undefined) button.innerHTML = original;
+    if (statusEl) {
+      statusEl.textContent = 'Choose how you’d like to continue your sign-up.';
     }
   }
 
-  $('#signupGoogle')?.addEventListener('click', () => startProvider('google', $('#signupGoogle'), { intent: 'signup' }));
-  $('#signupMicrosoft')?.addEventListener('click', () => startProvider('microsoft', $('#signupMicrosoft'), { intent: 'signup' }));
-  $('#signupApple')?.addEventListener('click', () => startProvider('apple', $('#signupApple'), { intent: 'signup' }));
-  passkeyBtn?.addEventListener('click', () => {
-    const emailValue = (fields.email?.value || '').trim();
-    startProvider(null, passkeyBtn, { intent: 'signup', email: emailValue });
-  });
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    clearAllErrors();
-
-    const firstName = (fields.firstName?.value || '').trim();
-    const lastName = (fields.lastName?.value || '').trim();
-    const email = (fields.email?.value || '').trim();
-    const dateOfBirth = fields.dateOfBirth?.value || '';
-    const password = fields.password?.value || '';
-    const passwordConfirm = fields.passwordConfirm?.value || '';
-    const agreeLegal = fields.agreeLegal?.checked === true;
-
-    let invalid = false;
-    if (!firstName) { setFieldError('firstName', 'First name is required'); invalid = true; }
-    if (!lastName) { setFieldError('lastName', 'Last name is required'); invalid = true; }
-    if (!email) { setFieldError('email', 'Email is required'); invalid = true; }
-    else if (!isEmail(email)) { setFieldError('email', 'Enter a valid email'); invalid = true; }
-    if (!dateOfBirth) { setFieldError('dateOfBirth', 'Date of birth is required'); invalid = true; }
-    if (!password) { setFieldError('password', 'Password is required'); invalid = true; }
-    else if (password.length < 8) { setFieldError('password', 'Use at least 8 characters'); invalid = true; }
-    if (!passwordConfirm) { setFieldError('passwordConfirm', 'Please confirm your password'); invalid = true; }
-    else if (password && passwordConfirm && password !== passwordConfirm) {
-      setFieldError('passwordConfirm', 'Passwords do not match');
-      invalid = true;
+  function buildUrl(options = {}) {
+    const url = new URL('/api/auth/workos/start', window.location.origin);
+    url.searchParams.set('next', options.next || next);
+    url.searchParams.set('intent', options.intent || 'signup');
+    url.searchParams.set('remember', 'true');
+    const loginHint = (options.email || emailHint || '').trim();
+    if (loginHint) {
+      url.searchParams.set('email', loginHint);
     }
-    if (!agreeLegal) { setFieldError('agreeLegal', 'You must accept the terms to continue'); invalid = true; }
-
-    if (invalid) return;
-
-    const original = signupBtn?.textContent;
-    if (signupBtn) {
-      signupBtn.disabled = true;
-      signupBtn.textContent = 'Creating account…';
+    if (options.provider) {
+      url.searchParams.set('provider', options.provider);
     }
+    return url;
+  }
 
-    try {
-      const res = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          firstName,
-          lastName,
-          email,
-          dateOfBirth,
-          password,
-          passwordConfirm,
-          agreeLegal: true,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        const message = data?.error || 'Sign up failed. Please try again.';
-        if (/email/i.test(message)) setFieldError('email', message);
-        else if (/password/i.test(message)) setFieldError('password', message);
-        else if (/birth|date/i.test(message)) setFieldError('dateOfBirth', message);
-        else showGlobalError(message);
-        return;
-      }
-
-      if (!data?.token) {
-        showGlobalError('No token returned from server.');
-        return;
-      }
-
-      try {
-        localStorage.setItem('token', data.token);
-        if (data.user) localStorage.setItem('me', JSON.stringify(data.user));
-      } catch (storageErr) {
-        console.warn('Failed to cache auth data:', storageErr);
-      }
-
-      location.href = next;
-    } catch (err) {
-      console.error('Signup error:', err);
-      showGlobalError('Network error. Please try again.');
-    } finally {
-      if (signupBtn) {
-        signupBtn.disabled = false;
-        if (original) signupBtn.textContent = original;
-      }
+  function startHostedSignup(options = {}) {
+    if (redirected) return;
+    redirected = true;
+    if (statusEl) {
+      statusEl.textContent = 'Redirecting you to secure sign-up…';
     }
-  });
+    const url = buildUrl(options);
+    window.location.assign(url.toString());
+  }
+
+  primaryBtn?.addEventListener('click', () => startHostedSignup({}));
+  googleBtn?.addEventListener('click', () => startHostedSignup({ provider: 'google' }));
+  microsoftBtn?.addEventListener('click', () => startHostedSignup({ provider: 'microsoft' }));
+  appleBtn?.addEventListener('click', () => startHostedSignup({ provider: 'apple' }));
+
+  if (error) {
+    showError(error);
+  } else if (statusEl) {
+    statusEl.textContent = 'Redirecting you to the WorkOS hosted sign-up…';
+  }
+
+  const autoStart = manual !== '1' && !error;
+  if (autoStart) {
+    window.setTimeout(() => startHostedSignup({}), 900);
+  } else if (statusEl && !error) {
+    statusEl.textContent = 'Choose how you’d like to continue your sign-up.';
+  }
 })();
