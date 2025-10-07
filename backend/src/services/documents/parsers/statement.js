@@ -246,6 +246,7 @@ async function llmStatementExtraction(text) {
         bank_name: { type: ['string', 'null'] },
         account_number: { type: ['string', 'null'] },
         account_type: { type: ['string', 'null'] },
+        account_holder: { type: ['string', 'null'] },
         statement_period: {
           type: 'object',
           additionalProperties: false,
@@ -390,6 +391,7 @@ async function analyseCurrentAccountStatement(text) {
     bankName: llm?.bank_name || null,
     accountType: llm?.account_type || null,
     accountNumberMasked: maskAccountNumber(llm?.account_number),
+    accountHolder: llm?.account_holder || null,
     period: {
       start: parseDate(llm?.statement_period?.start_date) || null,
       end: parseDate(llm?.statement_period?.end_date) || null,

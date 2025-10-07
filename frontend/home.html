@@ -39,52 +39,14 @@
           </div>
           <div class="d-flex flex-wrap gap-2 align-items-center">
             <div class="btn-group btn-group-sm" role="group" aria-label="Range picker">
-              <button id="rng-btn-quick" class="btn btn-outline-primary active" type="button">Quick</button>
-              <button id="rng-btn-custom" class="btn btn-outline-primary" type="button">Custom</button>
+              <button class="btn btn-outline-primary" type="button" data-range-option="now">Now</button>
+              <button class="btn btn-outline-primary" type="button" data-range-option="last-month">Last month</button>
+              <button class="btn btn-outline-primary" type="button" data-range-option="last-quarter">Last quarter</button>
+              <button class="btn btn-outline-primary" type="button" data-range-option="last-year">Last year</button>
             </div>
             <div class="btn-group btn-group-sm" role="group" aria-label="Delta mode">
               <button class="btn btn-outline-primary" id="delta-absolute" type="button">£ delta</button>
               <button class="btn btn-outline-primary" id="delta-percent" type="button">% delta</button>
-            </div>
-          </div>
-        </div>
-
-        <div id="rng-quick" class="mt-3">
-          <div class="form-check form-check-inline">
-            <input class="form-check-input" type="radio" name="rngQuick" id="rng-current-month" value="current-month">
-            <label class="form-check-label" for="rng-current-month">This month</label>
-          </div>
-          <div class="form-check form-check-inline">
-            <input class="form-check-input" type="radio" name="rngQuick" id="rng-last-month" value="last-month">
-            <label class="form-check-label" for="rng-last-month">Last month</label>
-          </div>
-          <div class="form-check form-check-inline">
-            <input class="form-check-input" type="radio" name="rngQuick" id="rng-last-quarter" value="last-quarter">
-            <label class="form-check-label" for="rng-last-quarter">Last quarter</label>
-          </div>
-          <div class="form-check form-check-inline">
-            <input class="form-check-input" type="radio" name="rngQuick" id="rng-last-year" value="last-year">
-            <label class="form-check-label" for="rng-last-year">Last tax year</label>
-          </div>
-          <div class="form-check form-check-inline">
-            <input class="form-check-input" type="radio" name="rngQuick" id="rng-year-to-date" value="year-to-date">
-            <label class="form-check-label" for="rng-year-to-date">Year to date</label>
-          </div>
-          <button class="btn btn-sm btn-primary ms-2" id="rng-apply-quick" type="button">Apply</button>
-        </div>
-
-        <div id="rng-custom" class="mt-3" style="display:none;">
-          <div class="row g-2 align-items-end">
-            <div class="col-auto">
-              <label class="form-label mb-1" for="rng-start">Start</label>
-              <input type="date" class="form-control form-control-sm" id="rng-start">
-            </div>
-            <div class="col-auto">
-              <label class="form-label mb-1" for="rng-end">End</label>
-              <input type="date" class="form-control form-control-sm" id="rng-end">
-            </div>
-            <div class="col-auto">
-              <button class="btn btn-sm btn-primary" id="rng-apply-custom" type="button">Apply</button>
             </div>
           </div>
         </div>

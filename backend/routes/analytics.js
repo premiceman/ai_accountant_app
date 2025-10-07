@@ -20,63 +20,181 @@ const REQUIRED_DOC_TYPES = [
 
 const money = (n) => Number(n || 0);
 
-function parseRange(query) {
+function latestDocumentMonthKey(docSources = {}) {
+  let latest = null;
+  const consider = (value) => {
+    const date = toDate(value);
+    if (!date) return;
+    if (!latest || date > latest) latest = date;
+  };
+  for (const entry of Object.values(docSources)) {
+    if (!entry) continue;
+    const meta = entry.metadata || {};
+    const metrics = entry.metrics || {};
+    consider(meta.documentDate);
+    if (meta.documentMonth) consider(`${meta.documentMonth}-01`);
+    consider(meta.payDate);
+    consider(metrics.payDate);
+    if (meta.period) {
+      consider(meta.period.start);
+      consider(meta.period.end);
+    }
+    if (entry.period) {
+      consider(entry.period.start);
+      consider(entry.period.end);
+    }
+    if (metrics.period) {
+      consider(metrics.period.start);
+      consider(metrics.period.end);
+    }
+    if (Array.isArray(meta.statementPeriods)) {
+      meta.statementPeriods.forEach((period) => {
+        consider(period?.start);
+        consider(period?.end);
+      });
+    }
+    const files = Array.isArray(entry.files) ? entry.files : [];
+    files.forEach((file) => consider(file?.uploadedAt));
+    const transactions = Array.isArray(entry.transactions) ? entry.transactions : [];
+    transactions.forEach((tx) => consider(tx?.date));
+  }
+  if (!latest) return null;
+  const year = latest.getUTCFullYear();
+  const month = String(latest.getUTCMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function startOfQuarter(date) {
+  const d = dayjs(date);
+  const month = d.month();
+  const qStartMonth = Math.floor(month / 3) * 3;
+  return d.month(qStartMonth).startOf('month');
+}
+
+function endOfQuarter(date) {
+  return startOfQuarter(date).add(3, 'month').subtract(1, 'day').endOf('day');
+}
+
+function quarterLabel(date) {
+  const d = dayjs(date);
+  const quarter = Math.floor(d.month() / 3) + 1;
+  return `Q${quarter} ${d.format('YYYY')}`;
+}
+
+function computeDeltaValue(current, previous, mode = 'absolute') {
+  if (current == null || previous == null) return null;
+  const curr = Number(current);
+  const prev = Number(previous);
+  if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+  if (mode === 'percent') {
+    if (prev === 0) return null;
+    return ((curr - prev) / Math.abs(prev)) * 100;
+  }
+  return curr - prev;
+}
+
+function parseRange(query, options = {}) {
+  const docSources = options.docSources || {};
   const preset = String(query.preset || '').toLowerCase();
   const start = query.start ? dayjs(query.start) : null;
   const end = query.end ? dayjs(query.end) : null;
 
   const now = dayjs();
   if (start && end && start.isValid() && end.isValid()) {
+    const rangeStart = start.startOf('day');
+    const rangeEnd = end.endOf('day');
+    const previous = prevComparableRange({ start: rangeStart.toDate(), end: rangeEnd.toDate() });
+    const previousLabel = `${dayjs(previous.start).format('D MMM YYYY')} – ${dayjs(previous.end).format('D MMM YYYY')}`;
     return {
       mode: 'custom',
-      start: start.startOf('day').toDate(),
-      end: end.endOf('day').toDate(),
-      label: `${start.format('D MMM YYYY')} – ${end.format('D MMM YYYY')}`
+      start: rangeStart.toDate(),
+      end: rangeEnd.toDate(),
+      label: `${rangeStart.format('D MMM YYYY')} – ${rangeEnd.format('D MMM YYYY')}`,
+      comparisonLabel: `vs ${previousLabel}`,
+      previous: { start: previous.start, end: previous.end, label: previousLabel },
     };
   }
 
+  const latestMonthKey = latestDocumentMonthKey(docSources);
+  const latestMonth = latestMonthKey ? dayjs(`${latestMonthKey}-01`) : null;
+
   switch (preset) {
-    case 'current-month':
-    case 'this-month':
-      return {
-        mode: 'preset',
-        preset: 'current-month',
-        start: now.startOf('month').toDate(),
-        end: now.endOf('month').toDate(),
-        label: 'This month'
-      };
     case 'last-year':
-      return {
-        mode: 'preset',
-        preset: 'last-year',
-        start: now.subtract(1, 'year').startOf('year').toDate(),
-        end: now.subtract(1, 'year').endOf('year').toDate(),
-        label: 'Last tax year'
-      };
+      {
+        const base = latestMonth?.isValid() ? latestMonth.subtract(1, 'year') : now.subtract(1, 'year');
+        const startOfYear = base.startOf('year');
+        const endOfYear = base.endOf('year');
+        const prevBase = startOfYear.subtract(1, 'year');
+        const prevStart = prevBase.startOf('year');
+        const prevEnd = prevBase.endOf('year');
+        const prevLabel = prevStart.format('YYYY');
+        return {
+          mode: 'preset',
+          preset: 'last-year',
+          start: startOfYear.toDate(),
+          end: endOfYear.toDate(),
+          label: `Last year · ${startOfYear.format('YYYY')}`,
+          comparisonLabel: `vs ${prevLabel}`,
+          previous: { start: prevStart.toDate(), end: prevEnd.toDate(), label: prevLabel },
+        };
+      }
     case 'last-quarter':
-      return {
-        mode: 'preset',
-        preset: 'last-quarter',
-        start: now.subtract(1, 'quarter').startOf('quarter').toDate(),
-        end: now.subtract(1, 'quarter').endOf('quarter').toDate(),
-        label: 'Last quarter'
-      };
-    case 'year-to-date':
-      return {
-        mode: 'preset',
-        preset: 'year-to-date',
-        start: now.startOf('year').toDate(),
-        end: now.toDate(),
-        label: 'Year to date'
-      };
+      {
+        const base = latestMonth?.isValid() ? latestMonth.subtract(1, 'month') : now.subtract(3, 'month');
+        const startQ = startOfQuarter(base);
+        const endQ = endOfQuarter(base);
+        const prevBase = startQ.subtract(3, 'month');
+        const prevStart = startOfQuarter(prevBase);
+        const prevEnd = endOfQuarter(prevBase);
+        const prevLabel = quarterLabel(prevStart);
+        return {
+          mode: 'preset',
+          preset: 'last-quarter',
+          start: startQ.toDate(),
+          end: endQ.toDate(),
+          label: `Last quarter · ${quarterLabel(startQ)}`,
+          comparisonLabel: `vs ${prevLabel}`,
+          previous: { start: prevStart.toDate(), end: prevEnd.toDate(), label: prevLabel },
+        };
+      }
+    case 'last-month':
+      {
+        const base = latestMonth?.isValid() ? latestMonth.subtract(1, 'month') : now.subtract(1, 'month');
+        const startOfMonth = base.startOf('month');
+        const endOfMonth = base.endOf('month');
+        const prevBase = startOfMonth.subtract(1, 'month');
+        const prevStart = prevBase.startOf('month');
+        const prevEnd = prevBase.endOf('month');
+        const prevLabel = prevStart.format('MMM YYYY');
+        return {
+          mode: 'preset',
+          preset: 'last-month',
+          start: startOfMonth.toDate(),
+          end: endOfMonth.toDate(),
+          label: `Last month · ${startOfMonth.format('MMM YYYY')}`,
+          comparisonLabel: `vs ${prevLabel}`,
+          previous: { start: prevStart.toDate(), end: prevEnd.toDate(), label: prevLabel },
+        };
+      }
     default:
-      return {
-        mode: 'preset',
-        preset: 'last-month',
-        start: now.subtract(1, 'month').startOf('month').toDate(),
-        end: now.subtract(1, 'month').endOf('month').toDate(),
-        label: 'Last month'
-      };
+      {
+        const base = latestMonth?.isValid() ? latestMonth : now;
+        const startOfMonth = base.startOf('month');
+        const endOfMonth = base.endOf('month');
+        const prevBase = startOfMonth.subtract(1, 'month');
+        const prevStart = prevBase.startOf('month');
+        const prevEnd = prevBase.endOf('month');
+        const prevLabel = prevStart.format('MMM YYYY');
+        return {
+          mode: 'preset',
+          preset: 'now',
+          start: startOfMonth.toDate(),
+          end: endOfMonth.toDate(),
+          label: `Now · ${startOfMonth.format('MMM YYYY')}`,
+          comparisonLabel: `vs ${prevLabel}`,
+          previous: { start: prevStart.toDate(), end: prevEnd.toDate(), label: prevLabel },
+        };
+      }
   }
 }
 
@@ -427,11 +545,11 @@ router.get('/dashboard', auth, async (req, res) => {
   const user = await User.findById(req.user.id).lean();
   if (!user) return res.status(404).json({ error: 'User not found' });
 
-  const range = parseRange(req.query);
   const docInsights = user.documentInsights || {};
   const docSources = docInsights.sources || {};
   const docAggregates = docInsights.aggregates || {};
   const docProcessing = docInsights.processing || {};
+  const range = parseRange(req.query, { docSources });
   const hasData = Object.keys(docSources).length > 0;
   const timelineRaw = Array.isArray(docInsights.timeline) ? docInsights.timeline : [];
   const timelineInRange = timelineRaw.filter((entry) => timelineEntryWithinRange(entry, range));
@@ -443,6 +561,24 @@ router.get('/dashboard', auth, async (req, res) => {
   const rangeView = buildRangeView(docSources, range);
   const latestPayslipEntry = rangeView.payslip.latest;
   const statementSummary = rangeView.statements;
+  const previousRange = range.previous || null;
+  const previousView = previousRange ? buildRangeView(docSources, previousRange) : null;
+  const previousPayslipEntry = previousView?.payslip?.latest || null;
+  const previousStatementSummary = previousView?.statements || null;
+  const deltaMode = user.preferences?.deltaMode || 'absolute';
+
+  const grossIncomeCurrent = latestPayslipEntry?.metrics?.gross != null ? Number(latestPayslipEntry.metrics.gross) : null;
+  const grossIncomePrevious = previousPayslipEntry?.metrics?.gross != null ? Number(previousPayslipEntry.metrics.gross) : null;
+  const totalSpendCurrent = statementSummary?.hasData ? Number(statementSummary.totals.spend || 0) : null;
+  const totalSpendPrevious = previousStatementSummary?.hasData ? Number(previousStatementSummary.totals.spend || 0) : null;
+  const incomeFromStatementsCurrent = statementSummary?.hasData ? Number(statementSummary.totals.income || 0) : null;
+  const incomeFromStatementsPrevious = previousStatementSummary?.hasData ? Number(previousStatementSummary.totals.income || 0) : null;
+  const savingsCapacityCurrent = (incomeFromStatementsCurrent != null && totalSpendCurrent != null)
+    ? incomeFromStatementsCurrent - totalSpendCurrent
+    : null;
+  const savingsCapacityPrevious = (incomeFromStatementsPrevious != null && totalSpendPrevious != null)
+    ? incomeFromStatementsPrevious - totalSpendPrevious
+    : null;
 
   const assetBreakdown = assetAllocation.map((item) => ({
     key: item.key || item.label,
@@ -466,7 +602,7 @@ router.get('/dashboard', auth, async (req, res) => {
     const payMetrics = latestPayslipEntry.metrics;
     metrics.push({
       key: 'income',
-      value: Number(payMetrics.gross),
+      value: grossIncomeCurrent,
       format: 'currency',
       subLabel: (() => {
         const net = payMetrics.net;
@@ -480,22 +616,31 @@ router.get('/dashboard', auth, async (req, res) => {
         return 'Derived from latest payslip in range.';
       })(),
       sourceNote: 'Derived from payslip uploads within the selected range.',
+      delta: computeDeltaValue(grossIncomeCurrent, grossIncomePrevious, deltaMode),
+      deltaMode,
     });
   }
   if (statementSummary?.hasData) {
+    const spendValue = totalSpendCurrent ?? Number(statementSummary.totals.spend || 0);
+    const savingsValue = savingsCapacityCurrent != null
+      ? savingsCapacityCurrent
+      : Number(statementSummary.totals.income || 0) - Number(statementSummary.totals.spend || 0);
     metrics.push({
       key: 'spend',
-      value: Number(statementSummary.totals.spend || 0),
+      value: spendValue,
       format: 'currency',
-      delta: null,
+      delta: computeDeltaValue(spendValue, totalSpendPrevious, deltaMode),
+      deltaMode,
       sourceNote: 'Calculated from categorised transactions in current account statements (range filtered).'
     });
     metrics.push({
       key: 'savingsCapacity',
-      value: Number(statementSummary.totals.income || 0) - Number(statementSummary.totals.spend || 0),
+      value: savingsValue,
       format: 'currency',
       subLabel: 'Income minus spending from documents in range',
-      sourceNote: 'Income and spending inferred from bank statements (range filtered).'
+      sourceNote: 'Income and spending inferred from bank statements (range filtered).',
+      delta: computeDeltaValue(savingsValue, savingsCapacityPrevious, deltaMode),
+      deltaMode,
     });
   }
   if (docAggregates.tax?.taxDue != null) {
@@ -507,6 +652,16 @@ router.get('/dashboard', auth, async (req, res) => {
       sourceNote: 'Based on latest HMRC correspondence upload.'
     });
   }
+
+  const comparatives = {
+    mode: deltaMode,
+    label: range.comparisonLabel || 'Comparing to previous period',
+    values: [
+      { key: 'income', current: grossIncomeCurrent, previous: grossIncomePrevious },
+      { key: 'spend', current: totalSpendCurrent, previous: totalSpendPrevious },
+      { key: 'savingsCapacity', current: savingsCapacityCurrent, previous: savingsCapacityPrevious },
+    ],
+  };
 
   const categorySourceRaw = Array.isArray(statementSummary?.spendingCanteorgies)
     ? statementSummary.spendingCanteorgies
@@ -629,10 +784,7 @@ router.get('/dashboard', auth, async (req, res) => {
         progress: documentsProgress,
         progressPercent,
       },
-      comparatives: {
-        mode: (user.preferences?.deltaMode || 'absolute'),
-        values: []
-      },
+      comparatives,
       spendByCategory: spendCategories,
       spendingCanteorgies: spendCategories,
       timeline: timelineInRange,

@@ -1,4 +1,6 @@
+const dayjs = require('dayjs');
 const User = require('../../../models/User');
+const DocumentInsight = require('../../../models/DocumentInsight');
 
 function mergeFileReference(existing = [], fileInfo) {
   const filtered = existing.filter((item) => item.id !== fileInfo.id);
@@ -33,6 +35,76 @@ function indexByBaseKey(sources = {}) {
     grouped[baseKey].push(entry);
   }
   return grouped;
+}
+
+function isoFromValue(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) return date.toISOString();
+  const str = String(value);
+  const match = str.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}T00:00:00.000Z`;
+  const alt = str.match(/(\d{2})[\/\-.](\d{2})[\/\-.](\d{2,4})/);
+  if (alt) {
+    const day = alt[1].padStart(2, '0');
+    const month = alt[2].padStart(2, '0');
+    const year = alt[3].length === 2 ? `20${alt[3]}` : alt[3].padStart(4, '0');
+    return `${year}-${month}-${day}T00:00:00.000Z`;
+  }
+  return null;
+}
+
+function monthKeyFromIsoSafe(iso) {
+  if (!iso) return null;
+  const match = String(iso).match(/(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function deriveDocumentContext(insights = {}, fileInfo = {}) {
+  const metadata = insights.metadata || {};
+  const metrics = insights.metrics || {};
+  const candidates = [
+    metadata.documentDate,
+    metrics.payDate,
+    metadata.payDate,
+    metadata.period?.end,
+    metadata.period?.start,
+    metrics.periodEnd,
+    metrics.periodStart,
+  ];
+  const txList = Array.isArray(insights.transactions) ? insights.transactions : [];
+  txList.forEach((tx) => {
+    if (tx?.date) candidates.push(tx.date);
+  });
+  if (Array.isArray(metadata.statementPeriods)) {
+    metadata.statementPeriods.forEach((period) => {
+      if (period?.end) candidates.push(period.end);
+      if (period?.start) candidates.push(period.start);
+    });
+  }
+  if (fileInfo?.uploadedAt) candidates.push(fileInfo.uploadedAt);
+
+  let documentIso = null;
+  for (const value of candidates) {
+    const iso = isoFromValue(value);
+    if (iso) {
+      documentIso = iso;
+      break;
+    }
+  }
+
+  const monthKey = monthKeyFromIsoSafe(documentIso);
+  const label = monthKey ? dayjs(documentIso).format('MMM YYYY') : null;
+  const documentName = metadata.documentName || metadata.personName || metadata.accountHolder || fileInfo?.name || null;
+  const nameMatchesUser = metadata.nameMatchesUser ?? null;
+
+  return {
+    documentIso,
+    monthKey,
+    label,
+    documentName,
+    nameMatchesUser,
+  };
 }
 
 function summariseStatementEntries(entries = []) {
@@ -456,6 +528,7 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   const storeKey = insights.storeKey || key;
   const baseKey = insights.baseKey || key;
   const existing = sources[storeKey] || {};
+  const documentContext = deriveDocumentContext(insights, fileInfo);
   sources[storeKey] = {
     ...existing,
     key: storeKey,
@@ -463,7 +536,15 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
     metrics: insights.metrics || existing.metrics || {},
     narrative: insights.narrative || existing.narrative || [],
     transactions: insights.transactions || existing.transactions || [],
-    metadata: insights.metadata || existing.metadata || {},
+    metadata: {
+      ...(existing.metadata || {}),
+      ...(insights.metadata || {}),
+      documentMonth: documentContext.monthKey || existing.metadata?.documentMonth || null,
+      documentLabel: documentContext.label || existing.metadata?.documentLabel || null,
+      documentDate: documentContext.documentIso || existing.metadata?.documentDate || null,
+      documentName: documentContext.documentName || existing.metadata?.documentName || null,
+      nameMatchesUser: documentContext.nameMatchesUser ?? existing.metadata?.nameMatchesUser ?? null,
+    },
     period: insights.metadata?.period || insights.metrics?.period || existing.period || null,
     files: fileInfo ? mergeFileReference(existing.files, fileInfo) : (existing.files || []),
   };
@@ -492,6 +573,38 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
     console.warn('[documents:insightsStore] failed to persist insights', err);
   });
 
+  if (fileInfo?.id) {
+    try {
+      await DocumentInsight.findOneAndUpdate(
+        { userId, fileId: fileInfo.id },
+        {
+          $set: {
+            catalogueKey: key,
+            baseKey,
+            documentMonth: documentContext.monthKey || null,
+            documentDate: documentContext.documentIso ? new Date(documentContext.documentIso) : null,
+            documentLabel: documentContext.label || null,
+            documentName: documentContext.documentName || null,
+            nameMatchesUser: documentContext.nameMatchesUser,
+            metrics: insights.metrics || {},
+            metadata: {
+              ...(insights.metadata || {}),
+              documentMonth: documentContext.monthKey || null,
+              documentLabel: documentContext.label || null,
+              documentDate: documentContext.documentIso || null,
+            },
+            transactions: Array.isArray(insights.transactions) ? insights.transactions : [],
+            narrative: Array.isArray(insights.narrative) ? insights.narrative : [],
+            extractedAt: new Date(),
+          },
+        },
+        { upsert: true, setDefaultsOnInsert: true }
+      ).exec();
+    } catch (err) {
+      console.warn('[documents:insightsStore] failed to upsert document insight', err);
+    }
+  }
+
   return newState;
 }
 
@@ -510,6 +623,8 @@ async function setInsightsProcessing(userId, key, state) {
     };
     if (state.step) payload.step = state.step;
     if (state.progress != null) payload.progress = state.progress;
+    if (state.fileId) payload.fileId = state.fileId;
+    if (state.fileName) payload.fileName = state.fileName;
     await User.findByIdAndUpdate(userId, { $set: { [path]: payload } }).exec();
     return payload;
   } catch (err) {
