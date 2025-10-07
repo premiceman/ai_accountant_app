@@ -93,6 +93,17 @@
     }
   }
 
+  function buildWorkOSUrl({ intent = 'login', next, email, remember = true } = {}) {
+    const normalizedIntent = intent === 'signup' ? 'signup' : 'login';
+    const basePath = normalizedIntent === 'signup' ? '/api/auth/workos/start' : '/api/auth/workos/login';
+    const url = new URL(basePath, window.location.origin);
+    if (next) url.searchParams.set('next', next);
+    url.searchParams.set('intent', normalizedIntent);
+    if (remember) url.searchParams.set('remember', 'true');
+    if (email) url.searchParams.set('email', email);
+    return url.toString();
+  }
+
   async function requireAuth() {
     const t = getToken();
     if (!t || isExpired(t)) {
@@ -134,8 +145,11 @@
 
     // Helper: redirect to login with ?next=<current>
     function toLogin() {
-      const next = encodeURIComponent(location.pathname + location.search);
-      location.replace(`./login.html?next=${next}`);
+      const url = buildWorkOSUrl({
+        intent: 'login',
+        next: location.pathname + location.search,
+      });
+      location.replace(url);
     }
     // Helper: redirect to app home or provided next
     function toAppHomeFromLogin() {
@@ -197,9 +211,13 @@
     if (g && name) g.textContent = name;
   }
 
-  function signOut() {
+  function signOut({ next } = {}) {
     clearTokens();
-    location.href = './login.html';
+    const url = buildWorkOSUrl({
+      intent: 'login',
+      next: next || (location.pathname + location.search) || '/index.html',
+    });
+    window.location.assign(url);
   }
 
   async function getCurrentUser({ force = false } = {}) {
@@ -215,6 +233,7 @@
     enforce,
     setBannerTitle,
     signOut,
+    buildWorkOSUrl,
     getCurrentUser,
     get me() { return window.__ME__; }
   };
