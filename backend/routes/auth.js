@@ -16,9 +16,18 @@ const Subscription = require('../models/Subscription');
 
 const router = express.Router();
 
+const NODE_ENV = process.env.NODE_ENV || 'development';
 const WORKOS_API_KEY = process.env.WORKOS_API_KEY || process.env.WORKOS_KEY || '';
 const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID || process.env.WORKOS_CLIENT || '';
 const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || 'https://www.phloat.io/callback';
+const WORKOS_STATE_COOKIE_NAME = process.env.WORKOS_STATE_COOKIE_NAME || 'workos_oauth_state';
+const WORKOS_STATE_TTL_MS = Number(process.env.WORKOS_STATE_TTL_MS || 10 * 60 * 1000);
+const STATE_COOKIE_BASE_OPTS = Object.freeze({
+  httpOnly: true,
+  secure: NODE_ENV === 'production',
+  sameSite: 'lax',
+  path: '/',
+});
 
 const workos = (WorkOS && WORKOS_API_KEY) ? new WorkOS(WORKOS_API_KEY) : null;
 
@@ -53,6 +62,76 @@ function decodeState(state) {
     return typeof parsed === 'object' && parsed ? parsed : {};
   } catch {
     return {};
+  }
+}
+
+function generateStateNonce() {
+  try {
+    if (typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID().replace(/-/g, '');
+    }
+    return crypto.randomBytes(32).toString('hex');
+  } catch {
+    return String(Date.now()) + Math.random().toString(16).slice(2);
+  }
+}
+
+function hashStateNonce(nonce) {
+  return crypto.createHash('sha256').update(String(nonce)).digest();
+}
+
+function setStateCookie(res, nonce) {
+  if (!nonce || !res?.cookie) return;
+  const expiresAt = Date.now() + Math.max(WORKOS_STATE_TTL_MS, 60_000);
+  const digestHex = hashStateNonce(nonce).toString('hex');
+  const value = `${expiresAt}.${digestHex}`;
+  try {
+    res.cookie(WORKOS_STATE_COOKIE_NAME, value, { ...STATE_COOKIE_BASE_OPTS, maxAge: expiresAt - Date.now() });
+  } catch (err) {
+    console.warn('Unable to set WorkOS state cookie:', err);
+  }
+}
+
+function clearStateCookie(res) {
+  if (!res?.clearCookie) return;
+  try {
+    res.clearCookie(WORKOS_STATE_COOKIE_NAME, { ...STATE_COOKIE_BASE_OPTS });
+  } catch (err) {
+    console.warn('Unable to clear WorkOS state cookie:', err);
+  }
+}
+
+function getStateCookie(req) {
+  const all = req?.cookies;
+  if (all && typeof all === 'object') return all[WORKOS_STATE_COOKIE_NAME];
+  const header = req?.headers?.cookie;
+  if (!header) return undefined;
+  const parts = String(header).split(';');
+  for (const part of parts) {
+    const [k, v] = part.split('=').map((s) => s.trim());
+    if (k === WORKOS_STATE_COOKIE_NAME) return decodeURIComponent(v || '');
+  }
+  return undefined;
+}
+
+function isValidStateNonce(nonce, cookieValue) {
+  if (!nonce || typeof cookieValue !== 'string') return false;
+  const [expiresRaw, digestHex] = cookieValue.split('.', 2);
+  const expiresAt = Number(expiresRaw);
+  if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) return false;
+  if (!digestHex || digestHex.length % 2 !== 0) return false;
+  let provided;
+  try {
+    provided = Buffer.from(digestHex, 'hex');
+  } catch {
+    return false;
+  }
+  const expected = hashStateNonce(nonce);
+  if (provided.length !== expected.length) return false;
+  try {
+    return crypto.timingSafeEqual(expected, provided);
+  } catch {
+    return false;
   }
 }
 
@@ -421,14 +500,23 @@ router.get('/workos/authorize', async (req, res) => {
 
     const next = sanitizeNext(req.query.next || '/home.html');
     const remember = String(req.query.remember || '').toLowerCase() === 'true';
-    const state = encodeState({ next, remember });
+    const nonce = generateStateNonce();
+    const statePayload = encodeState({ next, remember, nonce });
 
-    const url = await workos.userManagement.getAuthorizationUrl({
-      clientId: WORKOS_CLIENT_ID,
-      provider,
-      redirectUri: WORKOS_REDIRECT_URI,
-      state,
-    });
+    setStateCookie(res, nonce);
+
+    let url;
+    try {
+      url = await workos.userManagement.getAuthorizationUrl({
+        clientId: WORKOS_CLIENT_ID,
+        provider,
+        redirectUri: WORKOS_REDIRECT_URI,
+        state: statePayload,
+      });
+    } catch (err) {
+      clearStateCookie(res);
+      throw err;
+    }
 
     res.json({ authorizationUrl: url });
   } catch (err) {
@@ -443,6 +531,7 @@ async function handleWorkOSCallback(req, res) {
 
     const { error, error_description: errorDescription, code, state } = req.query || {};
     if (error || !code) {
+      clearStateCookie(res);
       const message = encodeURIComponent(errorDescription || error || 'Authentication was cancelled.');
       return res.redirect(`/login.html?error=${message}`);
     }
@@ -452,7 +541,13 @@ async function handleWorkOSCallback(req, res) {
       code: String(code),
     });
 
+    const stateCookie = getStateCookie(req);
+    clearStateCookie(res);
+
     const stateData = decodeState(state);
+    if (!stateData?.nonce || !isValidStateNonce(stateData.nonce, stateCookie)) {
+      throw new Error('Invalid or expired authentication state');
+    }
     const next = sanitizeNext(stateData.next || '/home.html');
     const remember = !!stateData.remember;
 
@@ -473,6 +568,7 @@ async function handleWorkOSCallback(req, res) {
     res.type('html').send(html);
   } catch (err) {
     console.error('WorkOS callback error:', err);
+    clearStateCookie(res);
     const message = encodeURIComponent('Sign-in failed. Please try again.');
     res.redirect(`/login.html?error=${message}`);
   }

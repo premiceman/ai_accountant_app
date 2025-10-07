@@ -4,6 +4,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,next)=>next(); }
 const mongoose = require('mongoose');
 
@@ -49,6 +50,7 @@ const DATA_DIR     = path.join(__dirname, '../data');
 app.use(morgan('combined'));
 app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
 
 // ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));

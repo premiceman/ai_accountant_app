@@ -68,7 +68,7 @@
       url.searchParams.set('provider', provider);
       url.searchParams.set('next', next);
       url.searchParams.set('remember', 'true');
-      const res = await fetch(url.toString());
+      const res = await fetch(url.toString(), { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.authorizationUrl) {
         showGlobalError(data?.error || 'Unable to start single sign-on. Please try again.');

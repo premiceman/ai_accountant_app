@@ -32,7 +32,7 @@
       url.searchParams.set('provider', provider);
       url.searchParams.set('next', next);
       url.searchParams.set('remember', remember?.checked ? 'true' : 'false');
-      const res = await fetch(url.toString());
+      const res = await fetch(url.toString(), { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.authorizationUrl) {
         const msg = data?.error || 'Unable to start single sign-on. Please try again.';
