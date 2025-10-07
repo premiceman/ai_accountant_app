@@ -21,6 +21,7 @@
   const globalError = $('#signup-error');
   const params = new URLSearchParams(location.search);
   const next = params.get('next') || './home.html';
+  const passkeyBtn = $('#signupPasskey');
 
   const setFieldError = (name, message) => {
     const input = fields[name];
@@ -57,18 +58,22 @@
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
   }
 
-  async function startProvider(provider, button) {
-    if (!provider || !button) return;
+  async function startProvider(provider, button, options = {}) {
+    if (!button) return;
     clearAllErrors();
-    const original = button.textContent;
+    const original = button.innerHTML;
     button.disabled = true;
-    button.textContent = 'Redirecting…';
+    button.innerHTML = '<span>Redirecting…</span>';
     try {
       const url = new URL('/api/auth/workos/authorize', location.origin);
-      url.searchParams.set('provider', provider);
+      if (provider) url.searchParams.set('provider', provider);
       url.searchParams.set('next', next);
       url.searchParams.set('remember', 'true');
-      const res = await fetch(url.toString());
+      if (options.intent) url.searchParams.set('intent', options.intent);
+      const emailValue = typeof options.email === 'string' ? options.email.trim() : '';
+      if (emailValue) url.searchParams.set('email', emailValue);
+      if (options.connectionId) url.searchParams.set('connection', options.connectionId);
+      const res = await fetch(url.toString(), { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.authorizationUrl) {
         showGlobalError(data?.error || 'Unable to start single sign-on. Please try again.');
@@ -80,13 +85,17 @@
       showGlobalError('Network error. Please try again.');
     } finally {
       button.disabled = false;
-      if (original) button.textContent = original;
+      if (original !== undefined) button.innerHTML = original;
     }
   }
 
-  $('#signupGoogle')?.addEventListener('click', () => startProvider('google', $('#signupGoogle')));
-  $('#signupMicrosoft')?.addEventListener('click', () => startProvider('microsoft', $('#signupMicrosoft')));
-  $('#signupApple')?.addEventListener('click', () => startProvider('apple', $('#signupApple')));
+  $('#signupGoogle')?.addEventListener('click', () => startProvider('google', $('#signupGoogle'), { intent: 'signup' }));
+  $('#signupMicrosoft')?.addEventListener('click', () => startProvider('microsoft', $('#signupMicrosoft'), { intent: 'signup' }));
+  $('#signupApple')?.addEventListener('click', () => startProvider('apple', $('#signupApple'), { intent: 'signup' }));
+  passkeyBtn?.addEventListener('click', () => {
+    const emailValue = (fields.email?.value || '').trim();
+    startProvider(null, passkeyBtn, { intent: 'signup', email: emailValue });
+  });
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
