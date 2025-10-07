@@ -36,6 +36,15 @@ function parseRange(query) {
   }
 
   switch (preset) {
+    case 'current-month':
+    case 'this-month':
+      return {
+        mode: 'preset',
+        preset: 'current-month',
+        start: now.startOf('month').toDate(),
+        end: now.endOf('month').toDate(),
+        label: 'This month'
+      };
     case 'last-year':
       return {
         mode: 'preset',
