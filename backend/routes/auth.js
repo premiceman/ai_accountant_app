@@ -19,10 +19,14 @@ const router = express.Router();
 const WORKOS_API_KEY = process.env.WORKOS_API_KEY || process.env.WORKOS_KEY || '';
 const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID || process.env.WORKOS_CLIENT || '';
 const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || 'https://www.phloat.io/callback';
+const WORKOS_DEFAULT_PROVIDER = (process.env.WORKOS_DEFAULT_PROVIDER || 'authkit').toLowerCase();
+const WORKOS_DEFAULT_CONNECTION_ID = process.env.WORKOS_DEFAULT_CONNECTION_ID || '';
+const WORKOS_DEFAULT_ORGANIZATION_ID = process.env.WORKOS_DEFAULT_ORGANIZATION_ID || '';
 
 const workos = (WorkOS && WORKOS_API_KEY) ? new WorkOS(WORKOS_API_KEY) : null;
 
 const OAUTH_PROVIDER_MAP = {
+  authkit: 'AuthKit',
   google: 'GoogleOAuth',
   apple: 'AppleOAuth',
   microsoft: 'MicrosoftOAuth'
@@ -108,14 +112,14 @@ async function buildAuthorizationUrl({
   intent,
   email,
   connectionId,
+  organizationId,
 } = {}) {
   ensureWorkOSConfigured();
 
-  const provider = resolveProvider(providerKey);
-  if (providerKey && !provider) {
-    const err = new Error('Unsupported provider');
-    err.statusCode = 400;
-    throw err;
+  const chosenProviderKey = providerKey || WORKOS_DEFAULT_PROVIDER;
+  let provider = resolveProvider(chosenProviderKey);
+  if (!provider && chosenProviderKey) {
+    provider = chosenProviderKey;
   }
 
   const state = encodeState({
@@ -135,8 +139,15 @@ async function buildAuthorizationUrl({
   const loginHint = normEmail(email);
   if (loginHint) params.loginHint = loginHint;
 
-  const connection = String(connectionId || '').trim();
+  const connection = String(connectionId || WORKOS_DEFAULT_CONNECTION_ID || '').trim();
   if (connection) params.connectionId = connection;
+
+  const organization = String(organizationId || WORKOS_DEFAULT_ORGANIZATION_ID || '').trim();
+  if (organization) params.organizationId = organization;
+
+  if (!params.provider && !params.connectionId && !params.organizationId) {
+    params.provider = 'AuthKit';
+  }
 
   return workos.userManagement.getAuthorizationUrl(params);
 }
@@ -476,6 +487,7 @@ router.get('/workos/authorize', async (req, res) => {
       intent: req.query.intent,
       email: req.query.email,
       connectionId: req.query.connectionId || req.query.connection,
+      organizationId: req.query.organizationId || req.query.organization,
     });
 
     res.json({ authorizationUrl: url });
@@ -498,6 +510,7 @@ async function startHostedAuthRedirect(req, res) {
       intent: req.query.intent,
       email: req.query.email,
       connectionId: req.query.connectionId || req.query.connection,
+      organizationId: req.query.organizationId || req.query.organization,
     });
     res.redirect(url);
   } catch (err) {
