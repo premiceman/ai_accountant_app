@@ -4,234 +4,34 @@
   <meta charset="utf-8" />
   <title>Sign up — AI Accountant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Match login head includes -->
   <script>window.__API_BASE = window.__API_BASE || 'http://localhost:3000';</script>
   <script src="/js/head-include.js"></script>
-  <script src="/js/http-shim.js"></script>
-
   <style>
-    :root{
-      --auth-maxw: 980px;
-      --card-w: 440px;
-    }
-
-    body{ background: var(--bg-body); color: var(--fg) }
-
-    /* Mini top nav (matches login) */
-    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter:saturate(1.2) blur(8px) }
-    .landing-nav .btn{ padding:.5rem .9rem }
-    .brand-mark{ display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg) }
-    .brand-dot{ width:12px; height:12px; border-radius:50%;
-      background: radial-gradient(circle at 30% 30%, var(--brand), var(--brand-hover));
-      box-shadow:0 0 24px color-mix(in oklab, var(--brand) 45%, transparent)
-    }
-
-    /* Hero/auth shell (matches login) */
-    .auth{ min-height: calc(100vh - 56px); display:grid; place-items:center; position:relative; overflow:hidden }
-    .auth-inner{ width:100%; max-width: var(--auth-maxw); padding: clamp(2rem, 4vw, 3rem) 1.25rem; position:relative; z-index:2 }
-    .auth-grid{ display:grid; grid-template-columns: 1.1fr .9fr; gap: clamp(1.25rem, 3vw, 2rem) }
-    @media (max-width: 992px){ .auth-grid{ grid-template-columns: 1fr } }
-
-    /* Copy side (matches login) */
-    .copy{ padding: clamp(1rem, 2vw, 1.25rem) }
-    .eyebrow{ color:var(--fg-3); font-weight:600; text-transform:uppercase; letter-spacing:.12em }
-    h1{ font-size: clamp(1.6rem, 3.6vw, 2.2rem); line-height:1.2; margin:.5rem 0 .75rem;
-        background: linear-gradient(120deg, var(--fg), color-mix(in oklab, var(--brand) 35%, var(--fg)));
-        -webkit-background-clip:text; background-clip:text; color:transparent; }
-    .sub{ color:var(--fg-2); max-width: 60ch }
-    .chip{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--bd-hairline); padding:.35rem .6rem; border-radius:999px; background:var(--bg-surface); font-size:.9rem }
-
-    /* Card side (matches login) */
-    .auth-card{
-      width:100%; max-width: var(--card-w);
-      background: var(--bg-surface);
-      border: 1px solid var(--bd-hairline);
-      border-radius: 1.25rem;
-      box-shadow: var(--shadow);
-      padding: 1.25rem;
-      margin-inline: auto;
-      transform: translateY(8px);
-      transition: transform .35s ease, box-shadow .35s ease;
-    }
-    .auth-card:hover{ transform: translateY(-2px); box-shadow: var(--shadow-2) }
-
-    .btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.6rem; width:100%; font-weight:600 }
-    .btn-google{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
-    .btn-google:hover{ background: var(--bg-surface-2) }
-    .btn-microsoft{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
-    .btn-microsoft:hover{ background: var(--bg-surface-2) }
-    .btn-apple{ background:#000; color:#fff; border:1px solid #000 }
-    .btn-apple:hover{ filter:brightness(1.08) }
-    .btn-outline{
-      --bs-btn-bg: transparent;
-      --bs-btn-border-color: var(--bd-hairline);
-      --bs-btn-color: var(--fg);
-      --bs-btn-hover-bg: var(--bg-surface-2);
-      --bs-btn-hover-border-color: var(--bd);
-      box-shadow:none;
-    }
-    .oauth-icon{ width:18px; height:18px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:.7rem; font-weight:700; color:#fff }
-    .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg) }
-    .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
-    .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
-    .oauth-icon.email{ background: var(--brand); color:#fff; border-radius:50% }
-    .btn-oauth.btn-outline .oauth-icon{ background: var(--bg-surface-2); color:var(--brand); border-radius:50% }
-
-    .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
-    .divider::before, .divider::after{ content:""; height:1px; background: var(--bd-hairline); flex:1 }
-
-    /* Background flair (matches login) */
-    .mesh{
-      position:absolute; inset:-10% -10% auto -10%; height: 70%;
-      background:
-        radial-gradient(1200px 600px at 15% 35%, color-mix(in oklab,var(--brand) 18%,transparent), transparent),
-        radial-gradient(1200px 600px at 80% 20%, color-mix(in oklab,var(--brand-hover) 18%,transparent), transparent),
-        radial-gradient(1200px 600px at 50% 90%, color-mix(in oklab,#7FDCCB 20%,transparent), transparent);
-      mask-image: radial-gradient(1200px 600px at 50% 40%, #000, transparent 70%);
-      opacity:.6;
-    }
-    .grid{ position:absolute; inset:0;
-      background-image:
-        linear-gradient(to right, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px),
-        linear-gradient(to bottom, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px);
-      background-size: 52px 52px; opacity:.14;
-      mask-image: linear-gradient(to bottom, #000, transparent 75%)
-    }
-
-    /* Entrance animation (matches login) */
-    .reveal{ opacity:0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease }
-    .reveal.in{ opacity:1; transform:none }
-    @media (prefers-reduced-motion: reduce){ .reveal{ transition:none } }
-
-    /* Minimal on-theme 'PHLOAT' text (visual only) */
-    .phloat-lockup{
-      text-align:center; font-weight:800; letter-spacing:.18em; text-transform:uppercase; padding:.25rem 0 .5rem;
-      background: linear-gradient(120deg, var(--brand), color-mix(in oklab, var(--brand-hover) 60%, var(--fg)));
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
-
-    /* Keep your existing error block spacing tidy */
-    #signup-error{ min-height: 1.25rem }
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg-body);color:var(--fg);margin:0;font-family:var(--font-sans,'Inter',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif);}
+    main{width:100%;padding:2rem;}
+    .redirect-card{max-width:520px;margin:0 auto;background:var(--bg-surface);border:1px solid var(--bd-hairline);border-radius:1rem;padding:2rem;box-shadow:var(--shadow,0 20px 45px -25px rgba(15,23,42,.65));text-align:center;}
+    h1{font-size:1.8rem;margin-bottom:.75rem;}
+    p{margin-bottom:1rem;}
+    #redirect-error{margin-bottom:1rem;}
+    .fallback{margin-top:1.5rem;color:var(--fg-2);font-size:.9rem;}
+    .fallback a{color:inherit;font-weight:600;}
   </style>
 </head>
-
 <body>
-  <!-- Mini top nav -->
-  <nav class="landing-nav navbar navbar-expand-lg py-2 border-bottom bg-body-tertiary">
-    <div class="container">
-      <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
-      <div class="ms-auto d-flex align-items-center gap-2">
-        <a class="btn btn-outline" href="/login.html">Sign in</a>
-      </div>
-    </div>
-  </nav>
-
-  <!-- Auth hero -->
-  <main class="auth">
-    <div class="mesh" aria-hidden="true"></div>
-    <div class="grid" aria-hidden="true"></div>
-
-    <div class="auth-inner">
-      <div class="auth-grid">
-        <!-- Copy side (mirrors login) -->
-        <section class="copy reveal">
-          <div class="eyebrow">Get started</div>
-          <h1>Create your account</h1>
-          <p class="sub">
-            Join AI Accountant to manage documents, connect HMRC & banks, and get real-time insights.
-          </p>
-          <div class="d-flex flex-wrap gap-2 mt-3">
-            <span class="chip"><i class="bi bi-shield-lock"></i> Secure vault</span>
-            <span class="chip"><i class="bi bi-bank"></i> Open Banking</span>
-            <span class="chip"><i class="bi bi-check2-circle"></i> HMRC-ready</span>
-          </div>
-        </section>
-
-        <!-- Card side -->
-        <section class="reveal">
-          <div class="auth-card">
-            <h2 class="h5 mb-2 text-center">Create your account</h2>
-
-            <p id="signup-status" class="small text-secondary text-center mb-3">
-              We’ll redirect you to the WorkOS hosted sign-up to finish creating your account securely.
-            </p>
-
-            <div id="signup-error" class="alert alert-danger d-none small"></div>
-
-            <div class="d-grid gap-2 mb-3">
-              <button class="btn btn-oauth btn-primary" type="button" id="signupWorkOSBtn">
-                <span class="oauth-icon email" aria-hidden="true"><i class="bi bi-magic"></i></span>
-                <span>Continue with email, passkey, or magic link</span>
-              </button>
-              <button class="btn btn-oauth btn-google" type="button" id="signupGoogle">
-                <span class="oauth-icon google" aria-hidden="true"></span>
-                <span>Continue with Google</span>
-              </button>
-              <button class="btn btn-oauth btn-microsoft" type="button" id="signupMicrosoft">
-                <span class="oauth-icon microsoft" aria-hidden="true"></span>
-                <span>Continue with Microsoft</span>
-              </button>
-              <button class="btn btn-oauth btn-apple" type="button" id="signupApple">
-                <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
-                <span>Continue with Apple</span>
-              </button>
-            </div>
-
-            <p class="small text-secondary text-center mb-0">
-              After signing up, we’ll bring you back here to complete onboarding details.
-            </p>
-
-            <p class="small text-center text-secondary mt-3 mb-0">
-              By continuing you agree to our <a href="/legal.html#terms">Terms</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
-            </p>
-
-            <div class="text-center mt-3">
-              <span class="text-secondary small">Already have an account?</span>
-              <a class="small ms-1" href="/login.html">Sign in</a>
-            </div>
-
-            <div class="text-center small text-secondary mt-2">
-              Invited by our team?
-              <a href="https://versatile-refuge-31.authkit.app/invite" target="_blank" rel="noopener">Open your invite link</a>.
-            </div>
-          </div>
-        </section>
-      </div>
+  <main>
+    <div class="redirect-card" role="status" aria-live="polite">
+      <h1>Create your account</h1>
+      <p id="redirect-status" class="text-secondary">We’ll open the secure WorkOS sign-up so you can join with email and magic link.</p>
+      <div id="redirect-error" class="alert alert-danger d-none" role="alert"></div>
+      <a id="redirect-link" class="btn btn-primary w-100" href="/api/auth/workos/start?intent=signup">Continue to WorkOS</a>
+      <p class="fallback">Already have an account? <a href="/api/auth/workos/login">Sign in with WorkOS</a>.</p>
     </div>
   </main>
 
-  <!-- Light footer to match login aesthetic -->
-  <footer class="site-footer py-4">
-    <div class="container d-flex flex-wrap gap-3 align-items-center justify-content-between">
-      <div class="small">&copy; <span id="y"></span> AI Accountant. All rights reserved.</div>
-      <div class="d-flex gap-3 small">
-        <a class="link-secondary" href="/">Home</a>
-        <a class="link-secondary" href="/login.html">Sign in</a>
-        <a class="link-secondary" href="/legal.html">Legal</a>
-      </div>
-    </div>
-  </footer>
-
-  <!-- Same script setup as your original -->
   <script src="./js/auth.js"></script>
   <script>
     Auth.enforce({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: true });
   </script>
-  <script src="/js/mobile-sidebar.js"></script>
   <script src="./js/signup.js"></script>
-
-  <!-- Tiny UI-only helpers (purely aesthetic) -->
-  <script>
-    // Entrance reveal (visual only)
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
-    }, { threshold: 0.14 });
-    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-    // Year in footer
-    document.getElementById('y').textContent = new Date().getFullYear();
-  </script>
 </body>
 </html>
-
