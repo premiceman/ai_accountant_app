@@ -78,7 +78,7 @@ const UserSchema = new mongoose.Schema({
   email:     { type: String, trim: true, unique: true, required: true },
   password:  { type: String, required: true },
 
-  dateOfBirth: { type: Date, required: true },
+  dateOfBirth: { type: Date, default: null },
 
   uid:       { type: String, unique: true, index: true, default: generateUid },
 

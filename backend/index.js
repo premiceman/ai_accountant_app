@@ -71,6 +71,9 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // ---- API mounts ----
 mount('/api/auth', authRouter, 'auth');
+if (authRouter?.handleWorkOSCallback) {
+  app.get('/callback', authRouter.handleWorkOSCallback);
+}
 mount('/api/user', userRouter, 'user');
 
 // Protect docs endpoints with Unauthorized page/JSON

@@ -6,16 +6,60 @@
   const remember = document.getElementById('remember');
   const btn = document.getElementById('login-btn');
   const err = document.getElementById('login-error');
-  const next = new URLSearchParams(location.search).get('next') || './home.html';
+  const googleBtn = document.getElementById('googleBtn');
+  const microsoftBtn = document.getElementById('microsoftBtn');
+  const appleBtn = document.getElementById('appleBtn');
+  const params = new URLSearchParams(location.search);
+  const next = params.get('next') || './home.html';
+  const initialError = params.get('error');
+
   const setLoading = (v)=>{ if(!btn) return; btn.disabled=v; btn.dataset.originalText = btn.dataset.originalText||btn.textContent; btn.textContent = v?'Signing in…':btn.dataset.originalText; };
   const showError = (m)=>{ if(!err){ alert(m); return; } err.textContent=m; err.classList.remove('d-none'); };
   const clearError = ()=>{ if(err){ err.textContent=''; err.classList.add('d-none'); } };
+
+  if (initialError) {
+    showError(initialError);
+  }
+
+  async function startProvider(provider, button) {
+    if (!provider || !button) return;
+    clearError();
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Redirecting…';
+    try {
+      const url = new URL('/api/auth/workos/authorize', location.origin);
+      url.searchParams.set('provider', provider);
+      url.searchParams.set('next', next);
+      url.searchParams.set('remember', remember?.checked ? 'true' : 'false');
+      const res = await fetch(url.toString());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.authorizationUrl) {
+        const msg = data?.error || 'Unable to start single sign-on. Please try again.';
+        showError(msg);
+        return;
+      }
+      location.href = data.authorizationUrl;
+    } catch (err) {
+      console.error('Provider start failed:', err);
+      showError('Network error. Please try again.');
+    } finally {
+      button.disabled = false;
+      if (original) button.textContent = original;
+    }
+  }
+
+  googleBtn?.addEventListener('click', () => startProvider('google', googleBtn));
+  microsoftBtn?.addEventListener('click', () => startProvider('microsoft', microsoftBtn));
+  appleBtn?.addEventListener('click', () => startProvider('apple', appleBtn));
+
   form?.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const identifier = (idInput?.value||'').trim();
     const password = pwInput?.value || '';
-    if(!identifier || !password) return showError('Please enter your email/username and password.');
-    const body = identifier.includes('@') ? { email:identifier, password } : { username:identifier, password };
+    if(!identifier || !password) return showError('Please enter your email and password.');
+    if(!/^\S+@\S+\.\S+$/.test(identifier)) return showError('Please enter a valid email address.');
+    const body = { identifier, password };
     setLoading(true); clearError();
     try {
       const res = await fetch('/api/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
