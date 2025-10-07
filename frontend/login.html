@@ -70,6 +70,7 @@
     .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg); color:#fff }
     .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
     .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
+    .btn-oauth.btn-outline .oauth-icon{ background: var(--bg-surface-2); color:var(--brand); border-radius:50% }
 
     .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
     .divider::before, .divider::after{ content:""; height:1px; background: var(--bd-hairline); flex:1 }
@@ -161,6 +162,10 @@
               <button class="btn btn-oauth btn-apple" type="button" id="appleBtn">
                 <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
                 <span>Sign in with Apple</span>
+              </button>
+              <button class="btn btn-oauth btn-outline" type="button" id="passkeyBtn">
+                <span class="oauth-icon" aria-hidden="true"><i class="bi bi-fingerprint"></i></span>
+                <span>Use a passkey or magic link</span>
               </button>
             </div>
 

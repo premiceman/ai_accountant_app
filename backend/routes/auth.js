@@ -28,6 +28,22 @@ const OAUTH_PROVIDER_MAP = {
   microsoft: 'MicrosoftOAuth'
 };
 
+function resolveProvider(providerKey) {
+  const key = String(providerKey || '').toLowerCase();
+  if (!key) return null;
+  return OAUTH_PROVIDER_MAP[key] || null;
+}
+
+function parseIntent(raw) {
+  const value = String(raw || '').toLowerCase();
+  return value === 'signup' ? 'signup' : 'login';
+}
+
+function parseBooleanParam(value) {
+  const normalized = String(value || '').toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(normalized);
+}
+
 function ensureWorkOSConfigured() {
   if (!workos || !WORKOS_CLIENT_ID) {
     const msg = 'WorkOS AuthKit is not configured';
@@ -84,6 +100,46 @@ const INTEGRATION_SEEDS = [
 ];
 
 const issueToken = (userId) => jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+
+async function buildAuthorizationUrl({
+  providerKey,
+  next,
+  remember,
+  intent,
+  email,
+  connectionId,
+} = {}) {
+  ensureWorkOSConfigured();
+
+  const provider = resolveProvider(providerKey);
+  if (providerKey && !provider) {
+    const err = new Error('Unsupported provider');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const state = encodeState({
+    next: sanitizeNext(next || '/home.html'),
+    remember: parseBooleanParam(remember),
+    intent: parseIntent(intent),
+  });
+
+  const params = {
+    clientId: WORKOS_CLIENT_ID,
+    redirectUri: WORKOS_REDIRECT_URI,
+    state,
+  };
+
+  if (provider) params.provider = provider;
+
+  const loginHint = normEmail(email);
+  if (loginHint) params.loginHint = loginHint;
+
+  const connection = String(connectionId || '').trim();
+  if (connection) params.connectionId = connection;
+
+  return workos.userManagement.getAuthorizationUrl(params);
+}
 
 async function ensureLocalUserFromWorkOS(workosUser, {
   fallbackEmail,
@@ -413,29 +469,46 @@ router.post('/login', async (req, res) => {
 
 router.get('/workos/authorize', async (req, res) => {
   try {
-    ensureWorkOSConfigured();
-
-    const providerKey = String(req.query.provider || '').toLowerCase();
-    const provider = OAUTH_PROVIDER_MAP[providerKey];
-    if (!provider) return res.status(400).json({ error: 'Unsupported provider' });
-
-    const next = sanitizeNext(req.query.next || '/home.html');
-    const remember = String(req.query.remember || '').toLowerCase() === 'true';
-    const state = encodeState({ next, remember });
-
-    const url = await workos.userManagement.getAuthorizationUrl({
-      clientId: WORKOS_CLIENT_ID,
-      provider,
-      redirectUri: WORKOS_REDIRECT_URI,
-      state,
+    const url = await buildAuthorizationUrl({
+      providerKey: req.query.provider,
+      next: req.query.next,
+      remember: parseBooleanParam(req.query.remember),
+      intent: req.query.intent,
+      email: req.query.email,
+      connectionId: req.query.connectionId || req.query.connection,
     });
 
     res.json({ authorizationUrl: url });
   } catch (err) {
+    const status = err?.statusCode || err?.status || 500;
+    if (status === 400) {
+      return res.status(400).json({ error: err.message || 'Unsupported provider' });
+    }
     console.error('WorkOS authorize error:', err);
     res.status(500).json({ error: 'Unable to start sign-in' });
   }
 });
+
+async function startHostedAuthRedirect(req, res) {
+  try {
+    const url = await buildAuthorizationUrl({
+      providerKey: req.query.provider,
+      next: req.query.next,
+      remember: parseBooleanParam(req.query.remember),
+      intent: req.query.intent,
+      email: req.query.email,
+      connectionId: req.query.connectionId || req.query.connection,
+    });
+    res.redirect(url);
+  } catch (err) {
+    console.error('WorkOS start redirect error:', err);
+    const message = encodeURIComponent(err?.message || 'Unable to start sign-in. Please try again.');
+    res.redirect(`/login.html?error=${message}`);
+  }
+}
+
+router.get('/workos/start', (req, res) => { startHostedAuthRedirect(req, res); });
+router.get('/workos/login', (req, res) => { startHostedAuthRedirect(req, res); });
 
 async function handleWorkOSCallback(req, res) {
   try {
@@ -455,12 +528,20 @@ async function handleWorkOSCallback(req, res) {
     const stateData = decodeState(state);
     const next = sanitizeNext(stateData.next || '/home.html');
     const remember = !!stateData.remember;
+    const intent = parseIntent(stateData.intent);
 
     const localUser = await ensureLocalUserFromWorkOS(authResult?.user, {
       fallbackEmail: authResult?.user?.email,
+      agreeLegal: intent === 'signup',
     });
 
     if (!localUser) throw new Error('Account sync failed');
+
+    if (intent === 'signup' && !localUser.eulaAcceptedAt) {
+      localUser.eulaAcceptedAt = new Date();
+      localUser.eulaVersion = LEGAL_VERSION;
+      await localUser.save();
+    }
 
     const token = issueToken(localUser._id);
     const userPayload = publicUser(localUser);

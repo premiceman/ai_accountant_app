@@ -63,10 +63,19 @@
     .btn-microsoft:hover{ background: var(--bg-surface-2) }
     .btn-apple{ background:#000; color:#fff; border:1px solid #000 }
     .btn-apple:hover{ filter:brightness(1.08) }
+    .btn-outline{
+      --bs-btn-bg: transparent;
+      --bs-btn-border-color: var(--bd-hairline);
+      --bs-btn-color: var(--fg);
+      --bs-btn-hover-bg: var(--bg-surface-2);
+      --bs-btn-hover-border-color: var(--bd);
+      box-shadow:none;
+    }
     .oauth-icon{ width:18px; height:18px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:.7rem; font-weight:700; color:#fff }
     .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg) }
     .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
     .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
+    .btn-oauth.btn-outline .oauth-icon{ background: var(--bg-surface-2); color:var(--brand); border-radius:50% }
 
     .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
     .divider::before, .divider::after{ content:""; height:1px; background: var(--bd-hairline); flex:1 }
@@ -155,6 +164,10 @@
               <button class="btn btn-oauth btn-apple" type="button" id="signupApple">
                 <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
                 <span>Continue with Apple</span>
+              </button>
+              <button class="btn btn-oauth btn-outline" type="button" id="signupPasskey">
+                <span class="oauth-icon" aria-hidden="true"><i class="bi bi-fingerprint"></i></span>
+                <span>Use a passkey or magic link</span>
               </button>
             </div>
 

@@ -9,6 +9,7 @@
   const googleBtn = document.getElementById('googleBtn');
   const microsoftBtn = document.getElementById('microsoftBtn');
   const appleBtn = document.getElementById('appleBtn');
+  const passkeyBtn = document.getElementById('passkeyBtn');
   const params = new URLSearchParams(location.search);
   const next = params.get('next') || './home.html';
   const initialError = params.get('error');
@@ -21,18 +22,25 @@
     showError(initialError);
   }
 
-  async function startProvider(provider, button) {
-    if (!provider || !button) return;
+  async function startProvider(provider, button, options = {}) {
+    if (!button) return;
     clearError();
-    const original = button.textContent;
+    const original = button.innerHTML;
     button.disabled = true;
-    button.textContent = 'Redirecting…';
+    button.innerHTML = '<span>Redirecting…</span>';
     try {
       const url = new URL('/api/auth/workos/authorize', location.origin);
-      url.searchParams.set('provider', provider);
+      if (provider) url.searchParams.set('provider', provider);
       url.searchParams.set('next', next);
-      url.searchParams.set('remember', remember?.checked ? 'true' : 'false');
-      const res = await fetch(url.toString());
+      const rememberValue = typeof options.rememberOverride === 'boolean'
+        ? options.rememberOverride
+        : !!remember?.checked;
+      if (rememberValue) url.searchParams.set('remember', 'true');
+      if (options.intent) url.searchParams.set('intent', options.intent);
+      const emailValue = typeof options.email === 'string' ? options.email.trim() : '';
+      if (emailValue) url.searchParams.set('email', emailValue);
+      if (options.connectionId) url.searchParams.set('connection', options.connectionId);
+      const res = await fetch(url.toString(), { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.authorizationUrl) {
         const msg = data?.error || 'Unable to start single sign-on. Please try again.';
@@ -45,13 +53,21 @@
       showError('Network error. Please try again.');
     } finally {
       button.disabled = false;
-      if (original) button.textContent = original;
+      if (original !== undefined) button.innerHTML = original;
     }
   }
 
   googleBtn?.addEventListener('click', () => startProvider('google', googleBtn));
   microsoftBtn?.addEventListener('click', () => startProvider('microsoft', microsoftBtn));
   appleBtn?.addEventListener('click', () => startProvider('apple', appleBtn));
+  passkeyBtn?.addEventListener('click', () => {
+    const emailValue = (idInput?.value || '').trim();
+    startProvider(null, passkeyBtn, {
+      intent: 'login',
+      rememberOverride: remember?.checked === true,
+      email: emailValue,
+    });
+  });
 
   form?.addEventListener('submit', async (e)=>{
     e.preventDefault();
