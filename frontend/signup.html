@@ -75,6 +75,7 @@
     .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg) }
     .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
     .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
+    .oauth-icon.email{ background: var(--brand); color:#fff; border-radius:50% }
     .btn-oauth.btn-outline .oauth-icon{ background: var(--bg-surface-2); color:var(--brand); border-radius:50% }
 
     .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
@@ -152,7 +153,17 @@
           <div class="auth-card">
             <h2 class="h5 mb-2 text-center">Create your account</h2>
 
+            <p id="signup-status" class="small text-secondary text-center mb-3">
+              We’ll redirect you to the WorkOS hosted sign-up to finish creating your account securely.
+            </p>
+
+            <div id="signup-error" class="alert alert-danger d-none small"></div>
+
             <div class="d-grid gap-2 mb-3">
+              <button class="btn btn-oauth btn-primary" type="button" id="signupWorkOSBtn">
+                <span class="oauth-icon email" aria-hidden="true"><i class="bi bi-magic"></i></span>
+                <span>Continue with email, passkey, or magic link</span>
+              </button>
               <button class="btn btn-oauth btn-google" type="button" id="signupGoogle">
                 <span class="oauth-icon google" aria-hidden="true"></span>
                 <span>Continue with Google</span>
@@ -165,71 +176,24 @@
                 <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
                 <span>Continue with Apple</span>
               </button>
-              <button class="btn btn-oauth btn-outline" type="button" id="signupPasskey">
-                <span class="oauth-icon" aria-hidden="true"><i class="bi bi-fingerprint"></i></span>
-                <span>Use a passkey or magic link</span>
-              </button>
             </div>
 
-            <div class="divider small text-muted text-center"><span>or</span></div>
+            <p class="small text-secondary text-center mb-0">
+              After signing up, we’ll bring you back here to complete onboarding details.
+            </p>
 
-            <form id="signupForm" novalidate>
-              <div class="row g-2 mb-2">
-                <div class="col-sm-6">
-                  <label class="form-label" for="firstName">First name</label>
-                  <input id="firstName" name="firstName" class="form-control" autocomplete="given-name" required>
-                  <div class="form-text error text-danger small" data-error-for="firstName"></div>
-                </div>
-                <div class="col-sm-6">
-                  <label class="form-label" for="lastName">Last name</label>
-                  <input id="lastName" name="lastName" class="form-control" autocomplete="family-name" required>
-                  <div class="form-text error text-danger small" data-error-for="lastName"></div>
-                </div>
-              </div>
+            <p class="small text-center text-secondary mt-3 mb-0">
+              By continuing you agree to our <a href="/legal.html#terms">Terms</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
+            </p>
 
-              <div class="mb-2">
-                <label class="form-label" for="email">Email</label>
-                <input id="email" name="email" type="email" class="form-control" autocomplete="email" required>
-                <div class="form-text error text-danger small" data-error-for="email"></div>
-              </div>
-
-              <div class="mb-2">
-                <label class="form-label" for="dateOfBirth">Date of birth</label>
-                <input id="dateOfBirth" name="dateOfBirth" class="form-control" type="date" required>
-                <div class="form-text error text-danger small" data-error-for="dateOfBirth"></div>
-              </div>
-
-              <div class="row g-2 mb-2">
-                <div class="col-sm-6">
-                  <label class="form-label" for="password">Password</label>
-                  <input id="password" name="password" type="password" class="form-control" autocomplete="new-password" minlength="8" required>
-                  <div class="form-text">At least 8 characters.</div>
-                  <div class="form-text error text-danger small" data-error-for="password"></div>
-                </div>
-                <div class="col-sm-6">
-                  <label class="form-label" for="passwordConfirm">Confirm password</label>
-                  <input id="passwordConfirm" name="passwordConfirm" type="password" class="form-control" autocomplete="new-password" required>
-                  <div class="form-text error text-danger small" data-error-for="passwordConfirm"></div>
-                </div>
-              </div>
-
-              <div class="form-check mb-2">
-                <input id="agreeLegal" class="form-check-input" type="checkbox" required>
-                <label class="form-check-label" for="agreeLegal">
-                  I agree to the <a href="/legal.html#terms">Terms of Service</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
-                </label>
-                <div class="form-text error text-danger small" data-error-for="agreeLegal"></div>
-              </div>
-
-              <div id="signup-error" class="alert alert-danger d-none small"></div>
-
-              <button id="signupBtn" class="btn btn-primary w-100" type="submit">Create account</button>
-              <p class="small text-muted mt-2">30-day trial included. Cancel anytime.</p>
-            </form>
-
-            <div class="text-center mt-2">
+            <div class="text-center mt-3">
               <span class="text-secondary small">Already have an account?</span>
               <a class="small ms-1" href="/login.html">Sign in</a>
+            </div>
+
+            <div class="text-center small text-secondary mt-2">
+              Invited by our team?
+              <a href="https://versatile-refuge-31.authkit.app/invite" target="_blank" rel="noopener">Open your invite link</a>.
             </div>
           </div>
         </section>
