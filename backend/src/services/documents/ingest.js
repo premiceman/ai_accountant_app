@@ -125,6 +125,7 @@ async function buildInsights(entry, text, context = {}) {
       categories: analysed.summary?.categories || [],
       topCategories: analysed.summary?.topCategories || [],
       largestExpenses: analysed.summary?.largestExpenses || [],
+      spendingCanteorgies: analysed.summary?.spendingCanteorgies || [],
       extractionSource: analysed.extractionSource || null,
       account: metadata,
     };

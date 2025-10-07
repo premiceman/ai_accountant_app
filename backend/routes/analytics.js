@@ -36,6 +36,15 @@ function parseRange(query) {
   }
 
   switch (preset) {
+    case 'current-month':
+    case 'this-month':
+      return {
+        mode: 'preset',
+        preset: 'current-month',
+        start: now.startOf('month').toDate(),
+        end: now.endOf('month').toDate(),
+        label: 'This month'
+      };
     case 'last-year':
       return {
         mode: 'preset',
@@ -188,6 +197,33 @@ function withinRange(value, range) {
   return date >= range.start && date <= range.end;
 }
 
+function monthRangeFromKey(monthKey) {
+  if (!monthKey) return null;
+  const parts = String(monthKey).split('-');
+  if (parts.length !== 2) return null;
+  const year = Number(parts[0]);
+  const monthIndex = Number(parts[1]) - 1;
+  if (!Number.isInteger(year) || !Number.isInteger(monthIndex)) return null;
+  const start = new Date(Date.UTC(year, monthIndex, 1));
+  const end = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
+  return { start, end };
+}
+
+function timelineEntryWithinRange(entry, range) {
+  if (!entry?.period) return false;
+  let start = toDate(entry.period.start);
+  let end = toDate(entry.period.end);
+  if (!start || !end) {
+    const monthRange = monthRangeFromKey(entry.period.month);
+    if (monthRange) {
+      start = start || monthRange.start;
+      end = end || monthRange.end;
+    }
+  }
+  if (!start || !end) return false;
+  return start <= range.end && end >= range.start;
+}
+
 function groupSourcesByBase(sources = {}) {
   const grouped = {};
   for (const entry of Object.values(sources)) {
@@ -219,8 +255,9 @@ function summariseStatementRange(entries = [], range) {
     accounts.set(accountId, accountSummary);
 
     const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
+    const fallbackDate = meta.period?.end || meta.period?.start || entry.period || (entry.files?.[0]?.uploadedAt || null);
     txList.forEach((tx, idx) => {
-      const txDate = tx.date || meta.period?.end || meta.period?.start || entry.period || null;
+      const txDate = tx.date || fallbackDate;
       if (!withinRange(txDate, range)) return;
       const amount = Number(tx.amount);
       if (!Number.isFinite(amount)) return;
@@ -297,6 +334,17 @@ function summariseStatementRange(entries = [], range) {
 
   const categories = Object.values(categoryGroups)
     .sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
+  const totalOutflow = categories.reduce((acc, item) => acc + (item.outflow || 0), 0);
+  const spendingCanteorgies = categories
+    .filter((item) => item.outflow || item.inflow)
+    .map((item) => ({
+      label: item.category,
+      category: item.category,
+      amount: item.outflow || item.inflow || 0,
+      outflow: item.outflow || 0,
+      inflow: item.inflow || 0,
+      share: totalOutflow ? (item.outflow || 0) / totalOutflow : 0,
+    }));
   const topCategories = categories
     .filter((cat) => cat.outflow)
     .slice(0, 5)
@@ -333,6 +381,7 @@ function summariseStatementRange(entries = [], range) {
     transactions: filtered,
     transferCount: transferIds.size,
     hasData: filtered.length > 0,
+    spendingCanteorgies,
   };
 }
 
@@ -343,7 +392,11 @@ function buildRangeView(docSources = {}, range) {
   const payslipInRange = payslipEntries
     .map((entry) => ({
       entry,
-      payDate: entry.metrics?.payDate || entry.metadata?.payDate || entry.metrics?.periodEnd || entry.metrics?.periodStart,
+      payDate: entry.metrics?.payDate
+        || entry.metadata?.payDate
+        || entry.metrics?.periodEnd
+        || entry.metrics?.periodStart
+        || entry.files?.[0]?.uploadedAt,
     }))
     .filter((item) => withinRange(item.payDate, range));
   const latestPayslip = payslipInRange
@@ -380,6 +433,8 @@ router.get('/dashboard', auth, async (req, res) => {
   const docAggregates = docInsights.aggregates || {};
   const docProcessing = docInsights.processing || {};
   const hasData = Object.keys(docSources).length > 0;
+  const timelineRaw = Array.isArray(docInsights.timeline) ? docInsights.timeline : [];
+  const timelineInRange = timelineRaw.filter((entry) => timelineEntryWithinRange(entry, range));
   const wealthPlan = user.wealthPlan || {};
   const summary = wealthPlan.summary || {};
   const assetAllocation = Array.isArray(summary.assetAllocation) ? summary.assetAllocation : [];
@@ -453,14 +508,19 @@ router.get('/dashboard', auth, async (req, res) => {
     });
   }
 
-  const categorySource = Array.isArray(statementSummary?.categories) ? statementSummary.categories : [];
-  const totalSpend = Number(statementSummary?.totals?.spend || 0) || categorySource.reduce((acc, item) => acc + Number(item.outflow || item.amount || 0), 0) || 1;
-  const spendCategories = categorySource
+  const categorySourceRaw = Array.isArray(statementSummary?.spendingCanteorgies)
+    ? statementSummary.spendingCanteorgies
+    : Array.isArray(statementSummary?.categories)
+      ? statementSummary.categories
+      : [];
+  const totalSpendRaw = categorySourceRaw.reduce((acc, item) => acc + Number(item.outflow ?? item.amount ?? 0), 0);
+  const spendDivisor = totalSpendRaw || Number(statementSummary?.totals?.spend || 0);
+  const spendCategories = categorySourceRaw
     .filter((cat) => (cat.outflow || cat.amount))
     .map((cat) => ({
-      label: cat.category || cat.label || 'Category',
+      label: cat.label || cat.category || 'Category',
       amount: Number(cat.outflow ?? cat.amount ?? 0),
-      share: totalSpend ? Number(cat.outflow ?? cat.amount ?? 0) / totalSpend : 0,
+      share: spendDivisor ? Number(cat.outflow ?? cat.amount ?? 0) / spendDivisor : 0,
     }));
 
   const processingStates = Object.entries(docProcessing).map(([k, state]) => ({ key: k, ...(state || {}) }));
@@ -505,6 +565,9 @@ router.get('/dashboard', auth, async (req, res) => {
         largestExpenses: Array.isArray(statementSummary.largestExpenses) ? statementSummary.largestExpenses : [],
         accounts: Array.isArray(statementSummary.accounts) ? statementSummary.accounts : [],
         transferCount: statementSummary.transferCount || 0,
+        spendingCanteorgies: Array.isArray(statementSummary.spendingCanteorgies)
+          ? statementSummary.spendingCanteorgies
+          : [],
       }
     : null;
 
@@ -571,6 +634,8 @@ router.get('/dashboard', auth, async (req, res) => {
         values: []
       },
       spendByCategory: spendCategories,
+      spendingCanteorgies: spendCategories,
+      timeline: timelineInRange,
       largestExpenses: Array.isArray(statementSummary?.largestExpenses) ? statementSummary.largestExpenses : [],
       payslipAnalytics,
       statementHighlights,

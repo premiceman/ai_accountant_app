@@ -35,7 +35,7 @@
   }
 
   function defaultRange() {
-    return { mode: 'preset', preset: 'last-quarter', start: null, end: null };
+    return { mode: 'preset', preset: 'current-month', start: null, end: null };
   }
   function loadRange() {
     try { return JSON.parse(localStorage.getItem(RANGE_KEY) || 'null') || defaultRange(); }
@@ -109,8 +109,13 @@
 
     document.querySelectorAll('input[name="rngQuick"]').forEach((el) => {
       el.addEventListener('change', () => {
+        if (!el.checked) return;
+        st.mode = 'preset';
         st.preset = el.value;
+        st.start = null;
+        st.end = null;
         saveRange(st);
+        reloadDashboard();
       });
     });
 
@@ -127,7 +132,7 @@
     });
 
     setMode(st.mode || 'preset');
-    const presetEl = byId(`rng-${st.preset || 'last-quarter'}`) || byId('rng-last-quarter');
+    const presetEl = byId(`rng-${st.preset || 'current-month'}`) || byId('rng-current-month');
     if (presetEl) presetEl.checked = true;
     if (st.start) byId('rng-start').value = st.start;
     if (st.end) byId('rng-end').value = st.end;
@@ -143,7 +148,7 @@
       params.set('start', st.start);
       params.set('end', st.end);
     } else {
-      params.set('preset', st.preset || 'last-quarter');
+      params.set('preset', st.preset || 'current-month');
     }
     params.set('t', Date.now());
 
@@ -209,7 +214,10 @@
 
     renderPayslipAnalytics(data.accounting?.payslipAnalytics || null, data.accounting?.rangeStatus || {});
     renderStatementHighlights(data.accounting?.statementHighlights || null, data.accounting?.rangeStatus || {});
-    renderSpendCategory(data.accounting?.spendByCategory || [], data.accounting?.rangeStatus || {});
+    renderSpendCategory(
+      data.accounting?.spendingCanteorgies || data.accounting?.spendByCategory || [],
+      data.accounting?.rangeStatus || {}
+    );
     renderInflationTrend(data.accounting?.inflationTrend || []);
     renderLargestExpenses(data.accounting?.largestExpenses || [], data.accounting?.rangeStatus || {});
     renderDuplicates(data.accounting?.duplicates || []);
