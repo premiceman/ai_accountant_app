@@ -18,18 +18,61 @@ const router = express.Router();
 
 const WORKOS_API_KEY = process.env.WORKOS_API_KEY || process.env.WORKOS_KEY || '';
 const WORKOS_CLIENT_ID = process.env.WORKOS_CLIENT_ID || process.env.WORKOS_CLIENT || '';
-const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || 'https://www.phloat.io/callback';
+const WORKOS_REDIRECT_URI = process.env.WORKOS_REDIRECT_URI || '';
+const WORKOS_DEFAULT_PROVIDER = (process.env.WORKOS_DEFAULT_PROVIDER || 'authkit').toLowerCase();
+const WORKOS_DEFAULT_CONNECTION_ID = process.env.WORKOS_DEFAULT_CONNECTION_ID || '';
+const WORKOS_DEFAULT_ORGANIZATION_ID = process.env.WORKOS_DEFAULT_ORGANIZATION_ID || '';
+
+const WORKOS_OAUTH_COOKIE_NAME = 'workos_oauth_pkce';
+const WORKOS_OAUTH_COOKIE_DOMAIN = process.env.WORKOS_OAUTH_COOKIE_DOMAIN || '.phloat.io';
+const WORKOS_OAUTH_COOKIE_MAX_AGE_MS = 10 * 60 * 1000;
+const WORKOS_OAUTH_COOKIE_OPTIONS = Object.freeze({
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  domain: WORKOS_OAUTH_COOKIE_DOMAIN || undefined,
+  path: '/callback',
+  maxAge: WORKOS_OAUTH_COOKIE_MAX_AGE_MS,
+});
+const WORKOS_OAUTH_COOKIE_CLEAR_OPTIONS = Object.freeze({
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  domain: WORKOS_OAUTH_COOKIE_DOMAIN || undefined,
+  path: '/callback',
+});
 
 const workos = (WorkOS && WORKOS_API_KEY) ? new WorkOS(WORKOS_API_KEY) : null;
 
+if (workos && WORKOS_CLIENT_ID) {
+  console.log("✅ WorkOS AuthKit provider correctly configured (provider='authkit')");
+}
+
 const OAUTH_PROVIDER_MAP = {
+  authkit: 'authkit',
   google: 'GoogleOAuth',
   apple: 'AppleOAuth',
   microsoft: 'MicrosoftOAuth'
 };
 
+function resolveProvider(providerKey) {
+  const key = String(providerKey || '').toLowerCase();
+  if (!key) return null;
+  return OAUTH_PROVIDER_MAP[key] || null;
+}
+
+function parseIntent(raw) {
+  const value = String(raw || '').toLowerCase();
+  return value === 'signup' ? 'signup' : 'login';
+}
+
+function parseBooleanParam(value) {
+  const normalized = String(value || '').toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(normalized);
+}
+
 function ensureWorkOSConfigured() {
-  if (!workos || !WORKOS_CLIENT_ID) {
+  if (!workos || !WORKOS_CLIENT_ID || !WORKOS_REDIRECT_URI) {
     const msg = 'WorkOS AuthKit is not configured';
     const err = new Error(msg);
     err.statusCode = 500;
@@ -54,6 +97,22 @@ function decodeState(state) {
   } catch {
     return {};
   }
+}
+
+function parseCookieHeader(header) {
+  if (typeof header !== 'string' || !header) return {};
+  return header.split(';').reduce((acc, part) => {
+    const [rawKey, ...rest] = part.split('=');
+    const key = rawKey ? rawKey.trim() : '';
+    if (!key) return acc;
+    const value = rest.join('=').trim();
+    try {
+      acc[key] = decodeURIComponent(value);
+    } catch {
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
 }
 
 function sanitizeNext(next) {
@@ -84,6 +143,112 @@ const INTEGRATION_SEEDS = [
 ];
 
 const issueToken = (userId) => jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
+
+function generateCodeVerifier() {
+  return crypto.randomBytes(64).toString('base64url');
+}
+
+function deriveCodeChallenge(codeVerifier) {
+  return crypto
+    .createHash('sha256')
+    .update(codeVerifier)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function persistWorkOSPkceCookie(res, payload) {
+  try {
+    res.cookie(WORKOS_OAUTH_COOKIE_NAME, JSON.stringify(payload), WORKOS_OAUTH_COOKIE_OPTIONS);
+  } catch (err) {
+    console.error('Failed to persist WorkOS PKCE cookie', err);
+  }
+}
+
+function readWorkOSPkceCookie(req) {
+  const cookieBag = (req && typeof req.cookies === 'object' && req.cookies)
+    ? req.cookies
+    : parseCookieHeader(req?.headers?.cookie);
+  const raw = cookieBag?.[WORKOS_OAUTH_COOKIE_NAME];
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function clearWorkOSPkceCookie(res) {
+  res.clearCookie(WORKOS_OAUTH_COOKIE_NAME, WORKOS_OAUTH_COOKIE_CLEAR_OPTIONS);
+}
+
+async function buildAuthorizationUrl({
+  providerKey,
+  next,
+  remember,
+  intent,
+  email,
+  connectionId,
+  organizationId,
+  stateOverride,
+  codeChallenge,
+  codeChallengeMethod,
+} = {}) {
+  ensureWorkOSConfigured();
+
+  const chosenProviderKey = providerKey || WORKOS_DEFAULT_PROVIDER;
+  let provider = resolveProvider(chosenProviderKey);
+  if (!provider && chosenProviderKey) {
+    provider = chosenProviderKey;
+  }
+
+  const sanitizedNext = sanitizeNext(next || '/home.html');
+  const rememberFlag = parseBooleanParam(remember);
+  const parsedIntent = parseIntent(intent);
+
+  const state = typeof stateOverride === 'string' && stateOverride
+    ? stateOverride
+    : encodeState({
+      next: sanitizedNext,
+      remember: rememberFlag,
+      intent: parsedIntent,
+    });
+
+  const params = {
+    clientId: WORKOS_CLIENT_ID,
+    redirectUri: WORKOS_REDIRECT_URI,
+    state,
+  };
+
+  if (provider) params.provider = provider;
+
+  const loginHint = normEmail(email);
+  if (loginHint) params.loginHint = loginHint;
+
+  const connection = String(connectionId || WORKOS_DEFAULT_CONNECTION_ID || '').trim();
+  if (connection) params.connectionId = connection;
+
+  const organization = String(organizationId || WORKOS_DEFAULT_ORGANIZATION_ID || '').trim();
+  if (organization) params.organizationId = organization;
+
+  if (!params.provider && !params.connectionId && !params.organizationId) {
+    // WorkOS AuthKit expects provider to be 'authkit' (lowercase).
+    // 'AuthKit' (capitalized) will throw “provider not valid”.
+    params.provider = 'authkit';
+  }
+
+  if (codeChallenge) {
+    params.codeChallenge = codeChallenge;
+  }
+  if (codeChallengeMethod) {
+    params.codeChallengeMethod = codeChallengeMethod;
+  }
+
+  const resolvedProvider = params.provider || null;
+  const authorizationUrl = await workos.userManagement.getAuthorizationUrl(params);
+  return { authorizationUrl, state, provider: resolvedProvider };
+}
 
 async function ensureLocalUserFromWorkOS(workosUser, {
   fallbackEmail,
@@ -168,6 +333,50 @@ async function ensureLocalUserFromWorkOS(workosUser, {
   }
 
   return user;
+}
+
+async function prepareWorkOSAuthorization(req, res) {
+  ensureWorkOSConfigured();
+
+  const sanitizedNext = sanitizeNext(req.query.next || '/home.html');
+  const rememberFlag = parseBooleanParam(req.query.remember);
+  const intent = parseIntent(req.query.intent);
+  const csrfToken = crypto.randomBytes(32).toString('hex');
+
+  const statePayload = {
+    next: sanitizedNext,
+    remember: rememberFlag,
+    intent,
+    csrf: csrfToken,
+  };
+
+  const state = encodeState(statePayload);
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = deriveCodeChallenge(codeVerifier);
+
+  const { authorizationUrl, provider } = await buildAuthorizationUrl({
+    providerKey: req.query.provider,
+    next: sanitizedNext,
+    remember: rememberFlag,
+    intent,
+    email: req.query.email,
+    connectionId: req.query.connectionId || req.query.connection,
+    organizationId: req.query.organizationId || req.query.organization,
+    stateOverride: state,
+    codeChallenge,
+    codeChallengeMethod: 'S256',
+  });
+
+  persistWorkOSPkceCookie(res, { state, codeVerifier });
+
+  console.info('Starting WorkOS AuthKit flow', {
+    flow: 'authkit',
+    provider: provider || 'authkit',
+    redirectUri: WORKOS_REDIRECT_URI,
+    intent,
+  });
+
+  return { authorizationUrl };
 }
 
 function publicUser(u) {
@@ -413,29 +622,31 @@ router.post('/login', async (req, res) => {
 
 router.get('/workos/authorize', async (req, res) => {
   try {
-    ensureWorkOSConfigured();
-
-    const providerKey = String(req.query.provider || '').toLowerCase();
-    const provider = OAUTH_PROVIDER_MAP[providerKey];
-    if (!provider) return res.status(400).json({ error: 'Unsupported provider' });
-
-    const next = sanitizeNext(req.query.next || '/home.html');
-    const remember = String(req.query.remember || '').toLowerCase() === 'true';
-    const state = encodeState({ next, remember });
-
-    const url = await workos.userManagement.getAuthorizationUrl({
-      clientId: WORKOS_CLIENT_ID,
-      provider,
-      redirectUri: WORKOS_REDIRECT_URI,
-      state,
-    });
-
-    res.json({ authorizationUrl: url });
+    const { authorizationUrl } = await prepareWorkOSAuthorization(req, res);
+    res.json({ authorizationUrl });
   } catch (err) {
+    const status = err?.statusCode || err?.status || 500;
+    if (status === 400) {
+      return res.status(400).json({ error: err.message || 'Unsupported provider' });
+    }
     console.error('WorkOS authorize error:', err);
     res.status(500).json({ error: 'Unable to start sign-in' });
   }
 });
+
+async function startHostedAuthRedirect(req, res) {
+  try {
+    const { authorizationUrl } = await prepareWorkOSAuthorization(req, res);
+    res.redirect(authorizationUrl);
+  } catch (err) {
+    console.error('WorkOS start redirect error:', err);
+    const message = encodeURIComponent(err?.message || 'Unable to start sign-in. Please try again.');
+    res.redirect(`/login.html?error=${message}`);
+  }
+}
+
+router.get('/workos/start', (req, res) => { startHostedAuthRedirect(req, res); });
+router.get('/workos/login', (req, res) => { startHostedAuthRedirect(req, res); });
 
 async function handleWorkOSCallback(req, res) {
   try {
@@ -447,20 +658,47 @@ async function handleWorkOSCallback(req, res) {
       return res.redirect(`/login.html?error=${message}`);
     }
 
-    const authResult = await workos.userManagement.authenticateWithAuthorizationCode({
+    const pkceSession = readWorkOSPkceCookie(req);
+    if (!pkceSession?.state || !pkceSession?.codeVerifier) {
+      console.warn('Missing WorkOS PKCE session data during callback');
+      clearWorkOSPkceCookie(res);
+      const message = encodeURIComponent('Sign-in failed. Please try again.');
+      return res.redirect(`/login.html?error=${message}`);
+    }
+
+    if (!state || state !== pkceSession.state) {
+      console.warn('WorkOS AuthKit state mismatch', { expected: pkceSession.state ? 'present' : 'missing', received: state ? 'present' : 'missing' });
+      clearWorkOSPkceCookie(res);
+      const message = encodeURIComponent('Sign-in failed. Please try again.');
+      return res.redirect(`/login.html?error=${message}`);
+    }
+
+    const authResult = await workos.userManagement.authenticateWithCode({
       clientId: WORKOS_CLIENT_ID,
       code: String(code),
+      codeVerifier: pkceSession.codeVerifier,
+      redirectUri: WORKOS_REDIRECT_URI,
     });
+
+    clearWorkOSPkceCookie(res);
 
     const stateData = decodeState(state);
     const next = sanitizeNext(stateData.next || '/home.html');
     const remember = !!stateData.remember;
+    const intent = parseIntent(stateData.intent);
 
     const localUser = await ensureLocalUserFromWorkOS(authResult?.user, {
       fallbackEmail: authResult?.user?.email,
+      agreeLegal: intent === 'signup',
     });
 
     if (!localUser) throw new Error('Account sync failed');
+
+    if (intent === 'signup' && !localUser.eulaAcceptedAt) {
+      localUser.eulaAcceptedAt = new Date();
+      localUser.eulaVersion = LEGAL_VERSION;
+      await localUser.save();
+    }
 
     const token = issueToken(localUser._id);
     const userPayload = publicUser(localUser);
@@ -470,9 +708,20 @@ async function handleWorkOSCallback(req, res) {
 
     const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Redirecting…</title></head><body><script>(function(){try{var store=window.${storage};if(store){store.setItem('token',${tokenJson});store.setItem('me',JSON.stringify(${userJson}));}}catch(e){console.error('AuthKit sync failed',e);}window.location.replace(${JSON.stringify(next)});}());</script></body></html>`;
 
+    console.info('Completed WorkOS AuthKit callback', { flow: 'authkit', intent });
+
     res.type('html').send(html);
   } catch (err) {
-    console.error('WorkOS callback error:', err);
+    clearWorkOSPkceCookie(res);
+    console.error('WorkOS AuthKit callback error', {
+      flow: 'authkit',
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      type: err?.type,
+      status: err?.status || err?.statusCode,
+      response: err?.data || err?.response?.data,
+    });
     const message = encodeURIComponent('Sign-in failed. Please try again.');
     res.redirect(`/login.html?error=${message}`);
   }

@@ -1,10 +1,10 @@
 // frontend/js/auth.js
 (function () {
-  // We read/write "token" by default but also accept legacy keys for compatibility.
+  // Keep compatibility with legacy token keys already in your app.
   const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
   const USER_CACHE_KEY = 'me';
 
-  // ---- Token helpers ----
+  // ---------- Token helpers ----------
   function getToken() {
     for (const k of STORAGE_KEYS) {
       const v = localStorage.getItem(k) || sessionStorage.getItem(k);
@@ -13,109 +13,194 @@
     return null;
   }
   function setToken(token, { session = false } = {}) {
-    // Clear old keys then set canonical "token"
     clearTokens();
     (session ? sessionStorage : localStorage).setItem('token', token || '');
   }
   function clearTokens() {
-    STORAGE_KEYS.forEach(k => localStorage.removeItem(k));
-    STORAGE_KEYS.forEach(k => sessionStorage.removeItem(k));
+    for (const k of STORAGE_KEYS) {
+      try { localStorage.removeItem(k); } catch {}
+      try { sessionStorage.removeItem(k); } catch {}
+    }
     try { localStorage.removeItem(USER_CACHE_KEY); } catch {}
+    try { sessionStorage.removeItem(USER_CACHE_KEY); } catch {}
+    window.__ME__ = null;
   }
 
-  // ---- JWT decode & expiry ----
+  // ---------- JWT decode & basic expiry check ----------
   function decodeJWT(t) {
     try {
       const b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      const json = decodeURIComponent(atob(b64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+      const json = decodeURIComponent(atob(b64).split('').map(c => {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
       return JSON.parse(json);
     } catch {
-      return {};
+      return null;
     }
   }
-  function isExpired(t) {
-    const p = decodeJWT(t);
-    if (!p || !p.exp) return false;
-    return Math.floor(Date.now() / 1000) >= p.exp;
+  function isExpired(token) {
+    const payload = decodeJWT(token);
+    if (!payload || !payload.exp) return false; // if no exp, don't assume expired
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Add a tiny skew to avoid edge flicker
+    return payload.exp <= (nowSec + 5);
   }
 
-  // ---- Navigation helpers ----
-  const redirectTo = (p) => { location.href = p; };
-  const redirectToHome = () => redirectTo('./home.html');
-  const redirectToLogin = () => {
-    const next = encodeURIComponent(location.pathname + location.search);
-    redirectTo(`./login.html?next=${next}`);
-  };
-
-  // ---- API base helpers ----
-  function apiUrl(path) {
-    const hasAPI = typeof window.API?.url === 'function';
-    if (hasAPI) return window.API.url(path);
-    // Fallback: same-origin
-    return path.startsWith('/') ? path : '/' + path;
+  // ---------- Fetch wrapper that adds Authorization when possible ----------
+  async function fetchWithAuth(url, options = {}) {
+    const token = getToken();
+    const headers = new Headers(options.headers || {});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch(window.API ? window.API.url(url) : url, { ...options, headers });
+    if (response.status === 401 || response.status === 403) {
+      clearTokens();
+    }
+    return response;
   }
 
-  // ---- Core auth flows ----
-  function signOut() {
-    clearTokens();
-    redirectToLogin();
-  }
+  // ---------- Tolerant user load (keeps your current behaviour) ----------
+  // Used by dashboard etc. We don't hard-fail UI here.
+  async function loadUser(force = false) {
+    if (!force && window.__ME__) return window.__ME__;
+    const cached = (() => {
+      try { return JSON.parse(localStorage.getItem(USER_CACHE_KEY) || sessionStorage.getItem(USER_CACHE_KEY) || 'null'); } catch {
+        return null;
+      }
+    })();
+    if (!force && cached) {
+      window.__ME__ = cached;
+      return cached;
+    }
 
-  function hardRedirectIfNotAuthed() {
     const t = getToken();
-    if (!t || isExpired(t)) redirectToLogin();
+    if (!t) return null;
+    try {
+      const res = await fetch((window.API ? window.API.url('/api/user/me') : '/api/user/me'), {
+        headers: { Authorization: `Bearer ${t}` },
+        cache: 'no-store'
+      });
+      if (res.status === 401 || res.status === 403) {
+        clearTokens();
+        return null;
+      }
+      if (!res.ok) return null;
+      const me = await res.json();
+      window.__ME__ = me;
+      try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+      return me;
+    } catch {
+      return null;
+    }
+  }
+
+  function buildWorkOSUrl({ intent = 'login', next, email, remember = true } = {}) {
+    const normalizedIntent = intent === 'signup' ? 'signup' : 'login';
+    const basePath = normalizedIntent === 'signup' ? '/api/auth/workos/start' : '/api/auth/workos/login';
+    const url = new URL(basePath, window.location.origin);
+    if (next) url.searchParams.set('next', next);
+    url.searchParams.set('intent', normalizedIntent);
+    if (remember) url.searchParams.set('remember', 'true');
+    if (email) url.searchParams.set('email', email);
+    return url.toString();
   }
 
   async function requireAuth() {
     const t = getToken();
     if (!t || isExpired(t)) {
-      signOut();
+      clearTokens();
       throw new Error('Not authenticated');
     }
-    const res = await fetch(apiUrl('/api/user/me'), {
-      headers: { Authorization: `Bearer ${t}` },
-      cache: 'no-store'
-    });
-    if (res.status === 401) { signOut(); throw new Error('Unauthorized'); }
-    if (!res.ok) throw new Error('Auth check failed');
-
-    const me = await res.json();
-    window.__ME__ = me;
-    try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
-    // Personalise banner if available
-    const h = document.querySelector('h1.page-title, h1');
-    if (h && !h.dataset.lockTitle) {
-      const name = (me?.firstName || '').trim();
-      if (name && !h.textContent.includes(name)) h.textContent = `${name} — ${h.textContent}`;
+    const me = await loadUser(true);
+    if (!me) {
+      clearTokens();
+      throw new Error('Not authenticated');
     }
+    window.__ME__ = me;
     const g = document.getElementById('greeting-name');
     if (g && me?.firstName) g.textContent = me.firstName;
-
-    return { token: t, me };
+    return { me, token: t };
   }
 
-  function authFetch(url, options = {}) {
-    const t = getToken();
-    if (!t) { signOut(); return Promise.reject(new Error('No token')); }
-    const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${t}` });
-    return fetch(apiUrl(url), Object.assign({}, options, { headers }))
-      .then(r => { if (r.status === 401) signOut(); return r; });
-  }
+  // ---------- Strict gate for protected pages ----------
+  // Pages already call:
+  //   Auth.enforce();                                 // protected pages
+  //   Auth.enforce({ allowAnonymous:[...], bounceIfAuthed:true }); // login/signup
+  async function enforce(opts = {}) {
+    const defaults = {
+      allowAnonymous: ['index.html', 'login.html', 'signup.html', '404.html', 'unauthorized.html'],
+      bounceIfAuthed: false,   // on login/signup: if already authed, go to next/home
+      validateWithServer: true // actually hit /api/user/me when a token exists
+    };
+    const cfg = { ...defaults, ...opts };
 
-  // ---- Page guard & UX helpers ----
-  function enforce(opts = {}) {
-    const path = (location.pathname.split('/').pop() || 'index.html').toLowerCase();
-    const allow = new Set((opts.allowAnonymous || ['login.html', 'signup.html', 'index.html']).map(s => s.toLowerCase()));
-    const t = getToken();
-    const authed = !!t && !isExpired(t);
+    // Current page filename, e.g. "home.html"
+    const page = (() => {
+      const p = (location.pathname || '/').split('/').pop();
+      return p && p.includes('.') ? p : 'index.html';
+    })();
 
-    if (!allow.has(path)) {
-      hardRedirectIfNotAuthed();
-    } else if (opts.bounceIfAuthed && authed) {
-      redirectToHome();
+    const hasToken = !!getToken();
+    const token = getToken();
+    const looksValid = hasToken && !isExpired(token);
+
+    // Helper: redirect to login with ?next=<current>
+    function toLogin() {
+      const url = buildWorkOSUrl({
+        intent: 'login',
+        next: location.pathname + location.search,
+      });
+      location.replace(url);
     }
+    // Helper: redirect to app home or provided next
+    function toAppHomeFromLogin() {
+      const params = new URLSearchParams(location.search);
+      const next = params.get('next');
+      location.replace(next && next.startsWith('/') ? next : './home.html');
+    }
+
+    // Anonymous pages (login/signup/index/etc.)
+    if (cfg.allowAnonymous.includes(page)) {
+      if (!cfg.bounceIfAuthed) return;
+      // If we're on login/signup and already authenticated, bounce to app.
+      if (!hasToken) return;                      // clearly not authed
+      if (!looksValid && !cfg.validateWithServer) return; // unsure, let them log in
+
+      if (cfg.validateWithServer) {
+        try {
+          const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
+          if (res.ok) return toAppHomeFromLogin(); // definitely authed
+        } catch { /* ignore and let page load */ }
+        return; // couldn't confirm; allow login page
+      } else {
+        return toAppHomeFromLogin();
+      }
+    }
+
+    // Protected pages (everything else)
+    if (!hasToken) return toLogin();
+    if (isExpired(token)) { clearTokens(); return toLogin(); }
+
+    if (cfg.validateWithServer) {
+      try {
+        const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
+        if (!res.ok) { clearTokens(); return toLogin(); }
+        // Cache user for the page (and keep existing tolerant flow intact)
+        try {
+          const me = await res.json();
+          window.__ME__ = me;
+          try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+        } catch { /* ignore parse errors; tolerant */ }
+      } catch {
+        // Network error => safest is to require re-auth
+        return toLogin();
+      }
+    }
+
+    // Keep your current pattern: pages often call requireAuth() after this
+    return;
   }
 
+  // ---------- Optional nicety used by your pages ----------
   function setBannerTitle(suffix) {
     const name = (window.__ME__?.firstName || '').trim();
     const title = name ? `${name} — ${suffix}` : suffix;
@@ -126,34 +211,30 @@
     if (g && name) g.textContent = name;
   }
 
-  // Expose API
+  function signOut({ next } = {}) {
+    clearTokens();
+    const url = buildWorkOSUrl({
+      intent: 'login',
+      next: next || (location.pathname + location.search) || '/index.html',
+    });
+    window.location.assign(url);
+  }
+
+  async function getCurrentUser({ force = false } = {}) {
+    const me = await loadUser(force);
+    return me;
+  }
+
+  // Public API (names preserved)
   window.Auth = {
-    // tokens
-    getToken, setToken, isExpired, decodeJWT,
-    // flows
-    signOut, hardRedirectIfNotAuthed, requireAuth,
-    // fetch wrapper (adds Authorization + API base)
-    fetch: authFetch,
-    // guards & UI sugar
-    enforce, setBannerTitle
+    getToken, setToken, clearTokens,
+    requireAuth,
+    fetch: fetchWithAuth,
+    enforce,
+    setBannerTitle,
+    signOut,
+    buildWorkOSUrl,
+    getCurrentUser,
+    get me() { return window.__ME__; }
   };
-
-    // ---- Global Sign Out click handler (works even if navbar is injected later) ----
-    if (!window.__boundSignoutHandler) {
-      document.addEventListener('click', async (ev) => {
-        const btn = ev.target.closest('#nav-signout');
-        if (!btn) return;
-  
-        ev.preventDefault();
-  
-        // If you maintain a server-side session, optionally notify the backend:
-        // try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
-  
-        // Clear local tokens & redirect (already implemented in Auth.signOut)
-        Auth.signOut();
-      });
-      window.__boundSignoutHandler = true;
-    }
-  
 })();
-

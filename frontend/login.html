@@ -4,253 +4,34 @@
   <meta charset="utf-8">
   <title>Login — AI Accountant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <!-- Theme + libs (unchanged) -->
   <script>window.__API_BASE = window.__API_BASE || 'http://localhost:3000';</script>
   <script src="/js/head-include.js"></script>
-
   <style>
-    :root{
-      --auth-maxw: 980px;
-      --card-w: 440px;
-    }
-
-    body{ background: var(--bg-body); color: var(--fg) }
-
-    /* Mini top nav (aesthetic only) */
-    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter:saturate(1.2) blur(8px) }
-    .landing-nav .btn{ padding:.5rem .9rem }
-    .brand-mark{ display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg) }
-    .brand-dot{ width:12px; height:12px; border-radius:50%; background: radial-gradient(circle at 30% 30%, var(--brand), var(--brand-hover)); box-shadow:0 0 24px color-mix(in oklab, var(--brand) 45%, transparent) }
-
-    /* Auth shell + layout */
-    .auth{ min-height: calc(100vh - 56px); display:grid; place-items:center; position:relative; overflow:hidden }
-    .auth-inner{ width:100%; max-width: var(--auth-maxw); padding: clamp(2rem, 4vw, 3rem) 1.25rem; position:relative; z-index:2 }
-    .auth-grid{ display:grid; grid-template-columns: 1.1fr .9fr; gap: clamp(1.25rem, 3vw, 2rem) }
-    @media (max-width: 992px){ .auth-grid{ grid-template-columns: 1fr } }
-
-    /* Copy side */
-    .copy{ padding: clamp(1rem, 2vw, 1.25rem) }
-    .eyebrow{ color:var(--fg-3); font-weight:600; text-transform:uppercase; letter-spacing:.12em }
-    h1{ font-size: clamp(1.6rem, 3.6vw, 2.2rem); line-height:1.2; margin:.5rem 0 .75rem;
-        background: linear-gradient(120deg, var(--fg), color-mix(in oklab, var(--brand) 35%, var(--fg)));
-        -webkit-background-clip:text; background-clip:text; color:transparent; }
-    .sub{ color:var(--fg-2); max-width: 60ch }
-
-    .chip{ display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--bd-hairline); padding:.35rem .6rem; border-radius:999px; background:var(--bg-surface); font-size:.9rem }
-
-    /* Card side */
-    .auth-card{
-      width:100%; max-width: var(--card-w);
-      background: var(--bg-surface);
-      border: 1px solid var(--bd-hairline);
-      border-radius: 1.25rem;
-      box-shadow: var(--shadow);
-      padding: 1.25rem;
-      margin-inline: auto;
-      transform: translateY(8px);
-      transition: transform .35s ease, box-shadow .35s ease;
-    }
-    .auth-card:hover{ transform: translateY(-2px); box-shadow: var(--shadow-2) }
-
-    .btn-outline{
-      --bs-btn-bg: transparent; --bs-btn-border-color: var(--bd-hairline); --bs-btn-color: var(--fg);
-      --bs-btn-hover-bg: var(--bg-surface-2); --bs-btn-hover-border-color: var(--bd); box-shadow:none;
-    }
-
-    /* OAuth buttons (do nothing on click for now) */
-    .btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.6rem; width:100%; font-weight:600 }
-    .btn-google{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
-    .btn-google:hover{ background: var(--bg-surface-2) }
-    .btn-microsoft{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
-    .btn-microsoft:hover{ background: var(--bg-surface-2) }
-    .btn-apple{ background: #000; color:#fff; border:1px solid #000 }
-    .btn-apple:hover{ filter:brightness(1.08) }
-    .oauth-icon{ width:18px; height:18px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:.7rem; font-weight:700; color:#fff }
-    .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg); color:#fff }
-    .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
-    .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
-
-    .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
-    .divider::before, .divider::after{ content:""; height:1px; background: var(--bd-hairline); flex:1 }
-
-    /* Form polish (IDs unchanged for your login.js) */
-    .form-floating>.form-control{ background: var(--bg-surface-2); border-color: var(--bd-hairline) }
-    .form-floating>.form-control:focus{ border-color: color-mix(in oklab, var(--brand) 40%, var(--bd)); box-shadow:none }
-    .form-text a{ text-decoration: none }
-
-    /* Background flair */
-    .mesh{
-      position:absolute; inset:-10% -10% auto -10%; height: 70%;
-      background:
-        radial-gradient(1200px 600px at 15% 35%, color-mix(in oklab,var(--brand) 18%,transparent), transparent),
-        radial-gradient(1200px 600px at 80% 20%, color-mix(in oklab,var(--brand-hover) 18%,transparent), transparent),
-        radial-gradient(1200px 600px at 50% 90%, color-mix(in oklab,#7FDCCB 20%,transparent), transparent);
-      mask-image: radial-gradient(1200px 600px at 50% 40%, #000, transparent 70%);
-      opacity:.6;
-    }
-    .grid{ position:absolute; inset:0;
-      background-image:
-        linear-gradient(to right, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px),
-        linear-gradient(to bottom, color-mix(in oklab, var(--brand) 10%, transparent) 1px, transparent 1px);
-      background-size: 52px 52px; opacity:.14;
-      mask-image: linear-gradient(to bottom, #000, transparent 75%)
-    }
-
-    /* Entrance animation */
-    .reveal{ opacity:0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease }
-    .reveal.in{ opacity:1; transform:none }
-    @media (prefers-reduced-motion: reduce){ .reveal{ transition:none } }
-
-    /* Keep your existing error block spacing tidy */
-    #login-error{ min-height: 1.25rem }
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg-body);color:var(--fg);margin:0;font-family:var(--font-sans, 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);}
+    main{width:100%;padding:2rem;}
+    .redirect-card{max-width:520px;margin:0 auto;background:var(--bg-surface);border:1px solid var(--bd-hairline);border-radius:1rem;padding:2rem;box-shadow:var(--shadow,0 20px 45px -25px rgba(15,23,42,.65));text-align:center;}
+    h1{font-size:1.8rem;margin-bottom:.75rem;}
+    p{margin-bottom:1rem;}
+    #redirect-error{margin-bottom:1rem;}
+    .fallback{margin-top:1.5rem;color:var(--fg-2);font-size:.9rem;}
+    .fallback a{color:inherit;font-weight:600;}
   </style>
 </head>
 <body>
-
-  <!-- Mini top nav -->
-  <nav class="landing-nav navbar navbar-expand-lg py-2 border-bottom bg-body-tertiary">
-    <div class="container">
-      <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
-      <div class="ms-auto d-flex align-items-center gap-2">
-        <a class="btn btn-outline" href="/">Home</a>
-        <a class="btn btn-primary" href="/signup.html">Create account</a>
-      </div>
-    </div>
-  </nav>
-
-  <!-- Auth shell -->
-  <main class="auth">
-    <div class="mesh" aria-hidden="true"></div>
-    <div class="grid" aria-hidden="true"></div>
-
-    <div class="auth-inner">
-      <div class="auth-grid">
-
-        <!-- Copy side -->
-        <section class="copy reveal">
-          <div class="eyebrow">Welcome back</div>
-          <h1>Log in and pick up where you left off.</h1>
-          <p class="sub">
-            Your dashboard, reconciliations, and AI Advisor are ready. Secure by design with
-            read-only bank connections, encryption, and export-anytime controls.
-          </p>
-
-          <div class="d-flex flex-wrap gap-2 mt-3">
-            <span class="chip"><i class="bi bi-shield-lock"></i> Encrypted</span>
-            <span class="chip"><i class="bi bi-bank"></i> Open Banking</span>
-            <span class="chip"><i class="bi bi-check2-circle"></i> HMRC-ready</span>
-          </div>
-        </section>
-
-        <!-- Card side -->
-        <section class="reveal">
-          <div class="auth-card">
-            <h2 class="h5 mb-2 text-center">Sign in</h2>
-
-            <!-- Social sign-in -->
-            <div class="d-grid gap-2 mb-3">
-              <button class="btn btn-oauth btn-google" type="button" id="googleBtn">
-                <span class="oauth-icon google" aria-hidden="true"></span>
-                <span>Sign in with Google</span>
-              </button>
-              <button class="btn btn-oauth btn-microsoft" type="button" id="microsoftBtn">
-                <span class="oauth-icon microsoft" aria-hidden="true"></span>
-                <span>Sign in with Microsoft</span>
-              </button>
-              <button class="btn btn-oauth btn-apple" type="button" id="appleBtn">
-                <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
-                <span>Sign in with Apple</span>
-              </button>
-            </div>
-
-            <div class="divider small text-muted text-center"><span>or</span></div>
-
-            <!-- Login form (ALL IDs preserved) -->
-            <form id="login-form" novalidate>
-              <div class="form-floating mb-2">
-                <input id="identifier" class="form-control" type="email" placeholder="name@domain.com" autocomplete="username" required>
-                <label for="identifier">Email</label>
-                <div class="invalid-feedback">Enter a valid email address.</div>
-              </div>
-
-              <div class="form-floating mb-2 position-relative">
-                <input id="password" class="form-control" type="password" placeholder="••••••••" autocomplete="current-password" minlength="6" required>
-                <label for="password">Password</label>
-                <button type="button" class="btn btn-sm btn-outline position-absolute end-0 top-50 translate-middle-y me-2" id="togglePw" aria-label="Show password">
-                  <i class="bi bi-eye"></i>
-                </button>
-                <div class="invalid-feedback">Password is required.</div>
-              </div>
-
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="form-check">
-                  <input id="remember" class="form-check-input" type="checkbox">
-                  <label class="form-check-label" for="remember">Remember me</label>
-                </div>
-                <a class="small" href="/forgot.html">Forgot password?</a>
-              </div>
-
-              <div id="login-error" class="alert alert-danger d-none small" role="alert"></div>
-
-              <button id="login-btn" class="btn btn-primary w-100" type="submit">Sign in</button>
-
-              <p class="small text-center mt-2 text-secondary">
-                By continuing you agree to our
-                <a href="/legal.html#terms">Terms</a> and <a href="/legal.html#privacy">Privacy Policy</a>.
-              </p>
-            </form>
-
-            <div class="text-center mt-2">
-              <span class="text-secondary small">New here?</span>
-              <a class="small ms-1" href="/signup.html">Create an account</a>
-            </div>
-          </div>
-        </section>
-
-      </div>
+  <main>
+    <div class="redirect-card" role="status" aria-live="polite">
+      <h1>Redirecting to WorkOS</h1>
+      <p id="redirect-status" class="text-secondary">We’re sending you to the secure WorkOS login to sign in with email, passkey, or magic link.</p>
+      <div id="redirect-error" class="alert alert-danger d-none" role="alert"></div>
+      <a id="redirect-link" class="btn btn-primary w-100" href="/api/auth/workos/login">Continue to WorkOS</a>
+      <p class="fallback">Need help? <a href="https://versatile-refuge-31.authkit.app/reset-password" target="_blank" rel="noopener">Reset your password</a>.</p>
     </div>
   </main>
 
-  <!-- Footer (light, aesthetic only) -->
-  <footer class="site-footer py-4">
-    <div class="container d-flex flex-wrap gap-3 align-items-center justify-content-between">
-      <div class="small">&copy; <span id="y"></span> AI Accountant. All rights reserved.</div>
-      <div class="d-flex gap-3 small">
-        <a class="link-secondary" href="/">Home</a>
-        <a class="link-secondary" href="/signup.html">Sign up</a>
-        <a class="link-secondary" href="/legal.html">Legal</a>
-      </div>
-    </div>
-  </footer>
-
-  <!-- Scripts (core auth unchanged) -->
   <script src="./js/auth.js"></script>
-  <script>Auth.enforce({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: true });</script>
-  <script src="./js/login.js"></script>
-
-  <!-- Tiny UI-only helpers (no backend impact) -->
   <script>
-    // Entrance reveal
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
-    }, { threshold: 0.14 });
-    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-    // Year in footer
-    document.getElementById('y').textContent = new Date().getFullYear();
-
-    // Show/hide password (aesthetic convenience)
-    const pw = document.getElementById('password');
-    const toggle = document.getElementById('togglePw');
-    toggle?.addEventListener('click', () => {
-      const show = pw.type === 'password';
-      pw.type = show ? 'text' : 'password';
-      toggle.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
-      toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
-    });
-
+    Auth.enforce({ allowAnonymous: ['login.html','signup.html','index.html'], bounceIfAuthed: true });
   </script>
+  <script src="./js/login.js"></script>
 </body>
 </html>
-
