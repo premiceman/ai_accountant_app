@@ -70,6 +70,8 @@
     updatedAt: null
   };
   let activeDocKey = null;
+  let processingByKey = {};
+  const pendingUploads = [];
 
   // ---------------- Utilities ----------------
   function toNumber(x) {
@@ -400,6 +402,8 @@
     const state = catalogueEntries[key] || {};
     const files = Array.isArray(state.files) ? state.files : [];
     const item = catalogueByKey.get(key);
+    const entryProcessing = state.processing || processingByKey[key] || null;
+    const pendingForKey = pendingUploads.filter((pending) => pending.key === key);
 
     if (elDocFilesTitle) {
       elDocFilesTitle.textContent = item ? `Uploads — ${item.label}` : 'Uploads';
@@ -407,12 +411,25 @@
 
     elDocFilesPanel.classList.remove('d-none');
 
-    if (!files.length) {
-      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">No uploads yet. Upload from the checklist or collections to get started.</td></tr>';
+    if (!files.length && !pendingForKey.length) {
+      elDocFilesTableBody.innerHTML = '<tr><td colspan="6" class="text-muted small">No uploads yet. Upload from the checklist or collections to get started.</td></tr>';
       return;
     }
 
     elDocFilesTableBody.innerHTML = '';
+
+    const renderStatus = (file) => {
+      const active = Boolean(file.processing || (entryProcessing?.active && entryProcessing?.fileId === file.id));
+      if (active) {
+        const msg = entryProcessing?.message || 'Processing…';
+        return `<div class="processing-indicator"><div class="spinner-border text-primary" role="status" aria-hidden="true"></div><span class="small">${escapeHtml(msg)}</span></div>`;
+      }
+      if (entryProcessing?.message && entryProcessing?.fileId === file.id) {
+        return `<span class="text-muted small">${escapeHtml(entryProcessing.message)}</span>`;
+      }
+      return '<span class="badge text-bg-success">Ready</span>';
+    };
+
     for (const file of files) {
       const row = document.createElement('tr');
       const collection = collections.find(c => String(c.id) === String(file.collectionId));
@@ -421,6 +438,7 @@
         <td>${escapeHtml(file.name || 'document.pdf')}</td>
         <td>${fmtDateTime(file.uploadedAt)}</td>
         <td>${fmtBytes(file.size)}</td>
+        <td>${renderStatus(file)}</td>
         <td>${escapeHtml(collectionName)}</td>
         <td class="text-end">
           <button type="button" class="btn btn-sm btn-outline-primary" data-file-action="manage">
@@ -445,13 +463,27 @@
 
       elDocFilesTableBody.appendChild(row);
     }
+
+    if (pendingForKey.length) {
+      pendingForKey.forEach((pending) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${escapeHtml(pending.name || 'Uploading…')}</td>
+          <td>${fmtDateTime(pending.startedAt)}</td>
+          <td>${fmtBytes(pending.size)}</td>
+          <td><div class="processing-indicator"><div class="spinner-border text-primary" role="status" aria-hidden="true"></div><span class="small">Processing…</span></div></td>
+          <td>—</td>
+          <td class="text-end text-muted small">Queued</td>`;
+        elDocFilesTableBody.appendChild(row);
+      });
+    }
   }
 
   function closeCatalogueFiles() {
     activeDocKey = null;
     if (elDocFilesPanel) elDocFilesPanel.classList.add('d-none');
     if (elDocFilesTableBody) {
-      elDocFilesTableBody.innerHTML = '<tr><td colspan="5" class="text-muted small">Select a document above to see recent uploads. Previewing or deleting files happens from the collections panel.</td></tr>';
+      elDocFilesTableBody.innerHTML = '<tr><td colspan="6" class="text-muted small">Select a document above to see recent uploads. Previewing or deleting files happens from the collections panel.</td></tr>';
     }
     renderCatalogue();
   }
@@ -509,6 +541,7 @@
       catalogue = Array.isArray(j.catalogue) ? j.catalogue : [];
       catalogueByKey = new Map(catalogue.map(item => [item.key, item]));
       catalogueEntries = j.entries && typeof j.entries === 'object' ? j.entries : {};
+      processingByKey = j.processing && typeof j.processing === 'object' ? j.processing : {};
       const progress = j.progress && typeof j.progress === 'object' ? j.progress : {};
       catalogueProgress = {
         required: progress.required || { total: 0, completed: 0 },
@@ -522,6 +555,7 @@
       catalogue = [];
       catalogueEntries = {};
       catalogueByKey = new Map();
+      processingByKey = {};
       catalogueProgress = {
         required: { total: 0, completed: 0 },
         helpful: { total: 0, completed: 0 },
@@ -797,26 +831,49 @@
     if (!files.length) return;
 
     const fd = new FormData();
+    const pendingRecords = [];
     for (const file of files) {
       fd.append('files', file);
+      pendingRecords.push({
+        id: `${Date.now()}-${Math.random()}`,
+        key: opts.catalogueKey || null,
+        name: file.name,
+        size: file.size,
+        startedAt: new Date(),
+      });
     }
     if (opts.catalogueKey) fd.append('catalogueKey', opts.catalogueKey);
 
-    const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, {
-      method: 'POST',
-      body: fd
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(()=> '');
-      alert(t || 'Upload failed');
-      return;
-    }
-    const tasks = [loadFiles(), loadStats(), loadCollections()];
-    if (opts.catalogueKey) tasks.push(loadCatalogue());
-    await Promise.all(tasks);
-    await ensureMetricsAndStats();
+    pendingRecords.forEach((record) => pendingUploads.push(record));
     if (opts.catalogueKey && activeDocKey === opts.catalogueKey) {
       renderCatalogueFiles(opts.catalogueKey);
+    }
+
+    try {
+      const r = await Auth.fetch(`/api/vault/collections/${currentCol.id}/files`, {
+        method: 'POST',
+        body: fd
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(()=> '');
+        alert(t || 'Upload failed');
+        return;
+      }
+      const tasks = [loadFiles(), loadStats(), loadCollections()];
+      if (opts.catalogueKey) tasks.push(loadCatalogue());
+      await Promise.all(tasks);
+      await ensureMetricsAndStats();
+      if (opts.catalogueKey && activeDocKey === opts.catalogueKey) {
+        renderCatalogueFiles(opts.catalogueKey);
+      }
+    } finally {
+      pendingRecords.forEach((record) => {
+        const idx = pendingUploads.indexOf(record);
+        if (idx !== -1) pendingUploads.splice(idx, 1);
+      });
+      if (opts.catalogueKey && activeDocKey === opts.catalogueKey) {
+        renderCatalogueFiles(opts.catalogueKey);
+      }
     }
   }
 

@@ -236,6 +236,7 @@ function buildStateFromDoc(doc) {
   return {
     ...summary,
     updatedAt: state.updatedAt || doc?.usageStats?.documentsProgressUpdatedAt || null,
+    processing: doc?.documentInsights?.processing || {},
   };
 }
 
@@ -284,7 +285,7 @@ async function updateCatalogueState(userId, mutator) {
 
 async function getUserCatalogueState(userId) {
   if (!userId) return { perFile: {}, perKey: {}, requiredCompleted: 0, helpfulCompleted: 0, updatedAt: null };
-  const doc = await User.findById(userId, 'usageStats.documentsCatalogue').lean();
+  const doc = await User.findById(userId, 'usageStats.documentsCatalogue documentInsights.processing').lean();
   if (!doc) return { perFile: {}, perKey: {}, requiredCompleted: 0, helpfulCompleted: 0, updatedAt: null };
   return buildStateFromDoc(doc);
 }
@@ -433,9 +434,11 @@ router.get('/catalogue', async (req, res) => {
     const tracked = Array.isArray(state?.perKey?.[doc.key]?.files)
       ? state.perKey[doc.key].files
       : [];
+    const processingState = state?.processing?.[doc.key] || null;
 
     const trackedFiles = tracked.map(info => {
       const stored = fileMap.get(info.id) || {};
+      const isProcessing = Boolean(processingState?.active && processingState.fileId === info.id);
       return {
         id: info.id,
         name: info.name || stored.name || 'document.pdf',
@@ -446,6 +449,8 @@ router.get('/catalogue', async (req, res) => {
         viewUrl: stored.viewUrl || `/api/vault/files/${info.id}/view`,
         downloadUrl: stored.downloadUrl || `/api/vault/files/${info.id}/download`,
         categories: Array.isArray(info.categories) ? info.categories : doc.categories || [],
+        processing: isProcessing,
+        processingState,
       };
     });
 
@@ -461,6 +466,8 @@ router.get('/catalogue', async (req, res) => {
         collectionName: f.collectionName,
         viewUrl: f.viewUrl,
         downloadUrl: f.downloadUrl,
+        processing: Boolean(processingState?.active && processingState.fileId === f.id),
+        processingState,
       }));
 
     const combined = [...trackedFiles, ...heuristicMatches]
@@ -471,6 +478,7 @@ router.get('/catalogue', async (req, res) => {
       latestFileId: state?.perKey?.[doc.key]?.latestFileId || combined[0]?.id || null,
       latestUploadedAt: state?.perKey?.[doc.key]?.latestUploadedAt || combined[0]?.uploadedAt || null,
       categories: doc.categories || [],
+      processing: processingState,
     };
   }
 
@@ -484,6 +492,7 @@ router.get('/catalogue', async (req, res) => {
       categories: state?.categories || {},
       updatedAt: state?.updatedAt || null,
     },
+    processing: state?.processing || {},
   });
 });
 
@@ -578,6 +587,16 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
   const files = req.files || [];
   if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
 
+  const userDoc = await User.findById(u.id, 'firstName lastName username').lean();
+  if (!userDoc) return res.status(404).json({ error: 'User not found' });
+  const userContext = {
+    fullName: [userDoc.firstName, userDoc.lastName].filter(Boolean).join(' ').trim() || null,
+    firstName: userDoc.firstName || null,
+    lastName: userDoc.lastName || null,
+    username: userDoc.username || null,
+    aliases: [userDoc.username].filter(Boolean),
+  };
+
   const catalogueKeyRaw = req.body?.catalogueKey;
   const catalogueKeyInput = Array.isArray(catalogueKeyRaw) ? catalogueKeyRaw[0] : catalogueKeyRaw;
   const trimmedCatalogueKey = catalogueKeyInput ? String(catalogueKeyInput).trim() : '';
@@ -607,7 +626,12 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         return res.status(400).json({ error: 'Only PDF files are allowed' });
       }
 
-      const analysis = await analyseDocument(entryForCatalogue, f.buffer, f.originalname || 'document.pdf');
+      const analysis = await analyseDocument(
+        entryForCatalogue,
+        f.buffer,
+        f.originalname || 'document.pdf',
+        { user: userContext }
+      );
       if (!analysis.valid) {
         await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
         return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
@@ -618,6 +642,13 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       const key = `${u.id}/${storageCollectionId}/${date}-${randomUUID()}-${safeBase}`;
       await putObject(key, f.buffer, 'application/pdf');
       const id = keyToFileId(key);
+      await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+        active: true,
+        message: `Extracting insights from ${safeBase}…`,
+        step: 'analyse',
+        fileId: id,
+        fileName: safeBase,
+      });
       uploaded.push({
         id,
         name: safeBase,
@@ -647,6 +678,8 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     await setInsightsProcessing(u.id, normalizedCatalogueKey, {
       active: false,
       message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
+      fileId: analyses[analyses.length - 1]?.fileId || null,
+      fileName: analyses[analyses.length - 1]?.fileName || null,
     });
     res.status(201).json({ uploaded });
   } catch (err) {

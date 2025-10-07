@@ -1,4 +1,5 @@
 const pdfParse = require('pdf-parse');
+const dayjs = require('dayjs');
 const { analysePayslip } = require('./parsers/payslip');
 const { analyseCurrentAccountStatement } = require('./parsers/statement');
 
@@ -41,10 +42,69 @@ function extractNumber(text, labels) {
   return null;
 }
 
+function normaliseName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function buildUserNameSet(user = {}) {
+  const names = new Set();
+  const add = (value) => {
+    const norm = normaliseName(value);
+    if (norm) names.add(norm);
+  };
+  if (user.fullName) add(user.fullName);
+  if (user.preferredName) add(user.preferredName);
+  if (user.firstName) add(user.firstName);
+  if (user.lastName) add(user.lastName);
+  if (user.firstName && user.lastName) add(`${user.firstName} ${user.lastName}`);
+  if (user.username) add(user.username);
+  if (Array.isArray(user.aliases)) {
+    user.aliases.forEach(add);
+  }
+  return names;
+}
+
+function nameMatchesUser(candidate, userSet) {
+  const norm = normaliseName(candidate);
+  if (!norm || !userSet.size) return null;
+  if (userSet.has(norm)) return true;
+  for (const stored of userSet) {
+    const tokens = stored.split(' ').filter(Boolean);
+    if (tokens.length && tokens.every((token) => norm.includes(token))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function firstValidDate(...values) {
+  for (const value of values) {
+    if (!value) continue;
+    const parsed = dayjs(value);
+    if (parsed.isValid()) return parsed;
+  }
+  return null;
+}
+
 async function buildInsights(entry, text, context = {}) {
   const key = entry.key;
   const insights = { key, metrics: {}, narrative: [] };
   const originalName = context.originalName || null;
+  const userNames = buildUserNameSet(context.user || {});
+
+  function stampDocumentDate(target, dateValue) {
+    const parsed = firstValidDate(dateValue);
+    if (!parsed) return null;
+    const iso = parsed.toISOString();
+    target.metadata = target.metadata || {};
+    target.metadata.documentDate = iso;
+    target.metadata.documentMonth = parsed.format('YYYY-MM');
+    target.metadata.documentMonthLabel = parsed.format('MM/YYYY');
+    return iso;
+  }
 
   if (key === 'payslip') {
     const breakdown = await analysePayslip(text || '');
@@ -58,6 +118,8 @@ async function buildInsights(entry, text, context = {}) {
       periodStart: breakdown.periodStart || null,
       periodEnd: breakdown.periodEnd || null,
       extractionSource: breakdown.extractionSource || null,
+      personName: breakdown.employeeName || null,
+      employerName: breakdown.employerName || null,
     };
     insights.metrics = {
       gross: breakdown.gross ?? null,
@@ -86,6 +148,15 @@ async function buildInsights(entry, text, context = {}) {
       periodStart: breakdown.periodStart || null,
       periodEnd: breakdown.periodEnd || null,
     };
+    const documentIso = stampDocumentDate(insights, breakdown.payDate || breakdown.periodEnd || breakdown.periodStart || null);
+    if (breakdown.employeeName) {
+      const matches = nameMatchesUser(breakdown.employeeName, userNames);
+      insights.metadata.documentName = breakdown.employeeName;
+      insights.metadata.nameMatchesUser = matches;
+    }
+    if (!insights.metadata.documentDate && documentIso) {
+      insights.metadata.documentDate = documentIso;
+    }
     if (insights.metrics.notes.length) {
       insights.narrative.push(...insights.metrics.notes);
     } else {
@@ -125,9 +196,26 @@ async function buildInsights(entry, text, context = {}) {
       categories: analysed.summary?.categories || [],
       topCategories: analysed.summary?.topCategories || [],
       largestExpenses: analysed.summary?.largestExpenses || [],
+      spendingCanteorgies: analysed.summary?.spendingCanteorgies || [],
       extractionSource: analysed.extractionSource || null,
       account: metadata,
     };
+    const docDate = firstValidDate(metadata.period?.end, metadata.period?.start, transactions[0]?.date);
+    if (docDate) {
+      insights.metadata = insights.metadata || {};
+      insights.metadata.documentDate = docDate.toISOString();
+      insights.metadata.documentMonth = docDate.format('YYYY-MM');
+      insights.metadata.documentMonthLabel = docDate.format('MM/YYYY');
+    }
+    if (metadata.accountHolder) {
+      const match = nameMatchesUser(metadata.accountHolder, userNames);
+      insights.metadata.documentName = metadata.accountHolder;
+      insights.metadata.nameMatchesUser = match;
+      insights.metadata.accountHolder = metadata.accountHolder;
+    }
+    if (!Array.isArray(insights.metadata.statementPeriods)) {
+      insights.metadata.statementPeriods = metadata.period ? [metadata.period] : [];
+    }
     const accountLabel = [metadata.accountName, metadata.accountNumberMasked].filter(Boolean).join(' ');
     insights.narrative.push(accountLabel
       ? `Classified inflows and outflows for ${accountLabel}.`
@@ -184,7 +272,7 @@ function validateDocument(entry, text, originalName) {
   }
 }
 
-async function analyseDocument(entry, buffer, originalName) {
+async function analyseDocument(entry, buffer, originalName, context = {}) {
   const text = await extractText(buffer);
   const valid = validateDocument(entry, text, originalName);
   if (!valid) {
@@ -192,7 +280,7 @@ async function analyseDocument(entry, buffer, originalName) {
   }
   return {
     valid: true,
-    insights: await buildInsights(entry, text, { originalName }),
+    insights: await buildInsights(entry, text, { ...context, originalName }),
     text,
   };
 }

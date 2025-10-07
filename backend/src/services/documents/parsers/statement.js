@@ -112,6 +112,27 @@ function parseDate(value) {
   return null;
 }
 
+function normaliseIsoDate(value) {
+  if (!value) return null;
+  const direct = value instanceof Date ? value : new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct.toISOString();
+  const parsed = parseDate(value);
+  if (parsed) {
+    const iso = new Date(parsed);
+    if (!Number.isNaN(iso.getTime())) return iso.toISOString();
+  }
+  return null;
+}
+
+function derivePeriodFromTransactions(transactions) {
+  const dates = transactions
+    .map((tx) => normaliseIsoDate(tx.date))
+    .filter(Boolean)
+    .sort();
+  if (!dates.length) return { start: null, end: null };
+  return { start: dates[0], end: dates[dates.length - 1] };
+}
+
 function normaliseTransactions(list, metadata) {
   if (!Array.isArray(list)) return [];
   return list
@@ -150,6 +171,71 @@ function summariseCategories(transactions) {
   return Array.from(groups.values()).sort((a, b) => (b.outflow || b.inflow) - (a.outflow || a.inflow));
 }
 
+async function llmCategoriseTransactions(transactions) {
+  const targets = transactions
+    .map((tx, index) => ({ tx, index }))
+    .filter(({ tx }) => !tx.category || tx.category === 'Other')
+    .slice(0, 60);
+  if (!targets.length) return transactions;
+
+  const schema = {
+    name: 'transaction_categorisation',
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        categories: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              index: { type: 'number' },
+              category: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    strict: true,
+  };
+
+  const lines = targets
+    .map(({ tx, index }) => {
+      const direction = tx.direction || (Number(tx.amount) >= 0 ? 'inflow' : 'outflow');
+      const amount = Math.abs(Number(tx.amount) || 0).toFixed(2);
+      const date = tx.date || 'unknown date';
+      const description = tx.description || 'Transaction';
+      return `#${index} | ${date} | ${direction.toUpperCase()} | £${amount} | ${description}`;
+    })
+    .join('\n');
+
+  const prompt = [
+    'Classify each bank transaction into the most appropriate high-level spending category.',
+    `Allowed categories: ${CATEGORY_LIST.join(', ')}.`,
+    'Prefer specific spending categories (e.g. Groceries, Travel). Use Transfers for movements between own accounts.',
+    'Return an array of objects with the transaction index and the chosen category label.',
+    'Transactions to classify:',
+    lines,
+  ].join('\n');
+
+  const response = await callStructuredExtraction(prompt, schema, {
+    systemPrompt: 'You are a meticulous accountant categorising bank statement transactions for analytics.',
+    maxTokens: 1200,
+  });
+
+  const updates = Array.isArray(response?.categories) ? response.categories : [];
+  updates.forEach((item) => {
+    const idx = Number(item.index);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= transactions.length) return;
+    const category = normaliseCategory(item.category);
+    if (!category) return;
+    transactions[idx].category = category;
+  });
+
+  return transactions;
+}
+
 async function llmStatementExtraction(text) {
   const schema = {
     name: 'statement_extraction',
@@ -160,6 +246,7 @@ async function llmStatementExtraction(text) {
         bank_name: { type: ['string', 'null'] },
         account_number: { type: ['string', 'null'] },
         account_type: { type: ['string', 'null'] },
+        account_holder: { type: ['string', 'null'] },
         statement_period: {
           type: 'object',
           additionalProperties: false,
@@ -268,6 +355,17 @@ function summariseStatement(transactions) {
   }, { income: 0, spend: 0 });
 
   const categories = summariseCategories(transactions);
+  const totalOutflow = categories.reduce((acc, cat) => acc + (cat.outflow || 0), 0);
+  const spendingCanteorgies = categories
+    .filter((cat) => cat.outflow || cat.amount)
+    .map((cat) => ({
+      label: cat.category,
+      category: cat.category,
+      amount: cat.outflow || cat.amount || 0,
+      outflow: cat.outflow || 0,
+      inflow: cat.inflow || 0,
+      share: totalOutflow ? (cat.outflow || cat.amount || 0) / totalOutflow : 0,
+    }));
   const topCategories = categories.filter((c) => c.outflow).slice(0, 5).map((cat) => ({
     category: cat.category,
     outflow: cat.outflow,
@@ -284,7 +382,7 @@ function summariseStatement(transactions) {
       date: tx.date,
     }));
 
-  return { totals, categories, topCategories, largestExpenses };
+  return { totals, categories, topCategories, largestExpenses, spendingCanteorgies };
 }
 
 async function analyseCurrentAccountStatement(text) {
@@ -293,6 +391,7 @@ async function analyseCurrentAccountStatement(text) {
     bankName: llm?.bank_name || null,
     accountType: llm?.account_type || null,
     accountNumberMasked: maskAccountNumber(llm?.account_number),
+    accountHolder: llm?.account_holder || null,
     period: {
       start: parseDate(llm?.statement_period?.start_date) || null,
       end: parseDate(llm?.statement_period?.end_date) || null,
@@ -307,6 +406,12 @@ async function analyseCurrentAccountStatement(text) {
   const llmTransactions = normaliseTransactions(llm?.transactions, metadata);
   const heuristicTransactions = heuristicStatementParsing(text || '');
   const mergedTransactions = llmTransactions.length ? llmTransactions : heuristicTransactions;
+
+  await llmCategoriseTransactions(mergedTransactions);
+
+  const derivedPeriod = derivePeriodFromTransactions(mergedTransactions);
+  if (!metadata.period.start && derivedPeriod.start) metadata.period.start = derivedPeriod.start.slice(0, 10);
+  if (!metadata.period.end && derivedPeriod.end) metadata.period.end = derivedPeriod.end.slice(0, 10);
 
   const summary = summariseStatement(mergedTransactions);
   if (!summary.totals.income && llm?.totals?.income) summary.totals.income = parseNumber(llm.totals.income) || 0;
