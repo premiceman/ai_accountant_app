@@ -28,6 +28,22 @@ const OAUTH_PROVIDER_MAP = {
   microsoft: 'MicrosoftOAuth'
 };
 
+function resolveProvider(providerKey) {
+  const key = String(providerKey || '').toLowerCase();
+  if (!key) return null;
+  return OAUTH_PROVIDER_MAP[key] || null;
+}
+
+function parseIntent(raw) {
+  const value = String(raw || '').toLowerCase();
+  return value === 'signup' ? 'signup' : 'login';
+}
+
+function parseBooleanParam(value) {
+  const normalized = String(value || '').toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(normalized);
+}
+
 function ensureWorkOSConfigured() {
   if (!workos || !WORKOS_CLIENT_ID) {
     const msg = 'WorkOS AuthKit is not configured';
@@ -85,6 +101,46 @@ const INTEGRATION_SEEDS = [
 
 const issueToken = (userId) => jwt.sign({ id: userId }, JWT_SECRET, { expiresIn: TOKEN_TTL });
 
+async function buildAuthorizationUrl({
+  providerKey,
+  next,
+  remember,
+  intent,
+  email,
+  connectionId,
+} = {}) {
+  ensureWorkOSConfigured();
+
+  const provider = resolveProvider(providerKey);
+  if (providerKey && !provider) {
+    const err = new Error('Unsupported provider');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const state = encodeState({
+    next: sanitizeNext(next || '/home.html'),
+    remember: parseBooleanParam(remember),
+    intent: parseIntent(intent),
+  });
+
+  const params = {
+    clientId: WORKOS_CLIENT_ID,
+    redirectUri: WORKOS_REDIRECT_URI,
+    state,
+  };
+
+  if (provider) params.provider = provider;
+
+  const loginHint = normEmail(email);
+  if (loginHint) params.loginHint = loginHint;
+
+  const connection = String(connectionId || '').trim();
+  if (connection) params.connectionId = connection;
+
+  return workos.userManagement.getAuthorizationUrl(params);
+}
+
 async function ensureLocalUserFromWorkOS(workosUser, {
   fallbackEmail,
   firstName,
@@ -100,6 +156,8 @@ async function ensureLocalUserFromWorkOS(workosUser, {
 
   const resolvedFirst = (workosUser?.firstName || firstName || '').trim() || 'Member';
   const resolvedLast = (workosUser?.lastName || lastName || '').trim() || 'Phloat';
+
+  const workosId = workosUser?.id ? String(workosUser.id).trim() : null;
 
   const dob = dateOfBirth instanceof Date ? dateOfBirth : (dateOfBirth ? new Date(dateOfBirth) : null);
 
@@ -119,6 +177,7 @@ async function ensureLocalUserFromWorkOS(workosUser, {
       username: '',
       password: hash,
       dateOfBirth: dob || null,
+      workosUserId: workosId || null,
       eulaAcceptedAt: agreeLegal ? now : null,
       eulaVersion: LEGAL_VERSION,
       licenseTier: plan.tier === 'premium' ? 'premium' : plan.tier,
@@ -138,6 +197,7 @@ async function ensureLocalUserFromWorkOS(workosUser, {
   } else {
     user.firstName = resolvedFirst || user.firstName;
     user.lastName = resolvedLast || user.lastName;
+    if (workosId) user.workosUserId = workosId;
     if (dob && !Number.isNaN(dob.getTime())) user.dateOfBirth = dob;
     if (agreeLegal) {
       user.eulaAcceptedAt = now;
@@ -179,6 +239,7 @@ function publicUser(u) {
     lastName: u.lastName || '',
     username: u.username || '',
     email: u.email || '',
+    workosUserId: u.workosUserId || null,
     dateOfBirth: u.dateOfBirth || null,
     licenseTier: u.licenseTier || 'free',
     roles: Array.isArray(u.roles) ? u.roles : ['user'],
@@ -198,10 +259,6 @@ function publicUser(u) {
 
 function normEmail(x) { return String(x || '').trim().toLowerCase(); }
 function normUsername(x) { return String(x || '').trim(); }
-function isValidEmail(x) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || ''));
-}
-
 function determinePlan(tierRaw, couponRaw) {
   const tier = String(tierRaw || 'starter').toLowerCase();
   const coupon = String(couponRaw || '').trim().toLowerCase();
@@ -237,6 +294,56 @@ function seedIntegrations(existing = []) {
   }));
 }
 
+function compactObject(obj) {
+  const out = {};
+  Object.entries(obj || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      out[key] = value;
+    }
+  });
+  return out;
+}
+
+function sanitizeWorkOSUser(workosUser) {
+  if (!workosUser) return null;
+  const data = compactObject({
+    id: workosUser.id,
+    email: workosUser.email,
+    firstName: workosUser.firstName,
+    lastName: workosUser.lastName,
+    emailVerified: typeof workosUser.emailVerified === 'boolean' ? workosUser.emailVerified : undefined,
+    profilePictureUrl: workosUser.profilePictureUrl,
+    createdAt: workosUser.createdAt,
+    updatedAt: workosUser.updatedAt,
+  });
+  return Object.keys(data).length ? data : null;
+}
+
+function sanitizeWorkOSSession(session) {
+  if (!session) return null;
+  const data = compactObject({
+    id: session.id,
+    userId: session.userId || session.user?.id,
+    organizationId: session.organizationId,
+    expiresAt: session.expiresAt,
+    authenticatedAt: session.authenticatedAt,
+    createdAt: session.createdAt,
+    type: session.type,
+  });
+  return Object.keys(data).length ? data : null;
+}
+
+function sanitizeWorkOSTokens(result) {
+  if (!result) return null;
+  const tokens = compactObject({
+    accessToken: result.accessToken || result.authentication?.accessToken || result.session?.accessToken,
+    refreshToken: result.refreshToken || result.authentication?.refreshToken || result.session?.refreshToken,
+    tokenType: result.tokenType || result.authentication?.tokenType,
+    expiresIn: result.expiresIn || result.authentication?.expiresIn,
+  });
+  return Object.keys(tokens).length ? tokens : null;
+}
+
 // GET /api/auth/check?email=&username=
 router.get('/check', async (req, res) => {
   try {
@@ -260,191 +367,65 @@ router.get('/check', async (req, res) => {
   }
 });
 
-// POST /api/auth/signup
-router.post('/signup', async (req, res) => {
-  try {
-    ensureWorkOSConfigured();
-
-    const {
-      firstName,
-      lastName,
-      email,
-      password,
-      passwordConfirm,
-      dateOfBirth,
-      agreeLegal,
-      legalVersion,
-    } = req.body || {};
-
-    if (!firstName || !lastName || !email || !password || !passwordConfirm || !dateOfBirth) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    if (!isValidEmail(email)) return res.status(400).json({ error: 'Invalid email address' });
-    if (String(password) !== String(passwordConfirm)) {
-      return res.status(400).json({ error: 'Passwords do not match' });
-    }
-    if (String(password).length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
-
-    const dob = new Date(String(dateOfBirth));
-    if (Number.isNaN(dob.getTime())) {
-      return res.status(400).json({ error: 'Invalid date of birth' });
-    }
-    if (dob >= new Date()) {
-      return res.status(400).json({ error: 'Date of birth must be in the past' });
-    }
-
-    if (!agreeLegal) {
-      return res.status(400).json({ error: 'You must agree to the Terms to create an account' });
-    }
-
-    const emailN = normEmail(email);
-    const nameFirst = String(firstName).trim();
-    const nameLast = String(lastName).trim();
-
-    let workosUser;
-    try {
-      workosUser = await workos.userManagement.createUser({
-        email: emailN,
-        password: String(password),
-        firstName: nameFirst,
-        lastName: nameLast,
-      });
-    } catch (err) {
-      const status = err?.status || err?.statusCode || err?.response?.status;
-      const code = err?.code || err?.response?.data?.code;
-      if (status === 409 || code === 'user_already_exists') {
-        return res.status(409).json({ error: 'Email already registered' });
-      }
-      console.error('WorkOS createUser error:', err);
-      return res.status(502).json({ error: 'Failed to create account with identity provider' });
-    }
-
-    const localUser = await ensureLocalUserFromWorkOS(workosUser?.user || workosUser, {
-      fallbackEmail: emailN,
-      firstName: nameFirst,
-      lastName: nameLast,
-      dateOfBirth: dob,
-      passwordPlain: password,
-      agreeLegal: true,
-    });
-
-    if (!localUser) {
-      return res.status(500).json({ error: 'Account provisioning failed' });
-    }
-
-    localUser.eulaAcceptedAt = new Date();
-    localUser.eulaVersion = String(legalVersion || LEGAL_VERSION);
-    await localUser.save();
-
-    try {
-      const authResult = await workos.userManagement.authenticateWithPassword({
-        clientId: WORKOS_CLIENT_ID,
-        email: emailN,
-        password: String(password),
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent') || undefined,
-      });
-      if (authResult?.user) {
-        await ensureLocalUserFromWorkOS(authResult.user, {
-          fallbackEmail: emailN,
-          firstName: nameFirst,
-          lastName: nameLast,
-          dateOfBirth: dob,
-          agreeLegal: true,
-        });
-      }
-    } catch (authErr) {
-      console.warn('WorkOS auto-login after signup failed:', authErr);
-    }
-
-    const token = issueToken(localUser._id);
-    res.status(201).json({ token, user: publicUser(localUser) });
-  } catch (e) {
-    console.error('Signup error:', e);
-    res.status(e?.statusCode || e?.status || 500).json({ error: e?.message || 'Server error' });
-  }
-});
-
-// POST /api/auth/login
-router.post('/login', async (req, res) => {
-  try {
-    ensureWorkOSConfigured();
-
-    const { identifier, email, username, password } = req.body || {};
-    const rawEmail = email || identifier || null;
-    const rawUsername = username || (!rawEmail && identifier ? identifier : null);
-
-    if ((!rawEmail && !rawUsername) || !password) {
-      return res.status(400).json({ error: 'Missing credentials' });
-    }
-
-    let emailN = rawEmail ? normEmail(rawEmail) : null;
-    if (!emailN && rawUsername) {
-      const existing = await User.findOne({ username: normUsername(rawUsername) });
-      if (existing) emailN = normEmail(existing.email);
-    }
-
-    if (!emailN) return res.status(400).json({ error: 'Email is required' });
-
-    const result = await workos.userManagement.authenticateWithPassword({
-      clientId: WORKOS_CLIENT_ID,
-      email: emailN,
-      password: String(password),
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent') || undefined,
-    });
-
-    const localUser = await ensureLocalUserFromWorkOS(result?.user, { fallbackEmail: emailN });
-    if (!localUser) return res.status(500).json({ error: 'Account sync failed' });
-
-    const token = issueToken(localUser._id);
-    res.json({ token, user: publicUser(localUser) });
-  } catch (err) {
-    const status = err?.statusCode || err?.status || 500;
-    if (status === 400 || status === 401) {
-      return res.status(400).json({ error: 'Invalid credentials' });
-    }
-    console.error('WorkOS login error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
 router.get('/workos/authorize', async (req, res) => {
   try {
-    ensureWorkOSConfigured();
-
-    const providerKey = String(req.query.provider || '').toLowerCase();
-    const provider = OAUTH_PROVIDER_MAP[providerKey];
-    if (!provider) return res.status(400).json({ error: 'Unsupported provider' });
-
-    const next = sanitizeNext(req.query.next || '/home.html');
-    const remember = String(req.query.remember || '').toLowerCase() === 'true';
-    const state = encodeState({ next, remember });
-
-    const url = await workos.userManagement.getAuthorizationUrl({
-      clientId: WORKOS_CLIENT_ID,
-      provider,
-      redirectUri: WORKOS_REDIRECT_URI,
-      state,
+    const url = await buildAuthorizationUrl({
+      providerKey: req.query.provider,
+      next: req.query.next,
+      remember: parseBooleanParam(req.query.remember),
+      intent: req.query.intent,
+      email: req.query.email,
+      connectionId: req.query.connectionId || req.query.connection,
     });
 
     res.json({ authorizationUrl: url });
   } catch (err) {
+    const status = err?.statusCode || err?.status || 500;
+    if (status === 400) {
+      return res.status(400).json({ error: err.message || 'Unsupported provider' });
+    }
     console.error('WorkOS authorize error:', err);
     res.status(500).json({ error: 'Unable to start sign-in' });
   }
 });
 
+async function startHostedAuthRedirect(req, res) {
+  try {
+    const url = await buildAuthorizationUrl({
+      providerKey: req.query.provider,
+      next: req.query.next,
+      remember: parseBooleanParam(req.query.remember),
+      intent: req.query.intent,
+      email: req.query.email,
+      connectionId: req.query.connectionId || req.query.connection,
+    });
+    res.redirect(url);
+  } catch (err) {
+    console.error('WorkOS start redirect error:', err);
+    const message = encodeURIComponent(err?.message || 'Unable to start sign-in. Please try again.');
+    const fallbackIntent = parseIntent(req.query.intent);
+    const fallbackPage = fallbackIntent === 'signup' ? '/signup.html' : '/login.html';
+    res.redirect(`${fallbackPage}?error=${message}`);
+  }
+}
+
+router.get('/workos/start', (req, res) => { startHostedAuthRedirect(req, res); });
+router.get('/workos/login', (req, res) => { startHostedAuthRedirect(req, res); });
+
 async function handleWorkOSCallback(req, res) {
+  const { error, error_description: errorDescription, code, state } = req.query || {};
+  const stateData = decodeState(state);
+  const next = sanitizeNext(stateData.next || '/home.html');
+  const remember = !!stateData.remember;
+  const intent = parseIntent(stateData.intent);
+
   try {
     ensureWorkOSConfigured();
 
-    const { error, error_description: errorDescription, code, state } = req.query || {};
     if (error || !code) {
       const message = encodeURIComponent(errorDescription || error || 'Authentication was cancelled.');
-      return res.redirect(`/login.html?error=${message}`);
+      const fallback = intent === 'signup' ? '/signup.html' : '/login.html';
+      return res.redirect(`${fallback}?error=${message}`);
     }
 
     const authResult = await workos.userManagement.authenticateWithAuthorizationCode({
@@ -452,15 +433,18 @@ async function handleWorkOSCallback(req, res) {
       code: String(code),
     });
 
-    const stateData = decodeState(state);
-    const next = sanitizeNext(stateData.next || '/home.html');
-    const remember = !!stateData.remember;
-
     const localUser = await ensureLocalUserFromWorkOS(authResult?.user, {
       fallbackEmail: authResult?.user?.email,
+      agreeLegal: intent === 'signup',
     });
 
     if (!localUser) throw new Error('Account sync failed');
+
+    if (intent === 'signup' && !localUser.eulaAcceptedAt) {
+      localUser.eulaAcceptedAt = new Date();
+      localUser.eulaVersion = LEGAL_VERSION;
+      await localUser.save();
+    }
 
     const token = issueToken(localUser._id);
     const userPayload = publicUser(localUser);
@@ -468,13 +452,25 @@ async function handleWorkOSCallback(req, res) {
     const tokenJson = JSON.stringify(token);
     const userJson = JSON.stringify(userPayload).replace(/</g, '\\u003c');
 
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Redirecting…</title></head><body><script>(function(){try{var store=window.${storage};if(store){store.setItem('token',${tokenJson});store.setItem('me',JSON.stringify(${userJson}));}}catch(e){console.error('AuthKit sync failed',e);}window.location.replace(${JSON.stringify(next)});}());</script></body></html>`;
+    const workosState = compactObject({
+      user: sanitizeWorkOSUser(authResult?.user),
+      session: sanitizeWorkOSSession(authResult?.session),
+      tokens: sanitizeWorkOSTokens(authResult),
+    });
+    const hasWorkOSState = Object.keys(workosState).length > 0;
+    const workosJson = JSON.stringify(workosState).replace(/</g, '\\u003c');
+    const workosSnippet = hasWorkOSState
+      ? `store.setItem('workos', JSON.stringify(${workosJson}));`
+      : `try{store.removeItem && store.removeItem('workos');}catch(e){}`;
+
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Redirecting…</title></head><body><script>(function(){try{var store=window.${storage};if(store){store.setItem('token',${tokenJson});store.setItem('me',JSON.stringify(${userJson}));${workosSnippet}}}catch(e){console.error('AuthKit sync failed',e);}window.location.replace(${JSON.stringify(next)});}());</script></body></html>`;
 
     res.type('html').send(html);
   } catch (err) {
     console.error('WorkOS callback error:', err);
     const message = encodeURIComponent('Sign-in failed. Please try again.');
-    res.redirect(`/login.html?error=${message}`);
+    const fallback = intent === 'signup' ? '/signup.html' : '/login.html';
+    res.redirect(`${fallback}?error=${message}`);
   }
 }
 

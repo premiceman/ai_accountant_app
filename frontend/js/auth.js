@@ -23,6 +23,8 @@
     }
     try { localStorage.removeItem(USER_CACHE_KEY); } catch {}
     try { sessionStorage.removeItem(USER_CACHE_KEY); } catch {}
+    try { localStorage.removeItem('workos'); } catch {}
+    try { sessionStorage.removeItem('workos'); } catch {}
     window.__ME__ = null;
   }
 

@@ -76,6 +76,7 @@ const UserSchema = new mongoose.Schema({
   lastName:  { type: String, trim: true, required: true },
   username:  { type: String, trim: true }, // no unique index (we validate at app level)
   email:     { type: String, trim: true, unique: true, required: true },
+  workosUserId: { type: String, trim: true, index: true, sparse: true, default: null },
   password:  { type: String, required: true },
 
   dateOfBirth: { type: Date, default: null },
