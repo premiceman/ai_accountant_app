@@ -59,12 +59,17 @@
     }
 
     /* OAuth buttons (do nothing on click for now) */
-    .btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.5rem; width:100% }
+    .btn-oauth{ display:flex; align-items:center; justify-content:center; gap:.6rem; width:100%; font-weight:600 }
     .btn-google{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
     .btn-google:hover{ background: var(--bg-surface-2) }
+    .btn-microsoft{ background: var(--bg-surface); border:1px solid var(--bd-hairline) }
+    .btn-microsoft:hover{ background: var(--bg-surface-2) }
     .btn-apple{ background: #000; color:#fff; border:1px solid #000 }
     .btn-apple:hover{ filter:brightness(1.08) }
-    .oauth-icon{ width:18px; height:18px; display:inline-block }
+    .oauth-icon{ width:18px; height:18px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; font-size:.7rem; font-weight:700; color:#fff }
+    .oauth-icon.google{ border-radius:50%; background: conic-gradient(#4285f4 0 90deg,#34a853 90deg 180deg,#fbbc05 180deg 270deg,#ea4335 270deg 360deg); color:#fff }
+    .oauth-icon.microsoft{ background: conic-gradient(#f25022 0 25%, #7fba00 25% 50%, #00a4ef 50% 75%, #ffb900 75% 100%); color:transparent }
+    .oauth-icon.apple{ background:#000; color:#fff; border-radius:6px }
 
     .divider{ display:flex; align-items:center; gap:.75rem; margin: .75rem 0 }
     .divider::before, .divider::after{ content:""; height:1px; background: var(--bd-hairline); flex:1 }
@@ -143,14 +148,20 @@
           <div class="auth-card">
             <h2 class="h5 mb-2 text-center">Sign in</h2>
 
-            <!-- PHLOAT (replaces Google/Apple buttons) -->
-            <div class="d-grid gap-2">
-              <div class="text-center py-1"
-                   style="font-weight:800; letter-spacing:.18em; text-transform:uppercase;
-                          background: linear-gradient(120deg, var(--brand), color-mix(in oklab, var(--brand-hover) 60%, var(--fg)));
-                          -webkit-background-clip: text; background-clip: text; color: transparent;">
-                PHLOAT
-              </div>
+            <!-- Social sign-in -->
+            <div class="d-grid gap-2 mb-3">
+              <button class="btn btn-oauth btn-google" type="button" id="googleBtn">
+                <span class="oauth-icon google" aria-hidden="true"></span>
+                <span>Sign in with Google</span>
+              </button>
+              <button class="btn btn-oauth btn-microsoft" type="button" id="microsoftBtn">
+                <span class="oauth-icon microsoft" aria-hidden="true"></span>
+                <span>Sign in with Microsoft</span>
+              </button>
+              <button class="btn btn-oauth btn-apple" type="button" id="appleBtn">
+                <span class="oauth-icon apple" aria-hidden="true"><i class="bi bi-apple"></i></span>
+                <span>Sign in with Apple</span>
+              </button>
             </div>
 
             <div class="divider small text-muted text-center"><span>or</span></div>
@@ -158,9 +169,9 @@
             <!-- Login form (ALL IDs preserved) -->
             <form id="login-form" novalidate>
               <div class="form-floating mb-2">
-                <input id="identifier" class="form-control" type="text" placeholder="name@domain.com" autocomplete="username" required>
-                <label for="identifier">Email or Username</label>
-                <div class="invalid-feedback">Enter a valid email or username.</div>
+                <input id="identifier" class="form-control" type="email" placeholder="name@domain.com" autocomplete="username" required>
+                <label for="identifier">Email</label>
+                <div class="invalid-feedback">Enter a valid email address.</div>
               </div>
 
               <div class="form-floating mb-2 position-relative">
@@ -239,10 +250,7 @@
       toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
     });
 
-    // OAuth buttons are intentionally no-op for now
-    document.getElementById('googleBtn')?.addEventListener('click', (e) => e.preventDefault());
-    document.getElementById('appleBtn')?.addEventListener('click', (e) => e.preventDefault());
   </script>
 </body>
 </html>
-```
+
