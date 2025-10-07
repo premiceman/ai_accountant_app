@@ -3,6 +3,30 @@
   // Keep compatibility with legacy token keys already in your app.
   const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
   const USER_CACHE_KEY = 'me';
+  const ONBOARDING_PAGE = 'onboarding.html';
+
+  function currentPage() {
+    const path = (location.pathname || '/').split('/').pop();
+    return path && path.includes('.') ? path : 'index.html';
+  }
+
+  function needsMandatoryOnboarding(user) {
+    if (!user) return true;
+    if (user.onboardingComplete) return false;
+    const hasUsername = typeof user.username === 'string' && user.username.trim().length >= 3;
+    const hasDob = !!user.dateOfBirth;
+    const interests = Array.isArray(user.profileInterests) ? user.profileInterests : [];
+    const survey = user.onboardingSurvey || {};
+    const hasSurveySignals = Array.isArray(survey.valueSignals) && survey.valueSignals.length >= 3 &&
+      Array.isArray(survey.tierSignals) && survey.tierSignals.length >= 3;
+    const hasPlanChoice = survey.planChoice && survey.planChoice.selection;
+    return !(hasUsername && hasDob && interests.length && hasSurveySignals && hasPlanChoice);
+  }
+
+  function redirectToOnboarding() {
+    if (currentPage() === ONBOARDING_PAGE) return;
+    location.replace('/onboarding.html');
+  }
 
   // ---------- Token helpers ----------
   function getToken() {
@@ -116,6 +140,10 @@
       throw new Error('Not authenticated');
     }
     window.__ME__ = me;
+    if (needsMandatoryOnboarding(me) && currentPage() !== ONBOARDING_PAGE) {
+      redirectToOnboarding();
+      throw new Error('Onboarding required');
+    }
     const g = document.getElementById('greeting-name');
     if (g && me?.firstName) g.textContent = me.firstName;
     return { me, token: t };
@@ -134,10 +162,7 @@
     const cfg = { ...defaults, ...opts };
 
     // Current page filename, e.g. "home.html"
-    const page = (() => {
-      const p = (location.pathname || '/').split('/').pop();
-      return p && p.includes('.') ? p : 'index.html';
-    })();
+    const page = currentPage();
 
     const hasToken = !!getToken();
     const token = getToken();
@@ -168,7 +193,16 @@
       if (cfg.validateWithServer) {
         try {
           const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
-          if (res.ok) return toAppHomeFromLogin(); // definitely authed
+          if (res.ok) {
+            const me = await res.json();
+            window.__ME__ = me;
+            try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+            if (needsMandatoryOnboarding(me)) {
+              redirectToOnboarding();
+              return;
+            }
+            return toAppHomeFromLogin(); // definitely authed
+          }
         } catch { /* ignore and let page load */ }
         return; // couldn't confirm; allow login page
       } else {
@@ -189,6 +223,9 @@
           const me = await res.json();
           window.__ME__ = me;
           try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+          if (needsMandatoryOnboarding(me) && page !== ONBOARDING_PAGE) {
+            return redirectToOnboarding();
+          }
         } catch { /* ignore parse errors; tolerant */ }
       } catch {
         // Network error => safest is to require re-auth
@@ -231,6 +268,7 @@
     requireAuth,
     fetch: fetchWithAuth,
     enforce,
+    needsOnboarding: needsMandatoryOnboarding,
     setBannerTitle,
     signOut,
     buildWorkOSUrl,

@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Welcome to Phloat — Onboarding</title>
+  <script src="/js/head-include.js"></script>
+  <style>
+    body.onboarding-body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top left, #0d1b3d 0%, #040712 45%, #020510 100%);
+      color: #f8fbff;
+      display: flex;
+      flex-direction: column;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+    }
+    .onboarding-shell {
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(320px, 32%) 1fr;
+      gap: 0;
+      min-height: 100vh;
+    }
+    .onboarding-sidebar {
+      padding: 3rem;
+      background: linear-gradient(160deg, rgba(10, 42, 140, 0.95), rgba(4, 17, 74, 0.88));
+      border-right: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .onboarding-logo {
+      font-size: 1.2rem;
+      letter-spacing: 0.2rem;
+      text-transform: uppercase;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .onboarding-logo span.badge {
+      background: rgba(255,255,255,0.18);
+      color: #fff;
+      border-radius: 999px;
+      padding: 0.2rem 0.7rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.08rem;
+    }
+    .onboarding-progress {
+      margin-top: 3rem;
+    }
+    .onboarding-progress-bar {
+      position: relative;
+      height: 6px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 1rem;
+    }
+    .onboarding-progress-bar span {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, #6de7ff, #7e7dff);
+      border-radius: inherit;
+      transition: width 280ms ease;
+    }
+    .onboarding-insights {
+      margin-top: 2.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+    }
+    .insight-card {
+      background: rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 1.2rem 1.3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .insight-card .insight-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .insight-card .insight-body {
+      font-size: 0.85rem;
+      line-height: 1.45;
+      color: rgba(235, 243, 255, 0.82);
+    }
+    .onboarding-main {
+      background: #f7f9fc;
+      color: #0c1630;
+      padding: 3rem clamp(2rem, 5vw, 4rem);
+      display: flex;
+      flex-direction: column;
+    }
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+    .step-eyebrow {
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.12rem;
+      font-weight: 600;
+      color: #4f5d7a;
+    }
+    .step-title {
+      font-size: clamp(1.5rem, 2.6vw, 2.4rem);
+      font-weight: 600;
+      margin: 0.3rem 0 0;
+    }
+    .step-body {
+      margin-top: 1.8rem;
+      flex: 1;
+    }
+    .step-body form,
+    .step-body .step-content {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .choice-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .choice-tile {
+      border: 1px solid #ccd5e6;
+      border-radius: 14px;
+      padding: 1.1rem 1.2rem;
+      background: #fff;
+      box-shadow: 0 12px 35px rgba(15, 35, 95, 0.05);
+      cursor: pointer;
+      transition: all 200ms ease;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .choice-tile.active {
+      border-color: #4c6ef5;
+      box-shadow: 0 18px 40px rgba(76, 110, 245, 0.22);
+    }
+    .choice-tile span.label {
+      font-weight: 600;
+      color: #0e1b3f;
+    }
+    .choice-tile span.caption {
+      font-size: 0.84rem;
+      color: #4c5a76;
+    }
+    .pill-set {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 0.45rem 0.9rem;
+      background: #fff;
+      border: 1px solid #d3dcf2;
+      font-size: 0.85rem;
+      color: #0e1b3f;
+      cursor: pointer;
+      transition: all 200ms ease;
+    }
+    .pill.active {
+      background: #2336a9;
+      border-color: #2336a9;
+      color: #fff;
+      box-shadow: 0 10px 26px rgba(35, 54, 169, 0.25);
+    }
+    .question-card {
+      border-radius: 18px;
+      border: 1px solid #d7e0f4;
+      background: #fff;
+      padding: 1.1rem 1.2rem;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 12px 32px rgba(15, 35, 95, 0.05);
+    }
+    .question-text {
+      font-weight: 500;
+      color: #12214c;
+    }
+    .question-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .question-actions button {
+      border-radius: 999px;
+      border: 1px solid #c7d2eb;
+      background: #f2f5fc;
+      color: #2a3d7d;
+      font-weight: 500;
+      padding: 0.4rem 0.95rem;
+      transition: all 180ms ease;
+    }
+    .question-actions button.active {
+      background: #2336a9;
+      border-color: #2336a9;
+      color: #fff;
+    }
+    .summary-card {
+      background: #fff;
+      border-radius: 20px;
+      border: 1px solid #d3dcf2;
+      padding: 1.4rem 1.6rem;
+      box-shadow: 0 20px 40px rgba(22, 37, 89, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+    .summary-card h3 {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #0f1f47;
+    }
+    .summary-card ul {
+      margin: 0;
+      padding-left: 1.2rem;
+      color: #4a5775;
+      font-size: 0.95rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .plan-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.2rem;
+    }
+    .plan-toggle {
+      display: inline-flex;
+      border-radius: 999px;
+      border: 1px solid #c9d4ee;
+      background: #ecf1fb;
+      padding: 0.25rem;
+      gap: 0.25rem;
+      margin-bottom: 1rem;
+    }
+    .plan-toggle button {
+      border: none;
+      background: transparent;
+      border-radius: 999px;
+      padding: 0.35rem 0.9rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #4b5b84;
+      cursor: pointer;
+      transition: all 180ms ease;
+    }
+    .plan-toggle button.active {
+      background: #fff;
+      color: #2336a9;
+      box-shadow: 0 6px 18px rgba(35, 54, 169, 0.22);
+    }
+    .plan-card {
+      border-radius: 18px;
+      border: 2px solid transparent;
+      background: #fff;
+      padding: 1.2rem 1.4rem;
+      box-shadow: 0 18px 40px rgba(14, 31, 79, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      cursor: pointer;
+      transition: all 200ms ease;
+    }
+    .plan-card.active {
+      border-color: #3c64ff;
+      box-shadow: 0 24px 55px rgba(60, 100, 255, 0.22);
+    }
+    .plan-card .plan-price {
+      font-weight: 600;
+      font-size: 1.1rem;
+      color: #102250;
+    }
+    .plan-card ul {
+      padding-left: 1.1rem;
+      margin: 0;
+      font-size: 0.9rem;
+      color: #4c5a76;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .billing-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem 1.2rem;
+      background: #fff;
+      padding: 1.3rem 1.5rem;
+      border-radius: 16px;
+      border: 1px solid #d4def3;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+    }
+    .billing-form label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08rem;
+      color: #51608c;
+    }
+    .billing-form input {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid #bfcce6;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.95rem;
+      transition: border-color 160ms ease;
+    }
+    .billing-form input:focus {
+      outline: none;
+      border-color: #4c6ef5;
+      box-shadow: 0 0 0 3px rgba(76, 110, 245, 0.18);
+    }
+    .legal-box {
+      background: rgba(255,255,255,0.94);
+      border-radius: 16px;
+      padding: 1.2rem 1.4rem;
+      border: 1px solid #cdd6ea;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+      color: #334163;
+    }
+    .legal-box label {
+      display: flex;
+      gap: 0.7rem;
+      align-items: flex-start;
+      font-size: 0.9rem;
+      line-height: 1.4;
+    }
+    .legal-box input[type="checkbox"] {
+      margin-top: 0.15rem;
+      width: 18px;
+      height: 18px;
+    }
+    .step-actions {
+      margin-top: 2.4rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+    .step-actions button {
+      border-radius: 999px;
+      padding: 0.65rem 1.6rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border: none;
+      cursor: pointer;
+      transition: transform 180ms ease, box-shadow 180ms ease;
+    }
+    .step-actions .btn-secondary {
+      background: transparent;
+      color: #46557c;
+      border: 1px solid #c6d3ef;
+    }
+    .step-actions .btn-primary {
+      background: linear-gradient(135deg, #3c64ff, #6d8dff);
+      color: #fff;
+      box-shadow: 0 16px 35px rgba(60, 100, 255, 0.35);
+    }
+    .step-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .step-actions .btn-primary:not(:disabled):hover {
+      transform: translateY(-1px);
+      box-shadow: 0 22px 45px rgba(60, 100, 255, 0.4);
+    }
+    .step-actions .btn-secondary:not(:disabled):hover {
+      transform: translateY(-1px);
+    }
+    .alert-banner {
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid rgba(234, 91, 110, 0.3);
+      color: #c2384d;
+      font-size: 0.9rem;
+      display: none;
+    }
+    .alert-banner.active {
+      display: block;
+    }
+    @media (max-width: 1080px) {
+      .onboarding-shell {
+        grid-template-columns: 1fr;
+      }
+      .onboarding-sidebar {
+        display: none;
+      }
+      .onboarding-main {
+        min-height: 100vh;
+        padding: 2.5rem 1.5rem 3rem;
+      }
+      .step-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .step-actions button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body class="onboarding-body">
+  <main class="onboarding-shell">
+    <aside class="onboarding-sidebar">
+      <div>
+        <div class="onboarding-logo">
+          <img src="/img/logo.svg" alt="Phloat" onerror="this.style.display='none'" width="28" height="28">
+          <span>Phloat</span>
+          <span class="badge">Private beta</span>
+        </div>
+        <div class="onboarding-progress">
+          <div class="step-eyebrow">Progress</div>
+          <div class="step-title" id="progress-label">Step 1 of 9</div>
+          <div class="onboarding-progress-bar"><span id="progress-bar"></span></div>
+        </div>
+        <div class="onboarding-insights" id="insight-cards">
+          <!-- populated by JS -->
+        </div>
+      </div>
+      <div class="insight-card" id="tier-recap-card">
+        <div class="insight-title">Recommended tier</div>
+        <div class="insight-body" id="tier-recap-copy">Answer a few questions and we'll tailor the perfect plan.</div>
+      </div>
+    </aside>
+    <section class="onboarding-main">
+      <header class="step-header">
+        <div>
+          <div class="step-eyebrow" id="step-eyebrow">Welcome</div>
+          <h1 class="step-title" id="step-title">Let's set up your workspace</h1>
+        </div>
+        <div class="alert-banner" id="step-alert"></div>
+      </header>
+      <div class="step-body">
+        <div class="step-content" id="step-content"></div>
+      </div>
+      <div class="step-actions">
+        <button type="button" class="btn-secondary" id="btn-back">Back</button>
+        <button type="button" class="btn-primary" id="btn-next">Continue</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/config.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/onboarding.js"></script>
+</body>
+</html>
