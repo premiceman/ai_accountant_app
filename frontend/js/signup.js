@@ -1,207 +1,175 @@
 // frontend/js/signup.js
-// Robust signup with on-theme validity cues, availability checks, and REQUIRED legal acceptance.
+// Simplified signup flow wired to WorkOS AuthKit-backed backend endpoints.
 
 (function () {
-  const LEGAL_VERSION = '2025-09-15'; // keep in sync with legal.html "Last updated"
-
   const $ = (sel, root = document) => root.querySelector(sel);
-  const val = (id) => (document.getElementById(id)?.value ?? '').trim();
 
-  function setErr(name, msg) {
-    const help = document.querySelector(`[data-error-for="${name}"]`);
-    if (help) help.textContent = msg || '';
-    const input = document.getElementById(name);
-    if (!input) return;
-    input.classList.toggle('is-invalid', !!msg);
-    if (msg) input.classList.remove('is-valid');
-  }
-  function setOk(name) {
-    const input = document.getElementById(name);
+  const form = $('#signupForm');
+  if (!form) return;
+
+  const fields = {
+    firstName: $('#firstName'),
+    lastName: $('#lastName'),
+    email: $('#email'),
+    dateOfBirth: $('#dateOfBirth'),
+    password: $('#password'),
+    passwordConfirm: $('#passwordConfirm'),
+    agreeLegal: $('#agreeLegal'),
+  };
+
+  const signupBtn = $('#signupBtn');
+  const globalError = $('#signup-error');
+  const params = new URLSearchParams(location.search);
+  const next = params.get('next') || './home.html';
+
+  const setFieldError = (name, message) => {
+    const input = fields[name];
+    const helper = document.querySelector(`[data-error-for="${name}"]`);
+    if (helper) helper.textContent = message || '';
     if (input) {
-      input.classList.remove('is-invalid');
-      input.classList.add('is-valid');
+      if (message) {
+        input.classList.add('is-invalid');
+        input.classList.remove('is-valid');
+      } else {
+        input.classList.remove('is-invalid');
+      }
+    }
+  };
+
+  const clearAllErrors = () => {
+    Object.keys(fields).forEach((key) => setFieldError(key, ''));
+    if (globalError) {
+      globalError.textContent = '';
+      globalError.classList.add('d-none');
+    }
+  };
+
+  const showGlobalError = (message) => {
+    if (!globalError) {
+      alert(message);
+      return;
+    }
+    globalError.textContent = message;
+    globalError.classList.remove('d-none');
+  };
+
+  function isEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
+  }
+
+  async function startProvider(provider, button) {
+    if (!provider || !button) return;
+    clearAllErrors();
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Redirecting…';
+    try {
+      const url = new URL('/api/auth/workos/authorize', location.origin);
+      url.searchParams.set('provider', provider);
+      url.searchParams.set('next', next);
+      url.searchParams.set('remember', 'true');
+      const res = await fetch(url.toString());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.authorizationUrl) {
+        showGlobalError(data?.error || 'Unable to start single sign-on. Please try again.');
+        return;
+      }
+      location.href = data.authorizationUrl;
+    } catch (err) {
+      console.error('Signup provider error:', err);
+      showGlobalError('Network error. Please try again.');
+    } finally {
+      button.disabled = false;
+      if (original) button.textContent = original;
     }
   }
-  function clearField(name) {
-    const input = document.getElementById(name);
-    const help  = document.querySelector(`[data-error-for="${name}"]`);
-    if (help) help.textContent = '';
-    if (input) { input.classList.remove('is-invalid','is-valid'); }
-  }
-  function clearAll() {
-    [
-      'firstName','lastName','username','email','dateOfBirth','password','passwordConfirm','agreeLegal',
-      'couponCode','cardHolder','cardBrand','cardLast4','cardExpMonth','cardExpYear'
-    ].forEach(clearField);
-  }
-  function isEmail(x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(x || '')); }
 
-  async function checkAvailability({ email, username }) {
-    const params = new URLSearchParams();
-    if (email)    params.set('email', email);
-    if (username) params.set('username', username);
-    if ([...params].length === 0) return {};
-    const url = (window.API ? API.url(`/api/auth/check?${params}`) : `/api/auth/check?${params}`);
-    const res = await fetch(url);
-    if (!res.ok) return {};
-    return res.json();
-  }
-  const debounce = (fn, ms = 250) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+  $('#signupGoogle')?.addEventListener('click', () => startProvider('google', $('#signupGoogle')));
+  $('#signupMicrosoft')?.addEventListener('click', () => startProvider('microsoft', $('#signupMicrosoft')));
+  $('#signupApple')?.addEventListener('click', () => startProvider('apple', $('#signupApple')));
 
-  async function onEmailBlur() {
-    const email = val('email');
-    if (!email) { clearField('email'); return; }
-    if (!isEmail(email)) { setErr('email','Invalid email'); return; }
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    clearAllErrors();
+
+    const firstName = (fields.firstName?.value || '').trim();
+    const lastName = (fields.lastName?.value || '').trim();
+    const email = (fields.email?.value || '').trim();
+    const dateOfBirth = fields.dateOfBirth?.value || '';
+    const password = fields.password?.value || '';
+    const passwordConfirm = fields.passwordConfirm?.value || '';
+    const agreeLegal = fields.agreeLegal?.checked === true;
+
+    let invalid = false;
+    if (!firstName) { setFieldError('firstName', 'First name is required'); invalid = true; }
+    if (!lastName) { setFieldError('lastName', 'Last name is required'); invalid = true; }
+    if (!email) { setFieldError('email', 'Email is required'); invalid = true; }
+    else if (!isEmail(email)) { setFieldError('email', 'Enter a valid email'); invalid = true; }
+    if (!dateOfBirth) { setFieldError('dateOfBirth', 'Date of birth is required'); invalid = true; }
+    if (!password) { setFieldError('password', 'Password is required'); invalid = true; }
+    else if (password.length < 8) { setFieldError('password', 'Use at least 8 characters'); invalid = true; }
+    if (!passwordConfirm) { setFieldError('passwordConfirm', 'Please confirm your password'); invalid = true; }
+    else if (password && passwordConfirm && password !== passwordConfirm) {
+      setFieldError('passwordConfirm', 'Passwords do not match');
+      invalid = true;
+    }
+    if (!agreeLegal) { setFieldError('agreeLegal', 'You must accept the terms to continue'); invalid = true; }
+
+    if (invalid) return;
+
+    const original = signupBtn?.textContent;
+    if (signupBtn) {
+      signupBtn.disabled = true;
+      signupBtn.textContent = 'Creating account…';
+    }
+
     try {
-      const { emailAvailable } = await checkAvailability({ email });
-      if (emailAvailable === false) setErr('email','Email already registered');
-      else setOk('email');
-    } catch {}
-  }
-  async function onUsernameBlur() {
-    const username = val('username');
-    if (!username) { clearField('username'); return; }
-    try {
-      const { usernameAvailable } = await checkAvailability({ username });
-      if (usernameAvailable === false) setErr('username','Username already in use');
-      else setOk('username');
-    } catch {}
-  }
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          dateOfBirth,
+          password,
+          passwordConfirm,
+          agreeLegal: true,
+        }),
+      });
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const form = $('#signupForm');
-    if (!form) return;
+      const data = await res.json().catch(() => ({}));
 
-    // Live checks
-    $('#email')?.addEventListener('input', () => clearField('email'));
-    $('#email')?.addEventListener('blur', debounce(onEmailBlur, 200));
-    $('#username')?.addEventListener('input', () => clearField('username'));
-    $('#username')?.addEventListener('blur', debounce(onUsernameBlur, 200));
-
-    // Password confirmation live cue
-    const checkPwMatch = () => {
-      const p1 = val('password'), p2 = val('passwordConfirm');
-      if (!p2) { clearField('passwordConfirm'); return; }
-      if (p1 && p2 && p1 === p2) setOk('passwordConfirm');
-      else setErr('passwordConfirm','Passwords do not match');
-    };
-    $('#password')?.addEventListener('input', () => { clearField('password'); checkPwMatch(); });
-    $('#passwordConfirm')?.addEventListener('input', checkPwMatch);
-
-    // Clear legal error when toggled
-    $('#agreeLegal')?.addEventListener('change', () => clearField('agreeLegal'));
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      clearAll();
-
-      const firstName       = val('firstName');
-      const lastName        = val('lastName');
-      const username        = val('username');
-      const email           = val('email');
-      const dateOfBirth     = val('dateOfBirth');
-      const password        = val('password');
-      const passwordConfirm = val('passwordConfirm');
-      const agreeLegal      = document.getElementById('agreeLegal')?.checked === true;
-      const couponCode      = val('couponCode');
-      const planTier        = document.querySelector('input[name="planTier"]:checked')?.value || 'starter';
-      const country         = $('#country')?.value || 'uk';
-      const goals           = Array.from(document.querySelectorAll('#goal-options input[type="checkbox"]:checked')).map((el) => el.value);
-      const cardHolder      = val('cardHolder');
-      const cardBrand       = $('#cardBrand')?.value || 'Card';
-      const cardLast4       = val('cardLast4');
-      const cardExpMonth    = val('cardExpMonth');
-      const cardExpYear     = val('cardExpYear');
-
-      // Client-side validations
-      if (!firstName) setErr('firstName','First name is required');
-      if (!lastName)  setErr('lastName','Last name is required');
-      if (!email)     setErr('email','Email is required');
-      else if (!isEmail(email)) setErr('email','Invalid email');
-      if (!dateOfBirth) setErr('dateOfBirth','Date of birth is required');
-      if (!password)  setErr('password','Password is required');
-      else if (password.length < 8) setErr('password','Password must be at least 8 characters');
-      if (!passwordConfirm) setErr('passwordConfirm','Please confirm your password');
-      else if (password && passwordConfirm && password !== passwordConfirm) setErr('passwordConfirm','Passwords do not match');
-      if (!agreeLegal) setErr('agreeLegal','You must agree to the Terms to create an account');
-
-      const couponUnlimited = couponCode.toLowerCase() === 'phloatadmin1998';
-      if (!couponUnlimited) {
-        if (!cardHolder) setErr('cardHolder','Card holder name is required');
-        if (!cardLast4 || cardLast4.length !== 4) setErr('cardLast4','Enter the last 4 digits');
-        if (!cardExpMonth || Number(cardExpMonth) < 1 || Number(cardExpMonth) > 12) setErr('cardExpMonth','Invalid month');
-        if (!cardExpYear || Number(cardExpYear) < new Date().getFullYear()) setErr('cardExpYear','Invalid year');
+      if (!res.ok) {
+        const message = data?.error || 'Sign up failed. Please try again.';
+        if (/email/i.test(message)) setFieldError('email', message);
+        else if (/password/i.test(message)) setFieldError('password', message);
+        else if (/birth|date/i.test(message)) setFieldError('dateOfBirth', message);
+        else showGlobalError(message);
+        return;
       }
 
-      if (document.querySelector('.is-invalid')) return;
-
-      // Final availability check
-      try {
-        const avail = await checkAvailability({ email, username });
-        if (avail.emailAvailable === false) setErr('email','Email already registered');
-        if (avail.usernameAvailable === false) setErr('username','Username already in use');
-      } catch {}
-      if (document.querySelector('.is-invalid')) return;
-
-      // Submit
-      const btn = $('#signupBtn');
-      const original = btn?.textContent;
-      btn?.setAttribute('disabled','true');
-      if (btn) btn.textContent = 'Creating account…';
-
-      try {
-        const res = await fetch((window.API ? API.url('/api/auth/signup') : '/api/auth/signup'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            firstName, lastName, username, email, dateOfBirth,
-            password, passwordConfirm,
-            agreeLegal: true,
-            legalVersion: LEGAL_VERSION,
-            planTier,
-            couponCode,
-            country,
-            selectedGoals: goals,
-            paymentMethod: couponUnlimited ? null : {
-              holder: cardHolder,
-              brand: cardBrand,
-              last4: cardLast4,
-              expMonth: cardExpMonth,
-              expYear: cardExpYear
-            }
-          })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const msg = data?.error || 'Sign up failed';
-          if (/agree|terms|policy|conditions/i.test(msg)) setErr('agreeLegal', msg);
-          else if (/email/i.test(msg)) setErr('email', msg);
-          else if (/username/i.test(msg)) setErr('username', msg);
-          else if (/password/i.test(msg)) setErr('password', msg);
-          else if (/birth|dob|date/i.test(msg)) setErr('dateOfBirth', msg);
-          else setErr('email', msg);
-          return;
-        }
-        if (data.requiresEmailVerification) {
-          form.innerHTML = `
-            <div class="text-center py-4">
-              <div class="mb-3"><i class="bi bi-envelope-check text-primary" style="font-size:2rem;"></i></div>
-              <h3 class="h5">Verify your email</h3>
-              <p class="text-muted">We have sent a confirmation link to <strong>${email}</strong>. Please verify your email to activate your trial.</p>
-              <p class="small text-muted">Once confirmed you can sign in and continue the onboarding wizard.</p>
-              <a class="btn btn-outline-primary mt-3" href="/login.html">Return to sign in</a>
-            </div>`;
-          return;
-        }
-        if (data.token) Auth.setToken(data.token);
-        location.replace('./home.html');
-      } catch (err) {
-        console.error('Signup POST error:', err);
-        setErr('email','Network error — please try again');
-      } finally {
-        if (btn) btn.textContent = original || 'Start free trial';
-        btn?.removeAttribute('disabled');
+      if (!data?.token) {
+        showGlobalError('No token returned from server.');
+        return;
       }
-    });
+
+      try {
+        localStorage.setItem('token', data.token);
+        if (data.user) localStorage.setItem('me', JSON.stringify(data.user));
+      } catch (storageErr) {
+        console.warn('Failed to cache auth data:', storageErr);
+      }
+
+      location.href = next;
+    } catch (err) {
+      console.error('Signup error:', err);
+      showGlobalError('Network error. Please try again.');
+    } finally {
+      if (signupBtn) {
+        signupBtn.disabled = false;
+        if (original) signupBtn.textContent = original;
+      }
+    }
   });
 })();
