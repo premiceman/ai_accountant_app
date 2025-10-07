@@ -201,6 +201,8 @@ async function llmPayslipExtraction(text) {
         payment_date: { type: ['string', 'null'] },
         period_start: { type: ['string', 'null'] },
         period_end: { type: ['string', 'null'] },
+        employee_name: { type: ['string', 'null'] },
+        employer_name: { type: ['string', 'null'] },
       },
     },
     strict: true,
@@ -232,6 +234,8 @@ ${text.slice(0, 6000)}`;
     payDate: parseDate(response.payment_date) || null,
     periodStart: parseDate(response.period_start) || null,
     periodEnd: parseDate(response.period_end) || null,
+    employeeName: response.employee_name || null,
+    employerName: response.employer_name || null,
     source: 'openai',
   };
 }
@@ -396,6 +400,8 @@ async function analysePayslip(text) {
     payDate: merged.payDate || null,
     periodStart: merged.periodStart || null,
     periodEnd: merged.periodEnd || null,
+    employeeName: merged.employeeName || null,
+    employerName: merged.employerName || null,
   };
   return breakdown;
 }

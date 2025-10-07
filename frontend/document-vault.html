@@ -107,6 +107,9 @@
     .doc-files-panel table{ margin-bottom:0; }
     .doc-files-panel .table thead th{ font-size:.78rem; text-transform:uppercase; letter-spacing:.03em; }
     .doc-files-panel .table td{ font-size:.85rem; }
+    .progress.progress-thin{ height:6px; }
+    .processing-indicator{ display:flex; align-items:center; gap:6px; }
+    .processing-indicator .spinner-border{ width:1rem; height:1rem; }
   </style>
 
   <script>
@@ -200,6 +203,7 @@
                   <th>Filename</th>
                   <th>Uploaded</th>
                   <th>Size</th>
+                  <th>Status</th>
                   <th>Collection</th>
                   <th class="text-end">Manage</th>
                 </tr>

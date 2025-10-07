@@ -2,6 +2,7 @@
 (function () {
   const RANGE_KEY = 'dashboardRangeV2';
   const DELTA_KEY = 'dashboardDeltaModeV1';
+  const RANGE_PRESETS = ['now', 'last-month', 'last-quarter', 'last-year'];
   const tierOrder = { free: 0, starter: 1, growth: 2, premium: 3 };
 
   init().catch((err) => {
@@ -35,14 +36,15 @@
   }
 
   function defaultRange() {
-    return { mode: 'preset', preset: 'current-month', start: null, end: null };
+    return 'now';
   }
   function loadRange() {
-    try { return JSON.parse(localStorage.getItem(RANGE_KEY) || 'null') || defaultRange(); }
-    catch { return defaultRange(); }
+    const value = localStorage.getItem(RANGE_KEY);
+    if (value && RANGE_PRESETS.includes(value)) return value;
+    return defaultRange();
   }
-  function saveRange(st) {
-    try { localStorage.setItem(RANGE_KEY, JSON.stringify(st)); } catch {}
+  function saveRange(value) {
+    try { localStorage.setItem(RANGE_KEY, value); } catch {}
   }
 
   function loadDeltaMode() {
@@ -89,67 +91,37 @@
   }
 
   function wireRangePicker() {
-    const st = loadRange();
-    const quickBtn = byId('rng-btn-quick');
-    const customBtn = byId('rng-btn-custom');
-    const quickPane = byId('rng-quick');
-    const customPane = byId('rng-custom');
+    const buttons = document.querySelectorAll('[data-range-option]');
+    const setActive = (value) => {
+      buttons.forEach((btn) => {
+        const active = btn.dataset.rangeOption === value;
+        btn.classList.toggle('active', active);
+        btn.classList.toggle('btn-primary', active);
+        btn.classList.toggle('btn-outline-primary', !active);
+      });
+    };
 
-    function setMode(mode) {
-      st.mode = mode;
-      saveRange(st);
-      quickPane.style.display = mode === 'preset' ? '' : 'none';
-      customPane.style.display = mode === 'custom' ? '' : 'none';
-      quickBtn.classList.toggle('active', mode === 'preset');
-      customBtn.classList.toggle('active', mode === 'custom');
-    }
-
-    quickBtn?.addEventListener('click', () => setMode('preset'));
-    customBtn?.addEventListener('click', () => setMode('custom'));
-
-    document.querySelectorAll('input[name="rngQuick"]').forEach((el) => {
-      el.addEventListener('change', () => {
-        if (!el.checked) return;
-        st.mode = 'preset';
-        st.preset = el.value;
-        st.start = null;
-        st.end = null;
-        saveRange(st);
+    let current = loadRange();
+    setActive(current);
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const value = btn.dataset.rangeOption;
+        if (!value) return;
+        current = value;
+        saveRange(value);
+        setActive(value);
         reloadDashboard();
       });
     });
-
-    byId('rng-apply-quick')?.addEventListener('click', () => reloadDashboard());
-    byId('rng-apply-custom')?.addEventListener('click', () => {
-      const start = byId('rng-start').value;
-      const end = byId('rng-end').value;
-      if (!start || !end) return alert('Select a start and end date.');
-      if (new Date(start) > new Date(end)) return alert('Start date must be before end date.');
-      st.start = start;
-      st.end = end;
-      saveRange(st);
-      reloadDashboard();
-    });
-
-    setMode(st.mode || 'preset');
-    const presetEl = byId(`rng-${st.preset || 'current-month'}`) || byId('rng-current-month');
-    if (presetEl) presetEl.checked = true;
-    if (st.start) byId('rng-start').value = st.start;
-    if (st.end) byId('rng-end').value = st.end;
   }
 
   async function reloadDashboard() {
     // TODO(analytics-cache): Once worker-backed cache is live, detect stale payloads and
     // surface a "refreshing" indicator while background recompute runs.
     setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
-    const st = loadRange();
+    const preset = loadRange();
     const params = new URLSearchParams();
-    if (st.mode === 'custom' && st.start && st.end) {
-      params.set('start', st.start);
-      params.set('end', st.end);
-    } else {
-      params.set('preset', st.preset || 'current-month');
-    }
+    params.set('preset', preset || defaultRange());
     params.set('t', Date.now());
 
     let data = null;
