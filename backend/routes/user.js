@@ -1011,6 +1011,8 @@ router.post('/onboarding/complete', auth, async (req, res) => {
     };
 
     const existingSubscription = toPlain(user.subscription || {});
+    const previousPlanChoice = toPlain(user.onboardingSurvey?.planChoice || {});
+    const existingSubscriptionRecord = await Subscription.findOne({ userId: user._id }).sort({ createdAt: -1 });
     const existingTrial = user.trial ? toPlain(user.trial) : null;
     let renewsAt = safeDate(existingSubscription.renewsAt || existingSubscription.currentPeriodEnd || user.onboardingSurvey?.planChoice?.renewsAt);
     let trialEndsAt = safeDate(existingTrial?.endsAt || user.onboardingSurvey?.planChoice?.trialEndsAt);
@@ -1057,14 +1059,28 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       onboarding: onboardingState
     };
 
-    if (!isRerun) {
+    const subscriptionPrice = planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval);
+    const previousInterval = existingSubscriptionRecord?.interval || previousPlanChoice.interval || null;
+    const subscriptionChanged = (
+      existingSubscription.tier !== resolvedTier ||
+      existingSubscription.status !== subscriptionStatus ||
+      (planSelection.interval && planSelection.interval !== previousInterval)
+    );
+    const shouldUpdateSubscription = !isRerun || subscriptionChanged;
+
+    if (shouldUpdateSubscription) {
       updateDoc.licenseTier = resolvedTier;
       updateDoc.subscription = {
         tier: resolvedTier,
         status: subscriptionStatus,
-        lastPlanChange: now,
+        lastPlanChange: subscriptionChanged
+          ? now
+          : (existingSubscription.lastPlanChange || now),
         renewsAt
       };
+    }
+
+    if (!isRerun) {
       updateDoc.trial = trialState;
       updateDoc.eulaAcceptedAt = now;
       updateDoc.eulaVersion = LEGAL_VERSION;
@@ -1084,7 +1100,7 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       throw new Error('User update failed during onboarding completion');
     }
 
-    if (!isRerun) {
+    if (shouldUpdateSubscription) {
       try {
         await Subscription.findOneAndUpdate(
           { userId: user._id },
@@ -1092,10 +1108,12 @@ router.post('/onboarding/complete', auth, async (req, res) => {
             userId: user._id,
             plan: resolvedTier,
             interval: planSelection.interval,
-            price: planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval),
+            price: subscriptionPrice,
             currency: 'GBP',
             status: 'active',
-            startedAt: now,
+            startedAt: subscriptionChanged
+              ? now
+              : (existingSubscriptionRecord?.startedAt || now),
             currentPeriodEnd: renewsAt
           },
           { upsert: true, new: true, setDefaultsOnInsert: true }
