@@ -1019,7 +1019,7 @@ router.post('/onboarding/complete', auth, async (req, res) => {
           interval: planSelection.interval,
           price: planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval),
           currency: 'GBP',
-          status: 'active',
+          status: subscriptionStatus,
           startedAt: now,
           currentPeriodEnd: renewsAt
         },
