@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import mongoose from 'mongoose';
 import pino from 'pino';
 
+import { fileIdToKey, getObject } from './lib/r2.js';
+
 const require = createRequire(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,11 +16,6 @@ const backendRoot = path.resolve(__dirname, '../../../backend');
 function requireBackend<T>(relativePath: string): T {
   return require(path.join(backendRoot, relativePath)) as T;
 }
-
-type R2Exports = {
-  getObject: (key: string) => Promise<{ Body: Readable }>;
-  fileIdToKey: (fileId: string) => string;
-};
 
 type PdfExports = {
   isPdf: (buffer: Buffer) => boolean;
@@ -37,7 +34,6 @@ type AnalyticsExports = {
   rebuildMonthlyAnalytics: (input: { userId: mongoose.Types.ObjectId; month: string }) => Promise<void>;
 };
 
-const { getObject, fileIdToKey } = requireBackend<R2Exports>('src/lib/r2.js');
 const { isPdf } = requireBackend<PdfExports>('src/lib/pdf.js');
 const { sha256 } = requireBackend<HashExports>('src/lib/hash.js');
 const { canonicaliseInstitution, canonicaliseEmployer } = requireBackend<CanonicaliseExports>('src/lib/canonicalise.js');

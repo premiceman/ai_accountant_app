@@ -504,6 +504,21 @@
   async function pollFileStatus(fileId) {
     try {
       const response = await apiFetch(`/files/${encodeURIComponent(fileId)}/status`);
+      if (response.status === 404) {
+        const record = state.files.get(fileId);
+        if (record) {
+          state.files.delete(fileId);
+          const session = state.sessions.get(record.sessionId);
+          if (session) {
+            session.files.delete(fileId);
+            if (session.files.size === 0 && session.rejected.length === 0) {
+              state.sessions.delete(record.sessionId);
+            }
+          }
+          renderSessionPanel();
+        }
+        return;
+      }
       if (!response.ok) return;
       const data = await response.json();
       const record = state.files.get(fileId);
