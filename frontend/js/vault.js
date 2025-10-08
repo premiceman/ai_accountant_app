@@ -6,6 +6,80 @@
   const POLL_INTERVAL_LISTS = 15000;
   const LIGHT_LABELS = { red: 'Waiting', amber: 'Processing', green: 'Complete' };
 
+  const BRAND_THEMES = [
+    { className: 'grid-card--brand-monzo', tokens: ['monzo'] },
+    { className: 'grid-card--brand-halifax', tokens: ['halifax'] },
+    { className: 'grid-card--brand-lloyds', tokens: ['lloyds', 'lloyd'] },
+    { className: 'grid-card--brand-hsbc', tokens: ['hsbc'] },
+    { className: 'grid-card--brand-natwest', tokens: ['natwest', 'nat west', 'royal bank of scotland'] },
+    { className: 'grid-card--brand-santander', tokens: ['santander'] },
+    { className: 'grid-card--brand-barclays', tokens: ['barclays', 'barclaycard'] },
+    { className: 'grid-card--brand-starling', tokens: ['starling'] },
+    { className: 'grid-card--brand-revolut', tokens: ['revolut'] },
+    { className: 'grid-card--brand-nationwide', tokens: ['nationwide'] },
+    { className: 'grid-card--brand-firstdirect', tokens: ['first direct'] },
+    { className: 'grid-card--brand-tsb', tokens: ['tsb'] },
+    { className: 'grid-card--brand-vanguard', tokens: ['vanguard'] },
+    { className: 'grid-card--brand-fidelity', tokens: ['fidelity'] },
+    { className: 'grid-card--brand-hl', tokens: ['hargreaves', 'lansdown'] },
+    { className: 'grid-card--brand-aviva', tokens: ['aviva'] },
+    { className: 'grid-card--brand-scottishwidows', tokens: ['scottish widows'] },
+    { className: 'grid-card--brand-hmrc', tokens: ['hmrc', 'hm revenue', "her majesty's revenue"] },
+    { className: 'grid-card--brand-amazon', tokens: ['amazon'] },
+    { className: 'grid-card--brand-google', tokens: ['google', 'alphabet'] },
+    { className: 'grid-card--brand-microsoft', tokens: ['microsoft'] },
+    { className: 'grid-card--brand-apple', tokens: ['apple'] },
+    { className: 'grid-card--brand-meta', tokens: ['meta', 'facebook'] },
+    { className: 'grid-card--brand-tesco', tokens: ['tesco'] },
+    { className: 'grid-card--brand-sainsbury', tokens: ["sainsbury", "sainsbury's"] },
+    { className: 'grid-card--brand-shell', tokens: ['shell'] },
+    { className: 'grid-card--brand-bp', tokens: ['^bp$', 'bp plc', 'british petroleum'] },
+  ];
+
+  function normaliseBrandName(name) {
+    return String(name || '').toLowerCase();
+  }
+
+  function findBrandTheme(name) {
+    if (!name) return null;
+    const target = normaliseBrandName(name);
+    return BRAND_THEMES.find((theme) =>
+      theme.tokens.some((tokenRaw) => {
+        const token = normaliseBrandName(tokenRaw);
+        if (!token) return false;
+        if (token.startsWith('^') && token.endsWith('$')) {
+          return target === token.slice(1, -1);
+        }
+        return target.includes(token);
+      })
+    );
+  }
+
+  function hashNameToHue(name) {
+    const input = normaliseBrandName(name);
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash << 5) - hash + input.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash) % 360;
+  }
+
+  function applyEntityBranding(card, name) {
+    if (!card) return;
+    card.className = 'grid-card';
+    card.style.removeProperty('--card-brand-hue');
+    const theme = findBrandTheme(name);
+    if (theme) {
+      card.classList.add('grid-card--brand', theme.className);
+      return;
+    }
+    if (name) {
+      card.classList.add('grid-card--brand', 'grid-card--brand-generic');
+      card.style.setProperty('--card-brand-hue', `${hashNameToHue(name)}`);
+    }
+  }
+
   const state = {
     sessions: new Map(),
     files: new Map(),
@@ -340,7 +414,7 @@
     payslipMeta.textContent = employers.length ? `${employers.length} employer${employers.length === 1 ? '' : 's'}` : 'No payslips yet.';
     employers.forEach((employer) => {
       const card = document.createElement('article');
-      card.className = 'grid-card';
+      applyEntityBranding(card, employer.name);
       const title = document.createElement('h3');
       title.textContent = employer.name || 'Unknown employer';
       const dl = document.createElement('dl');
@@ -369,7 +443,7 @@
     statementMeta.textContent = institutions.length ? `${institutions.length} institution${institutions.length === 1 ? '' : 's'}` : 'No statements yet.';
     institutions.forEach((inst) => {
       const card = document.createElement('article');
-      card.className = 'grid-card';
+      applyEntityBranding(card, inst.name);
       const title = document.createElement('h3');
       title.textContent = inst.name || 'Institution';
       const dl = document.createElement('dl');
