@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { existsSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.resolve(__dirname, '../../../backend');
 
 function requireBackend<T>(relativePath: string): T {
-  return require(path.join(backendRoot, relativePath)) as T;
+  const targetPath = path.join(backendRoot, relativePath);
+  if (!existsSync(targetPath)) {
+    throw new Error(`Backend module not found at ${targetPath}`);
+  }
+  try {
+    return require(targetPath) as T;
+  } catch (error) {
+    const nodeErr = error as NodeJS.ErrnoException;
+    if (nodeErr?.code === 'MODULE_NOT_FOUND') {
+      const enriched = new Error(
+        `Failed to load backend module at ${targetPath}: ${(nodeErr.message ?? '').trim()}. ` +
+          'Ensure backend dependencies are installed and accessible to the worker.'
+      );
+      (enriched as NodeJS.ErrnoException).code = nodeErr.code;
+      (enriched as any).cause = nodeErr;
+      throw enriched;
+    }
+    throw error;
+  }
 }
 
 type PdfExports = {
@@ -37,11 +56,23 @@ type AnalyticsExports = {
 const { isPdf } = requireBackend<PdfExports>('src/lib/pdf.js');
 const { sha256 } = requireBackend<HashExports>('src/lib/hash.js');
 const { canonicaliseInstitution, canonicaliseEmployer } = requireBackend<CanonicaliseExports>('src/lib/canonicalise.js');
-const { rebuildMonthlyAnalytics } = requireBackend<AnalyticsExports>('src/services/vault/analytics.js');
 const DocumentInsight = requireBackend<mongoose.Model<any>>('models/DocumentInsight.js');
 const UserDocumentJob = requireBackend<mongoose.Model<any>>('models/UserDocumentJob.js');
 const UploadSession = requireBackend<mongoose.Model<any>>('models/UploadSession.js');
 const Account = requireBackend<mongoose.Model<any>>('models/Account.js');
+
+let analyticsModule: AnalyticsExports | null = null;
+
+function getAnalyticsModule(): AnalyticsExports {
+  if (!analyticsModule) {
+    analyticsModule = requireBackend<AnalyticsExports>('src/services/vault/analytics.js');
+  }
+  return analyticsModule;
+}
+
+async function rebuildMonthlyAnalytics(input: { userId: mongoose.Types.ObjectId; month: string }): Promise<void> {
+  return getAnalyticsModule().rebuildMonthlyAnalytics(input);
+}
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 
