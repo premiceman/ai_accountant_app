@@ -5,6 +5,7 @@
   const POLL_INTERVAL_TILES = 10000;
   const POLL_INTERVAL_LISTS = 15000;
   const LIGHT_LABELS = { red: 'Waiting', amber: 'Processing', green: 'Complete' };
+  const STORAGE_KEY = 'vault.uploadSessions.v1';
 
   const BRAND_THEMES = [
     { className: 'grid-card--brand-monzo', tokens: ['monzo'] },
@@ -84,6 +85,7 @@
     sessions: new Map(),
     files: new Map(),
     timers: { uploads: null, tiles: null, lists: null },
+    placeholders: new Map(),
   };
 
   let unauthorised = false;
@@ -99,12 +101,163 @@
   const payslipMeta = document.getElementById('payslip-meta');
   const statementMeta = document.getElementById('statement-meta');
   const collectionMeta = document.getElementById('collection-meta');
+  const progressContainer = document.getElementById('vault-progress');
+  const progressPhase = document.getElementById('vault-progress-phase');
+  const progressCount = document.getElementById('vault-progress-count');
+  const progressBar = document.getElementById('vault-progress-bar');
 
   function authFetch(path, options) {
     if (window.Auth && typeof Auth.fetch === 'function') {
       return Auth.fetch(path, options);
     }
     return fetch(path, options);
+  }
+
+  function setProgress({ phase, completed, total, countLabel }) {
+    if (!(progressContainer && progressPhase && progressCount && progressBar)) return;
+    progressContainer.hidden = false;
+    progressContainer.setAttribute('aria-hidden', 'false');
+    progressPhase.textContent = phase;
+    const safeTotal = Math.max(0, total || 0);
+    let safeCompleted = Math.max(0, completed || 0);
+    if (safeTotal) {
+      safeCompleted = Math.min(safeCompleted, safeTotal);
+    }
+    progressBar.setAttribute('aria-label', phase);
+    if (countLabel != null) {
+      progressCount.textContent = countLabel;
+    } else {
+      progressCount.textContent = safeTotal ? `${safeCompleted}/${safeTotal} complete` : '';
+    }
+    const pct = safeTotal ? Math.round((safeCompleted / safeTotal) * 100) : safeCompleted ? 100 : 0;
+    progressBar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    progressBar.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, pct))));
+  }
+
+  function hideProgress() {
+    if (!(progressContainer && progressBar)) return;
+    progressContainer.hidden = true;
+    progressContainer.setAttribute('aria-hidden', 'true');
+    progressBar.style.width = '0%';
+    progressBar.setAttribute('aria-valuenow', '0');
+  }
+
+  function updateProgressUI() {
+    if (!(progressContainer && progressPhase && progressCount && progressBar)) return;
+    const placeholders = Array.from(state.placeholders.values());
+    if (placeholders.length) {
+      const total = placeholders.reduce((sum, item) => sum + (item.total || 1), 0);
+      const completed = placeholders.reduce((sum, item) => sum + (item.completed || 0), 0);
+      const hasZip = placeholders.some((item) => item.phase === 'Extracting zip');
+      const phaseLabel = hasZip ? 'Extracting zip' : 'Uploading files';
+      const countLabel = total ? `${completed}/${total} complete` : 'Preparing…';
+      const phaseWithCount = total ? `${phaseLabel} (${completed}/${total})` : phaseLabel;
+      setProgress({ phase: phaseWithCount, completed, total, countLabel });
+      return;
+    }
+
+    const totalFiles = state.files.size;
+    if (!totalFiles) {
+      hideProgress();
+      return;
+    }
+
+    const records = Array.from(state.files.values());
+    const uploadCompleted = records.filter((file) => file.upload === 'green').length;
+    const processingCompleted = records.filter((file) => file.processing === 'green').length;
+
+    if (uploadCompleted < totalFiles) {
+      const phase = `Uploading files (${uploadCompleted}/${totalFiles})`;
+      setProgress({ phase, completed: uploadCompleted, total: totalFiles, countLabel: `${uploadCompleted}/${totalFiles} complete` });
+      return;
+    }
+
+    if (processingCompleted < totalFiles) {
+      const phase = `Extracting analytics (${processingCompleted}/${totalFiles})`;
+      setProgress({ phase, completed: processingCompleted, total: totalFiles, countLabel: `${processingCompleted}/${totalFiles} complete` });
+      return;
+    }
+
+    const phase = `All files processed (${totalFiles}/${totalFiles})`;
+    setProgress({ phase, completed: totalFiles, total: totalFiles, countLabel: `${totalFiles}/${totalFiles} complete` });
+  }
+
+  function persistState() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const payload = {
+        sessions: Array.from(state.sessions.entries()).map(([sessionId, session]) => ({
+          sessionId,
+          files: Array.from(session.files.values()).map((file) => ({
+            fileId: file.fileId,
+            originalName: file.originalName,
+            upload: file.upload,
+            processing: file.processing,
+            message: file.message || '',
+          })),
+          rejected: Array.isArray(session.rejected)
+            ? session.rejected.map((entry) => ({ originalName: entry.originalName, reason: entry.reason }))
+            : [],
+        })),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.warn('Failed to persist vault sessions', error);
+    }
+  }
+
+  function restoreSessionsFromStorage() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data || !Array.isArray(data.sessions)) return;
+      data.sessions.forEach((entry) => {
+        if (!entry || !entry.sessionId) return;
+        const session = upsertSession(entry.sessionId);
+        session.rejected = Array.isArray(entry.rejected)
+          ? entry.rejected.map((item) => ({ originalName: item.originalName, reason: item.reason }))
+          : [];
+        if (Array.isArray(entry.files)) {
+          entry.files.forEach((file) => {
+            if (!file || !file.fileId) return;
+            const record = normaliseFileRecord(entry.sessionId, {
+              fileId: file.fileId,
+              originalName: file.originalName,
+              upload: file.upload || 'amber',
+              processing: file.processing || 'red',
+              message: file.message || '',
+            });
+            session.files.set(file.fileId, record);
+          });
+        }
+      });
+      renderSessionPanel();
+      queueStatusPolling();
+    } catch (error) {
+      console.warn('Failed to restore vault sessions', error);
+    }
+  }
+
+  function beginPlaceholder({ phase }) {
+    if (!phase) return null;
+    const id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `placeholder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    state.placeholders.set(id, { phase, total: 1, completed: 0 });
+    updateProgressUI();
+    return id;
+  }
+
+  function completePlaceholder(id) {
+    if (!id) return;
+    const placeholder = state.placeholders.get(id);
+    if (placeholder) {
+      placeholder.completed = placeholder.total || 1;
+    }
+    state.placeholders.delete(id);
+    updateProgressUI();
   }
 
   function stopPolling() {
@@ -141,6 +294,7 @@
   }
 
   function renderSessionPanel() {
+    if (!(sessionRows && sessionEmpty)) return;
     sessionRows.innerHTML = '';
     let rowCount = 0;
     for (const session of state.sessions.values()) {
@@ -158,6 +312,8 @@
     } else {
       sessionEmpty.style.display = 'none';
     }
+    updateProgressUI();
+    persistState();
   }
 
   function renderFileRow(file) {
@@ -215,11 +371,31 @@
   }
 
   function normaliseFileRecord(sessionId, file) {
-    const record = state.files.get(file.fileId) || { sessionId, fileId: file.fileId };
-    record.originalName = file.originalName;
-    if (file.upload) record.upload = file.upload;
-    if (file.processing) record.processing = file.processing;
-    if (file.message != null) record.message = file.message;
+    const record = state.files.get(file.fileId) || {
+      sessionId,
+      fileId: file.fileId,
+      upload: 'amber',
+      processing: 'red',
+      message: '',
+    };
+    if (file.originalName) {
+      record.originalName = file.originalName;
+    }
+    if (file.upload) {
+      record.upload = file.upload;
+    } else if (!record.upload) {
+      record.upload = 'amber';
+    }
+    if (file.processing) {
+      record.processing = file.processing;
+    } else if (!record.processing) {
+      record.processing = 'red';
+    }
+    if (file.message != null) {
+      record.message = file.message;
+    } else if (record.message == null) {
+      record.message = '';
+    }
     state.files.set(file.fileId, record);
     return record;
   }
@@ -233,11 +409,15 @@
 
   function handleUploadResponse(payload) {
     if (!payload) return;
-    const session = upsertSession(payload.sessionId || crypto.randomUUID());
+    const sessionId = payload.sessionId
+      || ((typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+        ? crypto.randomUUID()
+        : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    const session = upsertSession(sessionId);
     if (Array.isArray(payload.files)) {
       payload.files.forEach((file) => {
         if (!file.fileId) return;
-        const record = normaliseFileRecord(payload.sessionId, { ...file, upload: 'green', processing: 'red' });
+        const record = normaliseFileRecord(sessionId, { ...file, upload: 'green', processing: 'red' });
         session.files.set(file.fileId, record);
       });
     }
@@ -255,9 +435,10 @@
     sessionRows.innerHTML = '';
     sessionEmpty.style.display = '';
     sessionEmpty.textContent = message;
+    hideProgress();
   }
 
-  async function uploadFile(file) {
+  async function uploadFile(file, { placeholderId } = {}) {
     const formData = new FormData();
     formData.append('file', file, file.name);
     try {
@@ -279,6 +460,8 @@
       } else {
         showError(error.message || 'Upload failed');
       }
+    } finally {
+      completePlaceholder(placeholderId);
     }
   }
 
@@ -290,7 +473,9 @@
         showError('We only accept PDF or ZIP uploads.');
         return;
       }
-      uploadFile(file);
+      const phase = ext.endsWith('.zip') ? 'Extracting zip' : 'Uploading files';
+      const placeholderId = beginPlaceholder({ phase });
+      uploadFile(file, { placeholderId });
     });
     fileInput.value = '';
   }
@@ -521,6 +706,7 @@
     }
 
     setupDropzone();
+    restoreSessionsFromStorage();
     queueRefresh();
     fetchTiles();
     fetchPayslips();
