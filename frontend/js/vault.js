@@ -86,6 +86,9 @@
     files: new Map(),
     timers: { uploads: null, tiles: null, lists: null },
     placeholders: new Map(),
+    collections: [],
+    selectedCollectionId: null,
+    viewer: { type: null, context: null, files: [], selectedFileId: null },
   };
 
   let unauthorised = false;
@@ -105,6 +108,86 @@
   const progressPhase = document.getElementById('vault-progress-phase');
   const progressCount = document.getElementById('vault-progress-count');
   const progressBar = document.getElementById('vault-progress-bar');
+  const collectionTarget = document.getElementById('collection-target');
+  const viewerRoot = document.getElementById('file-viewer');
+  const viewerOverlay = document.getElementById('file-viewer-overlay');
+  const viewerList = document.getElementById('file-viewer-list');
+  const viewerFrame = document.getElementById('file-viewer-frame');
+  const viewerEmpty = document.getElementById('file-viewer-empty');
+  const viewerTitle = document.getElementById('file-viewer-title');
+  const viewerSubtitle = document.getElementById('file-viewer-subtitle');
+  const viewerClose = document.getElementById('file-viewer-close');
+
+  function formatDate(value) {
+    if (!value) return '—';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString();
+  }
+
+  function toNumberLike(value) {
+    if (value == null) return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+      const cleaned = value.replace(/[^0-9.-]+/g, '');
+      if (!cleaned) return null;
+      const parsed = Number(cleaned);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  }
+
+  function formatMoney(value, currency) {
+    if (value == null || value === '') return '—';
+    const number = toNumberLike(value);
+    if (number == null) {
+      return typeof value === 'string' && value.trim() ? value : '—';
+    }
+    const code = typeof currency === 'string' && currency.trim().length === 3 ? currency.trim().toUpperCase() : 'GBP';
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: code }).format(number);
+    } catch (error) {
+      console.warn('formatMoney fallback', error);
+      return number.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+  }
+
+  function formatNumber(value) {
+    const number = toNumberLike(value);
+    if (number == null) return value == null ? '—' : String(value);
+    return number.toLocaleString();
+  }
+
+  function pickMetric(metrics, keys) {
+    if (!metrics) return null;
+    for (const key of keys) {
+      if (metrics[key] != null) return metrics[key];
+    }
+    return null;
+  }
+
+  function normaliseStatementName(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return 'Institution';
+    return trimmed.replace(/^statement\s+/i, '').trim() || trimmed;
+  }
+
+  function getSelectedCollection() {
+    if (!state.selectedCollectionId) return null;
+    return state.collections.find((col) => col.id === state.selectedCollectionId) || null;
+  }
+
+  function updateCollectionTargetHint() {
+    if (!collectionTarget) return;
+    const label = collectionTarget.querySelector('strong');
+    const selected = getSelectedCollection();
+    if (selected) {
+      collectionTarget.hidden = false;
+      if (label) label.textContent = selected.name || 'Collection';
+    } else {
+      collectionTarget.hidden = true;
+    }
+  }
 
   function authFetch(path, options) {
     if (window.Auth && typeof Auth.fetch === 'function') {
@@ -180,6 +263,208 @@
 
     const phase = `All files processed (${totalFiles}/${totalFiles})`;
     setProgress({ phase, completed: totalFiles, total: totalFiles, countLabel: `${totalFiles}/${totalFiles} complete` });
+  }
+
+  function closeViewer() {
+    if (!viewerRoot) return;
+    viewerRoot.setAttribute('aria-hidden', 'true');
+    if (viewerFrame) {
+      viewerFrame.src = 'about:blank';
+    }
+    if (viewerEmpty) {
+      viewerEmpty.style.display = '';
+      viewerEmpty.textContent = 'Select a file to see the preview and actions.';
+    }
+    state.viewer = { type: null, context: null, files: [], selectedFileId: null };
+  }
+
+  function renderViewerSelection() {
+    if (!viewerList) return;
+    const cards = viewerList.querySelectorAll('.viewer__file');
+    cards.forEach((card) => {
+      const isSelected = card.dataset.fileId === state.viewer.selectedFileId;
+      card.classList.toggle('is-selected', isSelected);
+    });
+  }
+
+  function previewViewerFile(fileId) {
+    if (!viewerFrame || !fileId) return;
+    viewerFrame.src = `${API_BASE}/files/${encodeURIComponent(fileId)}/view`;
+    if (viewerEmpty) {
+      viewerEmpty.style.display = 'none';
+    }
+  }
+
+  function selectViewerFile(fileId, { preview = false } = {}) {
+    state.viewer.selectedFileId = fileId;
+    renderViewerSelection();
+    if (preview) {
+      previewViewerFile(fileId);
+    }
+  }
+
+  async function deleteViewerFile(fileId) {
+    if (!fileId) return;
+    const confirmed = window.confirm('Are you sure you want to delete this document? This action cannot be undone.');
+    if (!confirmed) return;
+    try {
+      const response = await apiFetch(`/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to delete documents.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Delete failed');
+      }
+      state.viewer.files = state.viewer.files.filter((file) => file.fileId !== fileId);
+      if (state.viewer.selectedFileId === fileId) {
+        state.viewer.selectedFileId = null;
+        if (viewerFrame) viewerFrame.src = 'about:blank';
+        if (viewerEmpty) {
+          viewerEmpty.style.display = '';
+          viewerEmpty.textContent = 'Select a file to see the preview and actions.';
+        }
+      }
+      renderViewerFiles();
+      queueRefresh();
+    } catch (error) {
+      console.error('Failed to delete file', error);
+      window.alert(error.message || 'Unable to delete file right now.');
+    }
+  }
+
+  function buildViewerFileCard(file) {
+    const card = document.createElement('article');
+    card.className = 'viewer__file';
+    card.dataset.fileId = file.fileId;
+    if (state.viewer.selectedFileId === file.fileId) {
+      card.classList.add('is-selected');
+    }
+
+    const header = document.createElement('div');
+    header.className = 'viewer__file-header';
+    const title = document.createElement('h4');
+    title.className = 'viewer__file-title';
+    title.textContent = file.title || 'Document';
+    header.appendChild(title);
+    if (file.subtitle) {
+      const subtitle = document.createElement('span');
+      subtitle.className = 'viewer__file-subtitle muted';
+      subtitle.textContent = file.subtitle;
+      header.appendChild(subtitle);
+    }
+    card.appendChild(header);
+
+    if (Array.isArray(file.summary) && file.summary.length) {
+      const meta = document.createElement('div');
+      meta.className = 'viewer__file-meta';
+      file.summary.forEach((entry) => {
+        const block = document.createElement('div');
+        const label = document.createElement('strong');
+        label.textContent = entry.label;
+        const value = document.createElement('span');
+        value.textContent = entry.value != null && entry.value !== '' ? entry.value : '—';
+        block.append(label, value);
+        meta.appendChild(block);
+      });
+      card.appendChild(meta);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'viewer__file-actions';
+    const previewButton = document.createElement('button');
+    previewButton.type = 'button';
+    previewButton.textContent = 'Preview';
+    previewButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      selectViewerFile(file.fileId, { preview: true });
+    });
+    actions.appendChild(previewButton);
+
+    const downloadButton = document.createElement('button');
+    downloadButton.type = 'button';
+    downloadButton.textContent = 'Download';
+    downloadButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      window.open(`${API_BASE}/files/${encodeURIComponent(file.fileId)}/download`, '_blank', 'noopener');
+    });
+    actions.appendChild(downloadButton);
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.textContent = 'Delete';
+    deleteButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      deleteViewerFile(file.fileId);
+    });
+    actions.appendChild(deleteButton);
+    card.appendChild(actions);
+
+    const details = document.createElement('div');
+    details.className = 'viewer__file-details';
+    if (Array.isArray(file.details) && file.details.length) {
+      file.details.forEach((entry) => {
+        const block = document.createElement('div');
+        const label = document.createElement('strong');
+        label.textContent = entry.label;
+        const value = document.createElement('span');
+        value.textContent = entry.value != null && entry.value !== '' ? entry.value : '—';
+        block.append(label, value);
+        details.appendChild(block);
+      });
+    }
+    if (file.isExpanded) {
+      details.classList.add('is-expanded');
+    }
+    card.appendChild(details);
+
+    card.addEventListener('click', () => {
+      file.isExpanded = !file.isExpanded;
+      details.classList.toggle('is-expanded', file.isExpanded);
+      selectViewerFile(file.fileId, { preview: false });
+    });
+
+    return card;
+  }
+
+  function renderViewerFiles() {
+    if (!viewerList) return;
+    viewerList.innerHTML = '';
+    const files = Array.isArray(state.viewer.files) ? state.viewer.files : [];
+    if (!files.length) {
+      const empty = document.createElement('p');
+      empty.className = 'muted';
+      empty.textContent = 'No documents available yet.';
+      viewerList.appendChild(empty);
+      if (viewerEmpty) {
+        viewerEmpty.style.display = '';
+        viewerEmpty.textContent = 'Upload a document to see it here.';
+      }
+      return;
+    }
+    files.forEach((file) => {
+      viewerList.appendChild(buildViewerFileCard(file));
+    });
+    renderViewerSelection();
+    if (viewerEmpty) {
+      viewerEmpty.style.display = state.viewer.selectedFileId ? 'none' : '';
+      if (!state.viewer.selectedFileId) {
+        viewerEmpty.textContent = 'Select a file to see the preview and actions.';
+      }
+    }
+  }
+
+  function showViewer({ type, title, subtitle, files }) {
+    if (!viewerRoot) return;
+    state.viewer.type = type;
+    state.viewer.context = { title, subtitle };
+    state.viewer.files = Array.isArray(files) ? files : [];
+    state.viewer.selectedFileId = null;
+    viewerRoot.setAttribute('aria-hidden', 'false');
+    if (viewerTitle) viewerTitle.textContent = title || 'Documents';
+    if (viewerSubtitle) viewerSubtitle.textContent = subtitle || '';
+    renderViewerFiles();
   }
 
   function persistState() {
@@ -441,6 +726,9 @@
   async function uploadFile(file, { placeholderId } = {}) {
     const formData = new FormData();
     formData.append('file', file, file.name);
+    if (state.selectedCollectionId) {
+      formData.append('collectionId', state.selectedCollectionId);
+    }
     try {
       if (window.Auth && typeof Auth.requireAuth === 'function') {
         await Auth.requireAuth();
@@ -609,6 +897,69 @@
     }
   }
 
+  async function openPayslipViewer(employer) {
+    if (!employer?.employerId) return;
+    try {
+      const response = await apiFetch(`/payslips/employers/${encodeURIComponent(employer.employerId)}/files`);
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to view your payslips.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Unable to load payslips');
+      }
+      const data = await response.json();
+      const files = Array.isArray(data?.files)
+        ? data.files.map((file) => {
+            const metrics = file?.metrics || {};
+            const currency = metrics.currency || metrics.currencyCode || 'GBP';
+            const payDate = metrics.payDate || file.documentDate || file.documentMonth;
+            const totalEarnings = pickMetric(metrics, ['totalEarnings', 'gross', 'grossPay']);
+            const totalDeductions = pickMetric(metrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']);
+            const netPay = pickMetric(metrics, ['net', 'netPay', 'takeHome']);
+            const details = [];
+            const periodStart = metrics.periodStart || metrics.period?.start || metrics.periodStartDate || metrics.period?.from;
+            const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.periodEndDate || metrics.period?.to;
+            if (periodStart) details.push({ label: 'Period start', value: formatDate(periodStart) });
+            if (periodEnd) details.push({ label: 'Period end', value: formatDate(periodEnd) });
+            if (metrics.payFrequency) details.push({ label: 'Pay frequency', value: metrics.payFrequency });
+            if (metrics.taxCode) details.push({ label: 'Tax code', value: metrics.taxCode });
+            if (metrics.tax != null) details.push({ label: 'Income tax', value: formatMoney(metrics.tax, currency) });
+            if (metrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(metrics.ni, currency) });
+            if (metrics.pension != null) details.push({ label: 'Pension', value: formatMoney(metrics.pension, currency) });
+            if (metrics.studentLoan != null) details.push({ label: 'Student loan', value: formatMoney(metrics.studentLoan, currency) });
+            return {
+              fileId: file.fileId,
+              title: formatDate(payDate) || 'Payslip',
+              subtitle: metrics.payFrequency ? `${metrics.payFrequency} payslip` : 'Payslip',
+              summary: [
+                { label: 'Date of payslip', value: formatDate(payDate) },
+                { label: 'Total earnings', value: formatMoney(totalEarnings, currency) },
+                { label: 'Total deductibles', value: formatMoney(totalDeductions, currency) },
+                { label: 'Net pay', value: formatMoney(netPay, currency) },
+              ],
+              details,
+              metrics,
+              raw: file,
+              currency,
+              isExpanded: false,
+            };
+          })
+        : [];
+      const employerName = employer.name || data?.employer || 'Employer';
+      showViewer({
+        type: 'payslip',
+        title: employerName,
+        subtitle: files.length ? `${files.length} document${files.length === 1 ? '' : 's'}` : 'No documents yet',
+        files,
+      });
+    } catch (error) {
+      console.error('Failed to open payslip viewer', error);
+      window.alert(error.message || 'Unable to load payslip documents right now.');
+    }
+  }
+
   function renderEmployerGrid(employers) {
     payslipGrid.innerHTML = '';
     payslipMeta.textContent = employers.length ? `${employers.length} employer${employers.length === 1 ? '' : 's'}` : 'No payslips yet.';
@@ -623,6 +974,17 @@
         <div><span>Last pay date</span><span>${employer.lastPayDate ? new Date(employer.lastPayDate).toLocaleDateString() : '—'}</span></div>
       `;
       card.append(title, dl);
+      card.tabIndex = 0;
+      card.setAttribute('role', 'button');
+      card.setAttribute('aria-label', `View payslips for ${employer.name || 'employer'}`);
+      const open = () => openPayslipViewer(employer);
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          open();
+        }
+      });
       payslipGrid.appendChild(card);
     });
   }
@@ -638,19 +1000,96 @@
     }
   }
 
+  async function openStatementViewer(institution) {
+    if (!institution?.institutionId) return;
+    try {
+      const response = await apiFetch(`/statements/institutions/${encodeURIComponent(institution.institutionId)}/files`);
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to view your statements.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Unable to load statements');
+      }
+      const data = await response.json();
+      const files = [];
+      const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+      accounts.forEach((account) => {
+        const accountName = account.displayName || normaliseStatementName(data?.institution?.name || institution.name);
+        const maskedNumber = account.accountNumberMasked || null;
+        const accountType = account.accountType || null;
+        const accountFiles = Array.isArray(account.files) ? account.files : [];
+        accountFiles.forEach((file) => {
+          const metrics = file?.metrics || {};
+          const currency = metrics.currency || metrics.currencyCode || 'GBP';
+          const totalIn = pickMetric(metrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']);
+          const totalOut = pickMetric(metrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']);
+          const periodStart = metrics.periodStart || metrics.period?.start || metrics.period?.from || metrics.statementPeriod?.start;
+          const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.period?.to || metrics.statementPeriod?.end;
+          const openingBalance = pickMetric(metrics, ['openingBalance', 'startingBalance']);
+          const closingBalance = pickMetric(metrics, ['closingBalance', 'endingBalance']);
+          const details = [];
+          if (periodStart) details.push({ label: 'Period start', value: formatDate(periodStart) });
+          if (periodEnd) details.push({ label: 'Period end', value: formatDate(periodEnd) });
+          if (openingBalance != null) details.push({ label: 'Opening balance', value: formatMoney(openingBalance, currency) });
+          if (closingBalance != null) details.push({ label: 'Closing balance', value: formatMoney(closingBalance, currency) });
+          if (metrics.currency) details.push({ label: 'Currency', value: metrics.currency });
+          if (accountType) details.push({ label: 'Account type', value: accountType });
+          files.push({
+            fileId: file.fileId,
+            title: accountName || 'Statement',
+            subtitle: periodEnd ? `Statement ending ${formatDate(periodEnd)}` : (file.documentDate ? `Statement ${formatDate(file.documentDate)}` : 'Statement'),
+            summary: [
+              { label: 'Account number', value: file.accountNumberMasked || maskedNumber || '—' },
+              { label: 'Total in', value: formatMoney(totalIn, currency) },
+              { label: 'Total out', value: formatMoney(totalOut, currency) },
+            ],
+            details,
+            metrics,
+            raw: file,
+            currency,
+            isExpanded: false,
+          });
+        });
+      });
+      showViewer({
+        type: 'statement',
+        title: normaliseStatementName(institution.name || data?.institution?.name),
+        subtitle: files.length ? `${files.length} document${files.length === 1 ? '' : 's'}` : 'No documents yet',
+        files,
+      });
+    } catch (error) {
+      console.error('Failed to open statements viewer', error);
+      window.alert(error.message || 'Unable to load statement documents right now.');
+    }
+  }
+
   function renderInstitutionGrid(institutions) {
     statementGrid.innerHTML = '';
     statementMeta.textContent = institutions.length ? `${institutions.length} institution${institutions.length === 1 ? '' : 's'}` : 'No statements yet.';
     institutions.forEach((inst) => {
       const card = document.createElement('article');
-      applyEntityBranding(card, inst.name);
+      const cleanName = normaliseStatementName(inst.name);
+      applyEntityBranding(card, cleanName);
       const title = document.createElement('h3');
-      title.textContent = inst.name || 'Institution';
+      title.textContent = cleanName || 'Institution';
       const dl = document.createElement('dl');
       dl.innerHTML = `
         <div><span>Accounts</span><span>${inst.accounts || 0}</span></div>
       `;
       card.append(title, dl);
+      card.tabIndex = 0;
+      card.setAttribute('role', 'button');
+      card.setAttribute('aria-label', `View statements for ${cleanName || 'institution'}`);
+      const open = () => openStatementViewer(inst);
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          open();
+        }
+      });
       statementGrid.appendChild(card);
     });
   }
@@ -666,22 +1105,219 @@
     }
   }
 
-  function renderCollections(collections) {
-    collectionGrid.innerHTML = '';
-    collectionMeta.textContent = collections.length ? `${collections.length} collection${collections.length === 1 ? '' : 's'}` : 'No collections yet.';
-    collections.forEach((col) => {
-      const card = document.createElement('article');
-      card.className = 'grid-card';
-      const title = document.createElement('h3');
-      title.textContent = col.name || 'Collection';
-      const dl = document.createElement('dl');
-      dl.innerHTML = `
-        <div><span>Files</span><span>${col.fileCount || 0}</span></div>
-        <div><span>Updated</span><span>${col.lastUpdated ? new Date(col.lastUpdated).toLocaleDateString() : '—'}</span></div>
-      `;
-      card.append(title, dl);
-      collectionGrid.appendChild(card);
+  async function promptCollectionCreate() {
+    const name = window.prompt('Name your new collection');
+    if (!name || !name.trim()) return;
+    try {
+      const response = await apiFetch('/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to create a collection.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Create failed');
+      }
+      const json = await response.json().catch(() => ({}));
+      const newId = json?.collection?.id || null;
+      await fetchCollections();
+      if (newId) {
+        state.selectedCollectionId = newId;
+        renderCollectionSelection();
+        updateCollectionTargetHint();
+      }
+    } catch (error) {
+      console.error('Failed to create collection', error);
+      window.alert(error.message || 'Unable to create the collection right now.');
+    }
+  }
+
+  async function promptCollectionRename(collection) {
+    if (!collection?.id) return;
+    const name = window.prompt('Rename collection', collection.name || 'Collection');
+    if (!name || !name.trim() || name.trim() === collection.name) return;
+    try {
+      const response = await apiFetch(`/collections/${encodeURIComponent(collection.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to rename collections.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Rename failed');
+      }
+      await fetchCollections();
+    } catch (error) {
+      console.error('Failed to rename collection', error);
+      window.alert(error.message || 'Unable to rename this collection right now.');
+    }
+  }
+
+  async function deleteCollection(collection) {
+    if (!collection?.id) return;
+    const confirmed = window.confirm('Are you sure you want to delete this collection and all contained files? This action is irreversible.');
+    if (!confirmed) return;
+    try {
+      const response = await apiFetch(`/collections/${encodeURIComponent(collection.id)}`, { method: 'DELETE' });
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to delete collections.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Delete failed');
+      }
+      if (state.selectedCollectionId === collection.id) {
+        state.selectedCollectionId = null;
+      }
+      await fetchCollections();
+      updateCollectionTargetHint();
+    } catch (error) {
+      console.error('Failed to delete collection', error);
+      window.alert(error.message || 'Unable to delete this collection right now.');
+    }
+  }
+
+  async function downloadCollection(collection) {
+    if (!collection?.id) return;
+    try {
+      const response = await apiFetch(`/collections/${encodeURIComponent(collection.id)}/archive`);
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to download collections.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(text || 'Download failed');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${(collection.name || 'collection').replace(/[^\w. -]+/g, '_')}.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch (error) {
+      console.error('Failed to download collection', error);
+      window.alert(error.message || 'Unable to download this collection right now.');
+    }
+  }
+
+  function selectCollection(collectionId) {
+    state.selectedCollectionId = state.selectedCollectionId === collectionId ? null : collectionId;
+    renderCollectionSelection();
+    updateCollectionTargetHint();
+  }
+
+  function renderCollectionSelection() {
+    if (!collectionGrid) return;
+    const cards = collectionGrid.querySelectorAll('.collection-card');
+    cards.forEach((card) => {
+      const id = card.dataset.collectionId || null;
+      card.classList.toggle('is-selected', id && id === state.selectedCollectionId);
     });
+  }
+
+  function buildCollectionCard(collection) {
+    const card = document.createElement('article');
+    card.className = 'collection-card';
+    card.dataset.collectionId = collection.id;
+    if (state.selectedCollectionId === collection.id) {
+      card.classList.add('is-selected');
+    }
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `Select collection ${collection.name || 'collection'}`);
+
+    const title = document.createElement('h3');
+    title.className = 'collection-card__title';
+    title.textContent = collection.name || 'Collection';
+
+    const meta = document.createElement('div');
+    meta.className = 'collection-card__meta';
+    meta.innerHTML = `
+      <span>${formatNumber(collection.fileCount || 0)} file${collection.fileCount === 1 ? '' : 's'}</span>
+      <span>${collection.lastUpdated ? `Updated ${formatDate(collection.lastUpdated)}` : 'No recent uploads'}</span>
+    `;
+
+    const actions = document.createElement('div');
+    actions.className = 'collection-actions';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
+    renameBtn.textContent = 'Rename';
+    renameBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      promptCollectionRename(collection);
+    });
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.type = 'button';
+    downloadBtn.textContent = 'Download';
+    downloadBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      downloadCollection(collection);
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      deleteCollection(collection);
+    });
+
+    actions.append(renameBtn, downloadBtn, deleteBtn);
+
+    card.append(title, meta, actions);
+
+    const select = () => selectCollection(collection.id);
+    card.addEventListener('click', select);
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        select();
+      }
+    });
+
+    return card;
+  }
+
+  function renderCollections(collections) {
+    state.collections = Array.isArray(collections) ? collections : [];
+    if (state.selectedCollectionId && !state.collections.some((collection) => collection.id === state.selectedCollectionId)) {
+      state.selectedCollectionId = null;
+    }
+    if (collectionGrid) {
+      collectionGrid.innerHTML = '';
+      const createCard = document.createElement('button');
+      createCard.type = 'button';
+      createCard.className = 'collection-card collection-card__create';
+      createCard.innerHTML = '<span>+ New collection</span>';
+      createCard.addEventListener('click', (event) => {
+        event.stopPropagation();
+        promptCollectionCreate();
+      });
+      collectionGrid.appendChild(createCard);
+      state.collections.forEach((collection) => {
+        collectionGrid.appendChild(buildCollectionCard(collection));
+      });
+      renderCollectionSelection();
+    }
+    collectionMeta.textContent = state.collections.length
+      ? `${state.collections.length} collection${state.collections.length === 1 ? '' : 's'}`
+      : 'No collections yet.';
+    updateCollectionTargetHint();
   }
 
   function queueRefresh() {
@@ -728,6 +1364,23 @@
     fetchStatements();
     fetchCollections();
   }
+
+  if (viewerClose) {
+    viewerClose.addEventListener('click', () => {
+      closeViewer();
+    });
+  }
+  if (viewerOverlay) {
+    viewerOverlay.addEventListener('click', () => {
+      closeViewer();
+    });
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && viewerRoot && viewerRoot.getAttribute('aria-hidden') === 'false') {
+      closeViewer();
+    }
+  });
 
   document.addEventListener('DOMContentLoaded', () => {
     init().catch((error) => {
