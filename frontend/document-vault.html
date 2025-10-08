@@ -269,6 +269,95 @@
       box-shadow: var(--vault-shadow-soft);
     }
 
+    .grid-card--brand {
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 24px 48px rgba(15, 23, 42, 0.2);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .grid-card--brand h3 {
+      color: inherit;
+    }
+
+    .grid-card--brand dl {
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    .grid-card--brand::before {
+      content: "";
+      position: absolute;
+      inset: -20% -30% auto;
+      height: 60%;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+      filter: blur(0);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .grid-card--brand::after {
+      content: "";
+      position: absolute;
+      inset: auto -40% -55% -40%;
+      height: 70%;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .grid-card--brand > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .grid-card--brand-generic {
+      --card-brand-hue: 210;
+      background: linear-gradient(150deg, hsl(var(--card-brand-hue), 74%, 55%) 0%, hsl(var(--card-brand-hue), 68%, 42%) 100%);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .grid-card--brand {
+        transition: none;
+      }
+    }
+
+    .grid-card--brand-monzo { background: linear-gradient(145deg, #ff2d77 0%, #ff8a4d 55%, #ffc233 100%); }
+    .grid-card--brand-halifax { background: linear-gradient(145deg, #003087 0%, #005bff 100%); }
+    .grid-card--brand-lloyds { background: linear-gradient(145deg, #0b3d1c 0%, #1f8a47 100%); }
+    .grid-card--brand-hsbc { background: linear-gradient(145deg, #b00020 0%, #ff5a5f 100%); }
+    .grid-card--brand-natwest { background: linear-gradient(145deg, #2d014d 0%, #6600a8 100%); }
+    .grid-card--brand-santander { background: linear-gradient(145deg, #c5001a 0%, #ff5656 100%); }
+    .grid-card--brand-barclays { background: linear-gradient(145deg, #0065b3 0%, #00bfe7 100%); }
+    .grid-card--brand-starling { background: linear-gradient(145deg, #522680 0%, #8b5cf6 100%); }
+    .grid-card--brand-revolut { background: linear-gradient(145deg, #0065ff 0%, #00d1ff 100%); }
+    .grid-card--brand-nationwide { background: linear-gradient(145deg, #002663 0%, #0052a5 100%); }
+    .grid-card--brand-firstdirect { background: linear-gradient(145deg, #111827 0%, #374151 100%); }
+    .grid-card--brand-tsb { background: linear-gradient(145deg, #0099e5 0%, #004e92 100%); }
+    .grid-card--brand-vanguard { background: linear-gradient(145deg, #8b1a2b 0%, #cf4856 100%); }
+    .grid-card--brand-fidelity { background: linear-gradient(145deg, #0b4430 0%, #169c6b 100%); }
+    .grid-card--brand-hl { background: linear-gradient(145deg, #002663 0%, #0d4dff 100%); }
+    .grid-card--brand-aviva { background: linear-gradient(145deg, #0057b8 0%, #00a8ff 100%); }
+    .grid-card--brand-scottishwidows { background: linear-gradient(145deg, #2c0f36 0%, #60215d 100%); }
+    .grid-card--brand-hmrc { background: linear-gradient(145deg, #0b5037 0%, #2d8c60 100%); }
+    .grid-card--brand-amazon { background: linear-gradient(145deg, #ff9900 0%, #ffbf3d 100%); color: #1f2933; }
+    .grid-card--brand-google { background: linear-gradient(145deg, #1a73e8 0%, #34a853 100%); }
+    .grid-card--brand-microsoft { background: linear-gradient(145deg, #0067b8 0%, #107c10 100%); }
+    .grid-card--brand-apple { background: linear-gradient(145deg, #0f172a 0%, #334155 100%); }
+    .grid-card--brand-meta { background: linear-gradient(145deg, #0064e0 0%, #9333ea 100%); }
+    .grid-card--brand-tesco { background: linear-gradient(145deg, #00539f 0%, #ef3f2b 100%); }
+    .grid-card--brand-sainsbury { background: linear-gradient(145deg, #ec6608 0%, #ff9248 100%); color: #1f2933; }
+    .grid-card--brand-shell { background: linear-gradient(145deg, #ff1f00 0%, #ffb400 100%); color: #1f2933; }
+    .grid-card--brand-bp { background: linear-gradient(145deg, #005f20 0%, #97d700 100%); }
+
+    .grid-card--brand-amazon dl,
+    .grid-card--brand-sainsbury dl,
+    .grid-card--brand-shell dl {
+      color: rgba(31, 41, 51, 0.75);
+    }
+
     .grid-card h3 {
       margin: 0 0 8px;
       font-size: 1rem;

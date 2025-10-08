@@ -1,19 +1,51 @@
 import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Readable } from 'node:stream';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import mongoose from 'mongoose';
 import pino from 'pino';
 
 const require = createRequire(import.meta.url);
-const { getObject, fileIdToKey } = require('../../backend/src/lib/r2');
-const { isPdf } = require('../../backend/src/lib/pdf');
-const { sha256 } = require('../../backend/src/lib/hash');
-const { canonicaliseInstitution, canonicaliseEmployer } = require('../../backend/src/lib/canonicalise');
-const { rebuildMonthlyAnalytics } = require('../../backend/src/services/vault/analytics.js');
-const DocumentInsight = require('../../backend/models/DocumentInsight');
-const UserDocumentJob = require('../../backend/models/UserDocumentJob');
-const UploadSession = require('../../backend/models/UploadSession');
-const Account = require('../../backend/models/Account');
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const backendRoot = path.resolve(__dirname, '../../../backend');
+
+function requireBackend<T>(relativePath: string): T {
+  return require(path.join(backendRoot, relativePath)) as T;
+}
+
+type R2Exports = {
+  getObject: (key: string) => Promise<{ Body: Readable }>;
+  fileIdToKey: (fileId: string) => string;
+};
+
+type PdfExports = {
+  isPdf: (buffer: Buffer) => boolean;
+};
+
+type HashExports = {
+  sha256: (buffer: Buffer) => string;
+};
+
+type CanonicaliseExports = {
+  canonicaliseInstitution: (name: string) => { canonical: string | null; raw: string | null };
+  canonicaliseEmployer: (name: string) => string | null;
+};
+
+type AnalyticsExports = {
+  rebuildMonthlyAnalytics: (input: { userId: mongoose.Types.ObjectId; month: string }) => Promise<void>;
+};
+
+const { getObject, fileIdToKey } = requireBackend<R2Exports>('src/lib/r2.js');
+const { isPdf } = requireBackend<PdfExports>('src/lib/pdf.js');
+const { sha256 } = requireBackend<HashExports>('src/lib/hash.js');
+const { canonicaliseInstitution, canonicaliseEmployer } = requireBackend<CanonicaliseExports>('src/lib/canonicalise.js');
+const { rebuildMonthlyAnalytics } = requireBackend<AnalyticsExports>('src/services/vault/analytics.js');
+const DocumentInsight = requireBackend<mongoose.Model<any>>('models/DocumentInsight.js');
+const UserDocumentJob = requireBackend<mongoose.Model<any>>('models/UserDocumentJob.js');
+const UploadSession = requireBackend<mongoose.Model<any>>('models/UploadSession.js');
+const Account = requireBackend<mongoose.Model<any>>('models/Account.js');
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 

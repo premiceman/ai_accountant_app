@@ -24,7 +24,8 @@ async function enumerateZipBuffers(buffer, predicate) {
   try {
     await fs.writeFile(zipPath, buffer);
     const { stdout: listStdout } = await execFileAsync('unzip', ['-Z1', zipPath]);
-    const entries = listStdout
+    const listText = Buffer.isBuffer(listStdout) ? listStdout.toString('utf8') : String(listStdout || '');
+    const entries = listText
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
