@@ -12,6 +12,8 @@
     timers: { uploads: null, tiles: null, lists: null },
   };
 
+  let unauthorised = false;
+
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
   const sessionRows = document.getElementById('session-rows');
@@ -31,8 +33,37 @@
     return fetch(path, options);
   }
 
-  function apiFetch(path, options) {
-    return authFetch(`${API_BASE}${path}`, options);
+  function stopPolling() {
+    if (state.timers.uploads) {
+      clearInterval(state.timers.uploads);
+      state.timers.uploads = null;
+    }
+    if (state.timers.tiles) {
+      clearInterval(state.timers.tiles);
+      state.timers.tiles = null;
+    }
+    if (state.timers.lists) {
+      clearInterval(state.timers.lists);
+      state.timers.lists = null;
+    }
+  }
+
+  function handleUnauthorised(message) {
+    if (unauthorised) return;
+    unauthorised = true;
+    stopPolling();
+    showError(message || 'Your session has expired. Please sign in again.');
+    if (window.Auth && typeof Auth.enforce === 'function') {
+      Auth.enforce({ validateWithServer: true }).catch(() => {});
+    }
+  }
+
+  async function apiFetch(path, options) {
+    const response = await authFetch(`${API_BASE}${path}`, options);
+    if (response.status === 401) {
+      handleUnauthorised('Your session has expired. Please sign in again.');
+    }
+    return response;
   }
 
   function renderSessionPanel() {
@@ -147,6 +178,7 @@
   }
 
   function showError(message) {
+    sessionRows.innerHTML = '';
     sessionEmpty.style.display = '';
     sessionEmpty.textContent = message;
   }
@@ -155,16 +187,24 @@
     const formData = new FormData();
     formData.append('file', file, file.name);
     try {
+      if (window.Auth && typeof Auth.requireAuth === 'function') {
+        await Auth.requireAuth();
+      }
       const response = await apiFetch('/upload', { method: 'POST', body: formData });
       if (!response.ok) {
         const text = await safeJson(response);
-        throw new Error(text?.error || 'Upload failed');
+        const errorMessage = response.status === 401 ? 'Your session has expired. Please sign in again.' : (text?.error || 'Upload failed');
+        throw new Error(errorMessage);
       }
       const json = await response.json();
       handleUploadResponse(json);
     } catch (error) {
       console.error('Upload error', error);
-      showError(error.message || 'Upload failed');
+      if (error.message && error.message.toLowerCase().includes('sign in')) {
+        handleUnauthorised(error.message);
+      } else {
+        showError(error.message || 'Upload failed');
+      }
     }
   }
 
@@ -395,7 +435,17 @@
     }
   }
 
-  function init() {
+  async function init() {
+    if (window.Auth && typeof Auth.requireAuth === 'function') {
+      try {
+        await Auth.requireAuth();
+      } catch (error) {
+        console.warn('Auth required for vault page', error);
+        handleUnauthorised('Please sign in to access your vault.');
+        return;
+      }
+    }
+
     setupDropzone();
     queueRefresh();
     fetchTiles();
@@ -404,5 +454,10 @@
     fetchCollections();
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', () => {
+    init().catch((error) => {
+      console.error('Failed to initialise vault page', error);
+      showError('Something went wrong initialising the vault. Please try again.');
+    });
+  });
 })();

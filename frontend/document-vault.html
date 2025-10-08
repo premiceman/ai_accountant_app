@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script>window.__API_BASE = window.__API_BASE || '';</script>
   <script src="/js/head-include.js"></script>
+  <script src="/auth.js"></script>
   <style>
     :root {
       color-scheme: light dark;
@@ -297,7 +298,7 @@
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       if (window.Auth && typeof Auth.enforce === 'function') {
-        Auth.enforce(true);
+        Auth.enforce({ validateWithServer: true }).catch(() => {});
       }
     });
   </script>
