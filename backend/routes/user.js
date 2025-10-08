@@ -853,7 +853,7 @@ router.patch('/onboarding', auth, async (req, res) => {
 // POST /api/user/onboarding/complete
 router.post('/onboarding/complete', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    let user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     if (user.onboardingComplete) {
@@ -960,20 +960,17 @@ router.post('/onboarding/complete', auth, async (req, res) => {
     const resolvedTier = planSelection.selection === 'premium' ? 'premium' : 'starter';
     const subscriptionStatus = planSelection.selection === 'trial' ? 'trial' : 'active';
 
-    user.username = cleanedUsername;
-    user.dateOfBirth = dob;
-    user.profileInterests = interests;
-    user.licenseTier = resolvedTier;
-    user.subscription = {
-      tier: resolvedTier,
-      status: subscriptionStatus,
-      lastPlanChange: now,
-      renewsAt
+    const existingOnboarding = user.onboarding?.toObject ? user.onboarding.toObject() : (user.onboarding || {});
+    const onboardingState = {
+      ...existingOnboarding,
+      wizardCompletedAt: existingOnboarding.wizardCompletedAt || now,
+      tourCompletedAt: existingOnboarding.tourCompletedAt || now,
+      mandatoryCompletedAt: now,
+      lastPromptedAt: now,
+      goals: motivations.length ? motivations : (existingOnboarding.goals || [])
     };
-    user.trial = planSelection.selection === 'trial'
-      ? { startedAt: now, endsAt: trialEndsAt, coupon: null, requiresPaymentMethod: true }
-      : { startedAt: now, endsAt: planSelection.selection === 'premium' ? null : addDays(now, 30), coupon: null, requiresPaymentMethod: false };
-    user.onboardingSurvey = {
+
+    const onboardingSurvey = {
       interests,
       motivations,
       valueSignals,
@@ -998,17 +995,39 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       },
       completedAt: now
     };
-    user.onboardingComplete = true;
-    user.onboarding = {
-      ...(user.onboarding?.toObject ? user.onboarding.toObject() : user.onboarding || {}),
-      mandatoryCompletedAt: now,
-      lastPromptedAt: now
-    };
-    if (motivations.length) user.onboarding.goals = motivations;
-    user.eulaAcceptedAt = now;
-    user.eulaVersion = LEGAL_VERSION;
 
-    await user.save();
+    const trialState = planSelection.selection === 'trial'
+      ? { startedAt: now, endsAt: trialEndsAt, coupon: null, requiresPaymentMethod: true }
+      : { startedAt: now, endsAt: planSelection.selection === 'premium' ? null : addDays(now, 30), coupon: null, requiresPaymentMethod: false };
+
+    const updateDoc = {
+      username: cleanedUsername,
+      dateOfBirth: dob,
+      profileInterests: interests,
+      licenseTier: resolvedTier,
+      subscription: {
+        tier: resolvedTier,
+        status: subscriptionStatus,
+        lastPlanChange: now,
+        renewsAt
+      },
+      trial: trialState,
+      onboardingSurvey,
+      onboardingComplete: true,
+      onboarding: onboardingState,
+      eulaAcceptedAt: now,
+      eulaVersion: LEGAL_VERSION
+    };
+
+    user = await User.findByIdAndUpdate(
+      user._id,
+      { $set: updateDoc },
+      { new: true, runValidators: true }
+    );
+
+    if (!user) {
+      throw new Error('User update failed during onboarding completion');
+    }
 
     try {
       await Subscription.findOneAndUpdate(
