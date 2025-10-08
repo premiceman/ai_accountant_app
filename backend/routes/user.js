@@ -856,11 +856,8 @@ router.post('/onboarding/complete', auth, async (req, res) => {
     let user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    if (user.onboardingComplete) {
-      return res.json({ user: publicUser(user) });
-    }
-
     const payload = req.body || {};
+    const isRerun = !!user.onboardingComplete;
 
     const cleanedUsername = normaliseUsername(payload.username);
     if (!cleanedUsername || cleanedUsername.length < 3) {
@@ -892,8 +889,11 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       return res.status(400).json({ error: 'Tell us how our value props land so we can tailor the experience.' });
     }
 
-    if (!payload.acceptEula || !payload.acceptPrivacy) {
-      return res.status(400).json({ error: 'You must accept the EULA and privacy policy to continue.' });
+    if (!payload.acceptEula && !user.eulaAcceptedAt) {
+      return res.status(400).json({ error: 'You must accept the EULA to continue.' });
+    }
+    if (!payload.acceptPrivacy && !user.eulaAcceptedAt) {
+      return res.status(400).json({ error: 'You must accept the privacy policy to continue.' });
     }
 
     const recommendation = computeTierRecommendation({
@@ -917,46 +917,86 @@ router.post('/onboarding/complete', auth, async (req, res) => {
         expYear = Number(match[2]);
       }
     }
-    if (!holder || holder.length < 3 || rawNumber.length < 12 || !expMonth || !expYear) {
-      return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
-    }
-    if (expYear < 100) expYear += 2000;
-    if (expMonth < 1 || expMonth > 12) {
-      return res.status(400).json({ error: 'Card expiry month looks incorrect.' });
-    }
-    const expiryDate = new Date(expYear, expMonth, 0);
-    if (expiryDate < new Date()) {
-      return res.status(400).json({ error: 'The card you entered appears to be expired.' });
-    }
+    const cvc = String(billing.cvc || '').trim();
+    const hasNewBilling = rawNumber.length >= 12;
+    const useExistingPayment = Boolean(payload.useExistingPayment && isRerun);
 
-    const brand = inferCardBrand(rawNumber);
-    const last4 = rawNumber.slice(-4);
+    let paymentSnapshot = null;
+    let paymentMethod = null;
 
-    await PaymentMethod.updateMany({ userId: user._id }, { $set: { isDefault: false } });
-    let paymentMethod;
-    try {
-      paymentMethod = await PaymentMethod.create({
-        userId: user._id,
+    if (hasNewBilling) {
+      if (!holder || holder.length < 3 || !expMonth || !expYear || !cvc || cvc.length < 3) {
+        return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
+      }
+      if (expYear < 100) expYear += 2000;
+      if (expMonth < 1 || expMonth > 12) {
+        return res.status(400).json({ error: 'Card expiry month looks incorrect.' });
+      }
+      const expiryDate = new Date(expYear, expMonth, 0);
+      if (expiryDate < new Date()) {
+        return res.status(400).json({ error: 'The card you entered appears to be expired.' });
+      }
+      const brand = inferCardBrand(rawNumber);
+      const last4 = rawNumber.slice(-4);
+      await PaymentMethod.updateMany({ userId: user._id }, { $set: { isDefault: false } });
+      try {
+        paymentMethod = await PaymentMethod.create({
+          userId: user._id,
+          holder,
+          brand,
+          last4,
+          expMonth,
+          expYear,
+          isDefault: true
+        });
+      } catch (err) {
+        console.error('Failed to capture onboarding payment method', err);
+        return res.status(500).json({ error: 'Unable to store billing details right now.' });
+      }
+      paymentSnapshot = {
         holder,
         brand,
         last4,
         expMonth,
         expYear,
-        isDefault: true
-      });
-    } catch (err) {
-      console.error('Failed to capture onboarding payment method', err);
-      return res.status(500).json({ error: 'Unable to store billing details right now.' });
+        capturedAt: paymentMethod?.createdAt || new Date()
+      };
+    } else if (useExistingPayment) {
+      const fromPayload = toPlain(payload.existingPayment || {});
+      let fallback = fromPayload;
+      if (!fallback?.last4) {
+        const existingSnapshot = toPlain(user.onboardingSurvey?.planChoice?.paymentSnapshot || {});
+        fallback = existingSnapshot.last4 ? existingSnapshot : fallback;
+      }
+      if (!fallback?.last4) {
+        const existingMethod = await PaymentMethod.findOne({ userId: user._id, isDefault: true }).sort({ createdAt: -1 });
+        if (existingMethod) {
+          fallback = {
+            holder: existingMethod.holder || '',
+            brand: existingMethod.brand || 'Card',
+            last4: existingMethod.last4 || '',
+            expMonth: existingMethod.expMonth || null,
+            expYear: existingMethod.expYear || null,
+            capturedAt: existingMethod.createdAt || new Date()
+          };
+        }
+      }
+      if (!fallback?.last4) {
+        return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
+      }
+      paymentSnapshot = {
+        holder: fallback.holder || '',
+        brand: fallback.brand || 'Card',
+        last4: fallback.last4,
+        expMonth: fallback.expMonth || null,
+        expYear: fallback.expYear || null,
+        capturedAt: fallback.capturedAt || fallback.createdAt || new Date()
+      };
+    } else {
+      return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
     }
 
     const now = new Date();
-    const renewsAt = planSelection.selection === 'trial'
-      ? addDays(now, 30)
-      : (planSelection.interval === 'yearly' ? addMonths(now, 12) : addMonths(now, 1));
-    const trialEndsAt = planSelection.selection === 'trial'
-      ? addDays(now, 30)
-      : null;
-
     const resolvedTier = planSelection.selection === 'premium' ? 'premium' : 'starter';
     const subscriptionStatus = planSelection.selection === 'trial' ? 'trial' : 'active';
 
@@ -965,10 +1005,23 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       ...existingOnboarding,
       wizardCompletedAt: existingOnboarding.wizardCompletedAt || now,
       tourCompletedAt: existingOnboarding.tourCompletedAt || now,
-      mandatoryCompletedAt: now,
+      mandatoryCompletedAt: existingOnboarding.mandatoryCompletedAt || now,
       lastPromptedAt: now,
       goals: motivations.length ? motivations : (existingOnboarding.goals || [])
     };
+
+    const existingSubscription = toPlain(user.subscription || {});
+    const existingTrial = user.trial ? toPlain(user.trial) : null;
+    let renewsAt = safeDate(existingSubscription.renewsAt || existingSubscription.currentPeriodEnd || user.onboardingSurvey?.planChoice?.renewsAt);
+    let trialEndsAt = safeDate(existingTrial?.endsAt || user.onboardingSurvey?.planChoice?.trialEndsAt);
+    if (!renewsAt) {
+      renewsAt = planSelection.selection === 'trial'
+        ? addDays(now, 30)
+        : (planSelection.interval === 'yearly' ? addMonths(now, 12) : addMonths(now, 1));
+    }
+    if (!trialEndsAt && planSelection.selection === 'trial') {
+      trialEndsAt = addDays(now, 30);
+    }
 
     const onboardingSurvey = {
       interests,
@@ -979,14 +1032,7 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       recommendedSummary: recommendation.summary,
       planChoice: {
         ...planSelection,
-        paymentSnapshot: {
-          holder,
-          brand,
-          last4,
-          expMonth,
-          expYear,
-          capturedAt: paymentMethod?.createdAt || now
-        },
+        paymentSnapshot,
         scores: recommendation.scores,
         reasons: recommendation.reasons,
         renewsAt,
@@ -996,28 +1042,37 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       completedAt: now
     };
 
-    const trialState = planSelection.selection === 'trial'
-      ? { startedAt: now, endsAt: trialEndsAt, coupon: null, requiresPaymentMethod: true }
-      : { startedAt: now, endsAt: planSelection.selection === 'premium' ? null : addDays(now, 30), coupon: null, requiresPaymentMethod: false };
+    const trialState = isRerun
+      ? (existingTrial || null)
+      : (planSelection.selection === 'trial'
+        ? { startedAt: now, endsAt: trialEndsAt, coupon: null, requiresPaymentMethod: true }
+        : { startedAt: now, endsAt: planSelection.selection === 'premium' ? null : addDays(now, 30), coupon: null, requiresPaymentMethod: false });
 
     const updateDoc = {
       username: cleanedUsername,
       dateOfBirth: dob,
       profileInterests: interests,
-      licenseTier: resolvedTier,
-      subscription: {
+      onboardingSurvey,
+      onboardingComplete: true,
+      onboarding: onboardingState
+    };
+
+    if (!isRerun) {
+      updateDoc.licenseTier = resolvedTier;
+      updateDoc.subscription = {
         tier: resolvedTier,
         status: subscriptionStatus,
         lastPlanChange: now,
         renewsAt
-      },
-      trial: trialState,
-      onboardingSurvey,
-      onboardingComplete: true,
-      onboarding: onboardingState,
-      eulaAcceptedAt: now,
-      eulaVersion: LEGAL_VERSION
-    };
+      };
+      updateDoc.trial = trialState;
+      updateDoc.eulaAcceptedAt = now;
+      updateDoc.eulaVersion = LEGAL_VERSION;
+    } else {
+      if (trialState) updateDoc.trial = trialState;
+      if (!user.eulaAcceptedAt) updateDoc.eulaAcceptedAt = now;
+      if (!user.eulaVersion) updateDoc.eulaVersion = LEGAL_VERSION;
+    }
 
     user = await User.findByIdAndUpdate(
       user._id,
@@ -1029,23 +1084,25 @@ router.post('/onboarding/complete', auth, async (req, res) => {
       throw new Error('User update failed during onboarding completion');
     }
 
-    try {
-      await Subscription.findOneAndUpdate(
-        { userId: user._id },
-        {
-          userId: user._id,
-          plan: resolvedTier,
-          interval: planSelection.interval,
-          price: planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval),
-          currency: 'GBP',
-          status: 'active',
-          startedAt: now,
-          currentPeriodEnd: renewsAt
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-    } catch (err) {
-      console.warn('Unable to upsert subscription during onboarding', err.message || err);
+    if (!isRerun) {
+      try {
+        await Subscription.findOneAndUpdate(
+          { userId: user._id },
+          {
+            userId: user._id,
+            plan: resolvedTier,
+            interval: planSelection.interval,
+            price: planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval),
+            currency: 'GBP',
+            status: 'active',
+            startedAt: now,
+            currentPeriodEnd: renewsAt
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } catch (err) {
+        console.warn('Unable to upsert subscription during onboarding', err.message || err);
+      }
     }
 
     res.json({ user: publicUser(user) });

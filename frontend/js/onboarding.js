@@ -6,6 +6,8 @@
     submitting: false,
     usernameStatus: { checking: false, available: null, message: '' },
     recommendation: null,
+    existingPaymentSnapshot: null,
+    isRerun: false,
     form: {
       username: '',
       dob: '',
@@ -255,15 +257,22 @@
   }
 
   function renderIntro(container) {
+    const heading = state.isRerun ? 'Refresh your experience' : 'What to expect';
+    const closingCopy = state.isRerun
+      ? 'We’ve pre-filled your previous answers. Update anything that has changed and we’ll keep your workspace in sync.'
+      : 'It takes about three minutes. We’ll save as you go — no surprises.';
+    const planBullet = state.isRerun
+      ? 'We’ll recommend the right tier, and you can keep your saved billing method by leaving the card section blank.'
+      : 'We’ll recommend the right tier, start your plan and capture billing securely.';
     container.innerHTML = `
       <div class="summary-card">
-        <h3>What to expect</h3>
+        <h3>${heading}</h3>
         <ul>
           <li>Confirm a username and a few personal details so we can secure your workspace.</li>
           <li>Tell us the outcomes you care about and how you want to measure value.</li>
-          <li>We’ll recommend the right tier, start your plan and capture billing securely.</li>
+          <li>${planBullet}</li>
         </ul>
-        <p class="mb-0" style="color:#4a5775;">It takes about three minutes. We’ll save as you go — no surprises.</p>
+        <p class="mb-0" style="color:#4a5775;">${closingCopy}</p>
       </div>
     `;
     $('#btn-back').style.visibility = 'hidden';
@@ -520,6 +529,12 @@
               <input id="card-cvc" inputmode="numeric" autocomplete="off" placeholder="123" value="${state.form.billing.cvc}" />
             </div>
           </div>
+          ${state.existingPaymentSnapshot ? `
+            <p class="small" style="margin-top:0.75rem;color:#586691;">
+              Current card on file: ${describeExistingPayment(state.existingPaymentSnapshot)}.
+              Leave these fields blank to keep it, or enter new details to replace it.
+            </p>
+          ` : ''}
         </div>
       </div>
     `;
@@ -592,6 +607,21 @@
   function formatCardNumber(value) {
     if (!value) return '';
     return value.replace(/[^0-9]/g, '').replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+  }
+
+  function hasNewBillingDetails() {
+    const number = String(state.form.billing.cardNumber || '').replace(/[^0-9]/g, '');
+    return number.length >= 12;
+  }
+
+  function describeExistingPayment(snapshot = {}) {
+    if (!snapshot) return '';
+    const brand = snapshot.brand || 'Card';
+    const last4 = snapshot.last4 ? `•••• ${snapshot.last4}` : 'saved card';
+    const month = snapshot.expMonth ? String(snapshot.expMonth).padStart(2, '0') : '';
+    const year = snapshot.expYear ? String(snapshot.expYear).slice(-2) : '';
+    const expiry = month && year ? ` · exp ${month}/${year}` : '';
+    return `${brand} ${last4}${expiry}`;
   }
 
   function renderLegal(container) {
@@ -688,6 +718,15 @@
 
   function validatePlan() {
     const billing = state.form.billing;
+    const hasNew = hasNewBillingDetails();
+    if (!hasNew) {
+      if (state.existingPaymentSnapshot) {
+        hideAlert();
+        return true;
+      }
+      showAlert('Add billing details so we can activate your workspace.');
+      return false;
+    }
     if (!billing.holder || billing.holder.length < 3) {
       showAlert('Enter the cardholder name.');
       return false;
@@ -698,6 +737,10 @@
     }
     if (!billing.expMonth || !billing.expYear) {
       showAlert('Add the card expiry in MM/YY format.');
+      return false;
+    }
+    if (!billing.cvc || billing.cvc.length < 3) {
+      showAlert('Add the card security code.');
       return false;
     }
     hideAlert();
@@ -782,6 +825,7 @@
     updateButtons();
     showAlert('Setting up your workspace…');
     try {
+      const hasNewBilling = hasNewBillingDetails();
       const payload = {
         username: state.form.username,
         dateOfBirth: state.form.dob,
@@ -790,9 +834,12 @@
         valueSignals: buildAnswerMap(valueQuestions, state.form.valueSignals),
         tierSignals: buildAnswerMap(tierQuestions, state.form.tierSignals),
         plan: state.form.plan,
-        billing: state.form.billing,
+        billing: hasNewBilling ? state.form.billing : {},
+        useExistingPayment: !hasNewBilling && !!state.existingPaymentSnapshot,
+        existingPayment: !hasNewBilling && state.existingPaymentSnapshot ? state.existingPaymentSnapshot : undefined,
         acceptEula: state.form.acceptEula,
-        acceptPrivacy: state.form.acceptPrivacy
+        acceptPrivacy: state.form.acceptPrivacy,
+        rerun: state.isRerun
       };
       const res = await Auth.fetch('/api/user/onboarding/complete', {
         method: 'POST',
@@ -818,8 +865,14 @@
         window.__ME__ = data.user;
         try { localStorage.setItem('me', JSON.stringify(data.user)); } catch {}
       }
+      const returnTo = (() => {
+        try { return sessionStorage.getItem('onboarding_return_to'); } catch (err) { return null; }
+      })();
+      if (returnTo) {
+        try { sessionStorage.removeItem('onboarding_return_to'); } catch {}
+      }
       setTimeout(() => {
-        window.location.replace('/home.html');
+        window.location.replace(returnTo || '/home.html');
       }, 1600);
     } catch (err) {
       console.error('Onboarding submission failed', err);
@@ -833,22 +886,49 @@
   async function init() {
     try {
       const { me } = await Auth.requireAuth();
+      const params = new URLSearchParams(window.location.search);
       state.user = me;
+      state.isRerun = !!me.onboardingComplete || params.get('rerun') === '1';
       state.form.username = (me.username || '').toLowerCase();
       state.form.dob = normaliseDate(me.dateOfBirth);
-      if (Array.isArray(me.profileInterests) && me.profileInterests.length) {
-        state.form.interests = me.profileInterests.slice(0, 5);
+      state.form.interests = Array.isArray(me.profileInterests) ? me.profileInterests.slice(0, 5) : [];
+      const survey = me.onboardingSurvey || {};
+      state.form.motivations = Array.isArray(survey.motivations) ? survey.motivations.slice(0, 4) : [];
+      state.form.valueSignals = {};
+      (Array.isArray(survey.valueSignals) ? survey.valueSignals : []).forEach((entry) => {
+        if (entry?.id) state.form.valueSignals[entry.id] = entry.response || 'not_sure';
+      });
+      state.form.tierSignals = {};
+      (Array.isArray(survey.tierSignals) ? survey.tierSignals : []).forEach((entry) => {
+        if (entry?.id) state.form.tierSignals[entry.id] = entry.response || 'not_sure';
+      });
+      const planChoice = survey.planChoice || {};
+      if (planChoice.selection) {
+        state.form.plan.selection = planChoice.selection;
+      } else if (me.subscription?.tier) {
+        const tier = String(me.subscription.tier).toLowerCase();
+        if (tier === 'starter' || tier === 'premium') {
+          state.form.plan.selection = tier;
+        }
       }
-      if (Array.isArray(me.onboardingSurvey?.motivations)) {
-        state.form.motivations = me.onboardingSurvey.motivations.slice(0, 4);
+      if (planChoice.interval) {
+        state.form.plan.interval = planChoice.interval;
       }
-      if (me.onboardingSurvey?.planChoice?.selection) {
-        state.form.plan.selection = me.onboardingSurvey.planChoice.selection;
-      }
+      state.existingPaymentSnapshot = planChoice.paymentSnapshot || null;
+      state.form.billing.cardNumber = '';
+      state.form.billing.expMonth = '';
+      state.form.billing.expYear = '';
+      state.form.billing.cvc = '';
       if (!state.form.billing.holder) {
-        const fullName = [me.firstName, me.lastName].filter(Boolean).join(' ').trim();
-        state.form.billing.holder = fullName;
+        if (state.existingPaymentSnapshot?.holder) {
+          state.form.billing.holder = state.existingPaymentSnapshot.holder;
+        } else {
+          const fullName = [me.firstName, me.lastName].filter(Boolean).join(' ').trim();
+          state.form.billing.holder = fullName;
+        }
       }
+      state.form.acceptEula = !!me.eulaAcceptedAt;
+      state.form.acceptPrivacy = !!me.eulaAcceptedAt;
     } catch (err) {
       console.error('Authentication required', err);
       return;

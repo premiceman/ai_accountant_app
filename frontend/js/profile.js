@@ -433,6 +433,17 @@
     });
   }
 
+  function bindOnboardingRerun() {
+    const btn = $('#btn-rerun-onboarding');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      if (state.user?.onboardingComplete) {
+        sessionStorage.setItem('onboarding_return_to', window.location.pathname);
+      }
+      window.location.href = '/onboarding.html?rerun=1';
+    });
+  }
+
   function initNotes() {
     const textarea = $('#notes-box');
     const saveBtn = $('#btn-notes-save');
@@ -511,6 +522,7 @@
       renderBilling();
       computeStats();
       bindProfileEditing();
+      bindOnboardingRerun();
       initNotes();
     } catch (err) {
       console.error('Profile initialisation failed', err);
