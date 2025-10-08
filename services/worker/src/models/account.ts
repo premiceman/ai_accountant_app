@@ -1,10 +1,16 @@
 import mongoose, { Schema, InferSchemaType, Model } from 'mongoose';
 
+import { normalizeRawInstitutionNamesInput } from '../lib/rawInstitutionNames.js';
+
 const AccountSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', index: true, required: true },
     institutionName: { type: String, required: true },
-    rawInstitutionNames: { type: [String], default: () => [] },
+    rawInstitutionNames: {
+      type: [String],
+      default: () => [],
+      set: normalizeRawInstitutionNamesInput,
+    },
     accountType: {
       type: String,
       enum: ['Current', 'Savings', 'ISA', 'Investments', 'Pension'],
