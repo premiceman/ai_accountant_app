@@ -1,9 +1,10 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import pino from 'pino';
 import { createServer } from 'node:http';
-import { queueManager } from './queues/index.js';
 import { createHealthRouter } from './http/health.js';
+import { startDocumentJobLoop, stopDocumentJobLoop } from './documentJobLoop.js';
 
 dotenv.config();
 
@@ -16,7 +17,7 @@ async function bootstrap() {
   app.use(express.json());
   app.use(
     createHealthRouter({
-      readinessCheck: async () => queueManager.isReady(),
+      readinessCheck: async () => mongoose.connection.readyState === 1,
     })
   );
 
@@ -27,17 +28,21 @@ async function bootstrap() {
   });
 
   try {
-    await queueManager.start();
+    const mongoUri = process.env.MONGODB_URI ?? 'mongodb://localhost:27017/ai_accountant_app';
+    await mongoose.connect(mongoUri);
+    logger.info({ mongoUri }, 'Connected to MongoDB');
+    await startDocumentJobLoop();
     logger.info('Worker online');
   } catch (error) {
-    logger.error({ err: error }, 'Failed to start queues');
+    logger.error({ err: error }, 'Failed to start worker loop');
     process.exit(1);
   }
 
   const shutdown = async (signal: NodeJS.Signals) => {
     logger.info({ signal }, 'Shutting down worker');
     server.close();
-    await queueManager.shutdown();
+    await stopDocumentJobLoop();
+    await mongoose.disconnect();
     process.exit(0);
   };
 

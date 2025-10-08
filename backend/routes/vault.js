@@ -1,3 +1,324 @@
-// backend/routes/vault.js
-// Compatibility shim: delegate Document Vault to the R2-native router.
-module.exports = require('../src/routes/vault.routes');
+const express = require('express');
+const multer = require('multer');
+const dayjs = require('dayjs');
+const mongoose = require('mongoose');
+const auth = require('../middleware/auth');
+const DocumentInsight = require('../models/DocumentInsight');
+const UploadSession = require('../models/UploadSession');
+const UserDocumentJob = require('../models/UserDocumentJob');
+const Account = require('../models/Account');
+const { handleUpload } = require('../src/services/vault/storage');
+const { registerUpload } = require('../src/services/vault/jobService');
+const VaultCollection = require('../models/VaultCollection');
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+const router = express.Router();
+
+router.use(auth);
+
+router.post('/upload', upload.single('file'), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+    let collectionId = null;
+    if (req.body?.collectionId) {
+      if (!mongoose.Types.ObjectId.isValid(req.body.collectionId)) {
+        return res.status(400).json({ error: 'Invalid collectionId' });
+      }
+      const collection = await VaultCollection.findOne({ _id: req.body.collectionId, userId: userObjectId });
+      if (!collection) {
+        return res.status(404).json({ error: 'Collection not found' });
+      }
+      collectionId = collection._id.toString();
+    }
+    const { sessionId, files } = await handleUpload({ userId, file: req.file, collectionId });
+    const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
+
+    res.status(201).json({
+      sessionId,
+      files: files
+        .filter((file) => !file.error)
+        .map((file) => ({ fileId: file.fileId, originalName: file.originalName })),
+      rejected: files
+        .filter((file) => file.error)
+        .map((file) => ({ originalName: file.originalName, reason: file.error })),
+      jobIds: jobs.map((job) => job.jobId),
+    });
+  } catch (error) {
+    console.error('upload error', error);
+    res.status(400).json({ error: error.message || 'Upload failed' });
+  }
+});
+
+router.get('/upload-sessions/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = await UploadSession.findOne({ sessionId, userId: new mongoose.Types.ObjectId(req.user.id) });
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  res.json({
+    sessionId: session.sessionId,
+    summary: session.summary,
+    files: session.files.map((file) => ({
+      fileId: file.fileId,
+      originalName: file.originalName,
+      status: file.status,
+      reason: file.reason,
+    })),
+  });
+});
+
+router.get('/files/:fileId/status', async (req, res) => {
+  const { fileId } = req.params;
+  const job = await UserDocumentJob.findOne({ fileId, userId: new mongoose.Types.ObjectId(req.user.id) });
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  const upload = mapLight(job.uploadState);
+  const processing = mapLight(job.processState);
+  const message = job.lastError?.message || null;
+  res.json({ upload, processing, message });
+});
+
+router.get('/tiles', async (req, res) => {
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const insights = await DocumentInsight.aggregate([
+    { $match: { userId: userObjectId } },
+    {
+      $group: {
+        _id: '$catalogueKey',
+        count: { $sum: 1 },
+        lastUpdated: { $max: '$updatedAt' },
+      },
+    },
+  ]);
+
+  const jobsInFlight = await UserDocumentJob.countDocuments({ userId: req.user.id, processState: { $in: ['pending', 'in_progress'] } });
+
+  const map = Object.fromEntries(
+    insights.map((row) => [row._id, { count: row.count, lastUpdated: row.lastUpdated }])
+  );
+
+  res.json({
+    tiles: {
+      payslips: normaliseTile(map.payslip),
+      statements: normaliseTile(map.current_account_statement),
+      savings: normaliseTile(map.savings_account_statement),
+      isa: normaliseTile(map.isa_statement),
+      investments: normaliseTile(map.investment_statement),
+      pension: normaliseTile(map.pension_statement),
+      hmrc: normaliseTile(map.hmrc_correspondence),
+    },
+    processing: jobsInFlight,
+  });
+});
+
+router.get('/payslips/employers', async (req, res) => {
+  const rows = await DocumentInsight.aggregate([
+    { $match: { userId: new mongoose.Types.ObjectId(req.user.id), catalogueKey: 'payslip' } },
+    {
+      $group: {
+        _id: '$metadata.employerName',
+        count: { $sum: 1 },
+        lastPayDate: { $max: '$documentDate' },
+      },
+    },
+  ]);
+  res.json({
+    employers: rows
+      .filter((row) => row._id)
+      .map((row) => ({
+        employerId: Buffer.from(String(row._id)).toString('base64url'),
+        name: row._id,
+        count: row.count,
+        lastPayDate: row.lastPayDate,
+      })),
+  });
+});
+
+router.get('/payslips/employers/:employerId/files', async (req, res) => {
+  const employerName = Buffer.from(req.params.employerId, 'base64url').toString('utf8');
+  const documents = await DocumentInsight.find({ userId: new mongoose.Types.ObjectId(req.user.id), catalogueKey: 'payslip', 'metadata.employerName': employerName }).sort({ documentDate: -1 });
+  res.json({
+    employer: employerName,
+    files: documents.map((doc) => ({
+      documentMonth: doc.documentMonth,
+      documentDate: doc.documentDate,
+      metrics: doc.metrics,
+      fileId: doc.fileId,
+      status: doc.narrative?.length ? 'processed' : 'pending',
+    })),
+  });
+});
+
+router.get('/statements/institutions', async (req, res) => {
+  const accounts = await Account.find({ userId: new mongoose.Types.ObjectId(req.user.id) }).sort({ institutionName: 1 });
+  const grouped = new Map();
+  for (const account of accounts) {
+    const entry = grouped.get(account.institutionName) || { institutionId: Buffer.from(account.institutionName).toString('base64url'), name: account.institutionName, accounts: 0 };
+    entry.accounts += 1;
+    grouped.set(account.institutionName, entry);
+  }
+  res.json({ institutions: Array.from(grouped.values()) });
+});
+
+router.get('/statements/institutions/:institutionId/accounts', async (req, res) => {
+  const institutionName = Buffer.from(req.params.institutionId, 'base64url').toString('utf8');
+  const accounts = await Account.find({ userId: new mongoose.Types.ObjectId(req.user.id), institutionName }).sort({ displayName: 1 });
+  res.json({
+    institution: institutionName,
+    accounts: accounts.map((account) => ({
+      accountId: account._id.toString(),
+      displayName: account.displayName,
+      accountType: account.accountType,
+      accountNumberMasked: account.accountNumberMasked,
+      lastSeenAt: account.lastSeenAt,
+    })),
+  });
+});
+
+router.get('/statements/accounts/:accountId/files', async (req, res) => {
+  const accountId = req.params.accountId;
+  const account = await Account.findOne({ _id: accountId, userId: new mongoose.Types.ObjectId(req.user.id) });
+  if (!account) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+  const documents = await DocumentInsight.find({ userId: new mongoose.Types.ObjectId(req.user.id), 'metadata.accountId': account._id }).sort({ documentMonth: -1 });
+  res.json({
+    account: {
+      displayName: account.displayName,
+      accountType: account.accountType,
+      accountNumberMasked: account.accountNumberMasked,
+    },
+    files: documents.map((doc) => ({
+      documentMonth: doc.documentMonth,
+      metrics: doc.metrics,
+      fileId: doc.fileId,
+    })),
+  });
+});
+
+router.get('/collections', async (req, res) => {
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const collections = await VaultCollection.find({ userId: userObjectId }).sort({ name: 1 });
+  const counts = await DocumentInsight.aggregate([
+    { $match: { userId: userObjectId, collectionId: { $ne: null } } },
+    { $group: { _id: '$collectionId', count: { $sum: 1 }, lastUpdated: { $max: '$updatedAt' } } },
+  ]);
+  const countMap = new Map(counts.map((row) => [String(row._id), row]));
+  res.json({
+    collections: collections.map((col) => {
+      const stats = countMap.get(col._id.toString());
+      return {
+        id: col._id.toString(),
+        name: col.name,
+        description: col.description,
+        fileCount: stats?.count || 0,
+        lastUpdated: stats?.lastUpdated || null,
+      };
+    }),
+  });
+});
+
+router.post('/collections', async (req, res) => {
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const name = String(req.body?.name || '').trim();
+  if (!name) {
+    return res.status(400).json({ error: 'Name is required' });
+  }
+  try {
+    const collection = await VaultCollection.create({ userId: userObjectId, name, description: req.body?.description || '' });
+    res.status(201).json({
+      collection: {
+        id: collection._id.toString(),
+        name: collection.name,
+        description: collection.description,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Collection name already exists' });
+    }
+    throw error;
+  }
+});
+
+router.get('/collections/:collectionId/files', async (req, res) => {
+  const { collectionId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(collectionId)) {
+    return res.status(400).json({ error: 'Invalid collectionId' });
+  }
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const collection = await VaultCollection.findOne({ _id: collectionId, userId: userObjectId });
+  if (!collection) {
+    return res.status(404).json({ error: 'Collection not found' });
+  }
+  const collectionObjectId = new mongoose.Types.ObjectId(collectionId);
+  const insights = await DocumentInsight.find({ userId: userObjectId, collectionId: collectionObjectId }).sort({ updatedAt: -1 });
+  const jobs = await UserDocumentJob.find({ userId: userObjectId, collectionId: collectionObjectId }).select('fileId uploadState processState lastError');
+  const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
+  res.json({
+    collection: {
+      id: collection._id.toString(),
+      name: collection.name,
+    },
+    files: insights.map((doc) => {
+      const job = jobMap.get(doc.fileId);
+      return {
+        fileId: doc.fileId,
+        catalogueKey: doc.catalogueKey,
+        documentMonth: doc.documentMonth,
+        metrics: doc.metrics,
+        upload: mapLight(job?.uploadState || 'succeeded'),
+        processing: mapLight(job?.processState || 'succeeded'),
+        message: job?.lastError?.message || null,
+      };
+    }),
+  });
+});
+
+router.post('/collections/:collectionId/upload', upload.single('file'), async (req, res) => {
+  const { collectionId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(collectionId)) {
+    return res.status(400).json({ error: 'Invalid collectionId' });
+  }
+  const userId = req.user.id;
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const collection = await VaultCollection.findOne({ _id: collectionId, userId: userObjectId });
+  if (!collection) {
+    return res.status(404).json({ error: 'Collection not found' });
+  }
+  try {
+    const { sessionId, files } = await handleUpload({ userId, file: req.file, collectionId });
+    const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
+    res.status(201).json({
+      sessionId,
+      files: files
+        .filter((file) => !file.error)
+        .map((file) => ({ fileId: file.fileId, originalName: file.originalName })),
+      rejected: files
+        .filter((file) => file.error)
+        .map((file) => ({ originalName: file.originalName, reason: file.error })),
+      jobIds: jobs.map((job) => job.jobId),
+    });
+  } catch (error) {
+    console.error('collection upload error', error);
+    res.status(400).json({ error: error.message || 'Upload failed' });
+  }
+});
+
+module.exports = router;
+
+function mapLight(state) {
+  if (state === 'succeeded') return 'green';
+  if (state === 'in_progress') return 'amber';
+  return 'red';
+}
+
+function normaliseTile(entry) {
+  if (!entry) {
+    return { count: 0, lastUpdated: null };
+  }
+  return { count: entry.count, lastUpdated: entry.lastUpdated ? dayjs(entry.lastUpdated).toISOString() : null };
+}
