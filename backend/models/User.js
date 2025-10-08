@@ -80,6 +80,8 @@ const UserSchema = new mongoose.Schema({
 
   dateOfBirth: { type: Date, default: null },
 
+  profileInterests: { type: [String], default: [] },
+
   uid:       { type: String, unique: true, index: true, default: generateUid },
 
   licenseTier: {
@@ -121,7 +123,21 @@ const UserSchema = new mongoose.Schema({
     wizardCompletedAt: { type: Date, default: null },
     tourCompletedAt:   { type: Date, default: null },
     goals:             { type: [String], default: [] },
-    lastPromptedAt:    { type: Date, default: null }
+    lastPromptedAt:    { type: Date, default: null },
+    mandatoryCompletedAt: { type: Date, default: null }
+  },
+
+  onboardingComplete: { type: Boolean, default: false },
+
+  onboardingSurvey: {
+    interests:        { type: [String], default: [] },
+    motivations:      { type: [String], default: [] },
+    valueSignals:     { type: [mongoose.Schema.Types.Mixed], default: [] },
+    tierSignals:      { type: [mongoose.Schema.Types.Mixed], default: [] },
+    recommendedTier:  { type: String, enum: ['free','starter','growth','premium', null], default: null },
+    recommendedSummary: { type: String, default: '' },
+    planChoice:       { type: mongoose.Schema.Types.Mixed, default: {} },
+    completedAt:      { type: Date, default: null }
   },
 
   usageStats: {
