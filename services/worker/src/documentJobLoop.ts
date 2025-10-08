@@ -1,78 +1,23 @@
-import { createRequire } from 'node:module';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { existsSync } from 'node:fs';
 import { Readable } from 'node:stream';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import mongoose from 'mongoose';
+import type { HydratedDocument, Types } from 'mongoose';
 import pino from 'pino';
 
 import { fileIdToKey, getObject } from './lib/r2.js';
-
-const require = createRequire(import.meta.url);
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const backendRoot = path.resolve(__dirname, '../../../backend');
-
-function requireBackend<T>(relativePath: string): T {
-  const targetPath = path.join(backendRoot, relativePath);
-  if (!existsSync(targetPath)) {
-    throw new Error(`Backend module not found at ${targetPath}`);
-  }
-  try {
-    return require(targetPath) as T;
-  } catch (error) {
-    const nodeErr = error as NodeJS.ErrnoException;
-    if (nodeErr?.code === 'MODULE_NOT_FOUND') {
-      const enriched = new Error(
-        `Failed to load backend module at ${targetPath}: ${(nodeErr.message ?? '').trim()}. ` +
-          'Ensure backend dependencies are installed and accessible to the worker.'
-      );
-      (enriched as NodeJS.ErrnoException).code = nodeErr.code;
-      (enriched as any).cause = nodeErr;
-      throw enriched;
-    }
-    throw error;
-  }
-}
-
-type PdfExports = {
-  isPdf: (buffer: Buffer) => boolean;
-};
-
-type HashExports = {
-  sha256: (buffer: Buffer) => string;
-};
-
-type CanonicaliseExports = {
-  canonicaliseInstitution: (name: string) => { canonical: string | null; raw: string | null };
-  canonicaliseEmployer: (name: string) => string | null;
-};
-
-type AnalyticsExports = {
-  rebuildMonthlyAnalytics: (input: { userId: mongoose.Types.ObjectId; month: string }) => Promise<void>;
-};
-
-const { isPdf } = requireBackend<PdfExports>('src/lib/pdf.js');
-const { sha256 } = requireBackend<HashExports>('src/lib/hash.js');
-const { canonicaliseInstitution, canonicaliseEmployer } = requireBackend<CanonicaliseExports>('src/lib/canonicalise.js');
-const DocumentInsight = requireBackend<mongoose.Model<any>>('models/DocumentInsight.js');
-const UserDocumentJob = requireBackend<mongoose.Model<any>>('models/UserDocumentJob.js');
-const UploadSession = requireBackend<mongoose.Model<any>>('models/UploadSession.js');
-const Account = requireBackend<mongoose.Model<any>>('models/Account.js');
-
-let analyticsModule: AnalyticsExports | null = null;
-
-function getAnalyticsModule(): AnalyticsExports {
-  if (!analyticsModule) {
-    analyticsModule = requireBackend<AnalyticsExports>('src/services/vault/analytics.js');
-  }
-  return analyticsModule;
-}
-
-async function rebuildMonthlyAnalytics(input: { userId: mongoose.Types.ObjectId; month: string }): Promise<void> {
-  return getAnalyticsModule().rebuildMonthlyAnalytics(input);
-}
+import { isPdf } from './lib/pdf.js';
+import { sha256 } from './lib/hash.js';
+import { canonicaliseInstitution, canonicaliseEmployer } from './lib/canonicalise.js';
+import {
+  AccountModel,
+  DocumentInsightModel,
+  UploadSessionModel,
+  UserDocumentJobModel,
+  type Account,
+  type DocumentInsight,
+  type UploadSession,
+  type UserDocumentJob,
+} from './models/index.js';
+import { rebuildMonthlyAnalytics } from './services/analytics.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -87,8 +32,30 @@ function streamToBuffer(stream: Readable): Promise<Buffer> {
   });
 }
 
-async function claimJob() {
-  return UserDocumentJob.findOneAndUpdate(
+type UserDocumentJobDoc = HydratedDocument<UserDocumentJob>;
+type AccountDoc = HydratedDocument<Account>;
+type InsightUpsertPayload = Omit<DocumentInsight, '_id' | 'createdAt' | 'updatedAt'>;
+type SupportedClassificationType = Exclude<Classification['type'], 'unknown'>;
+type SupportedClassification = Classification & { type: SupportedClassificationType };
+
+type Classification = {
+  type:
+    | 'payslip'
+    | 'current_account_statement'
+    | 'savings_account_statement'
+    | 'isa_statement'
+    | 'investment_statement'
+    | 'pension_statement'
+    | 'hmrc_correspondence'
+    | 'unknown';
+  confidence: number;
+  employerName: string | null;
+  institutionName: string | null;
+  accountNumberMasked?: string | null;
+};
+
+async function claimJob(): Promise<UserDocumentJobDoc | null> {
+  return UserDocumentJobModel.findOneAndUpdate(
     {
       status: { $in: ['pending', 'failed'] },
       processState: { $ne: 'in_progress' },
@@ -104,11 +71,16 @@ async function claimJob() {
       $inc: { attempts: 1 },
     },
     { sort: { createdAt: 1 }, new: true }
-  );
+  ).exec();
 }
 
-async function setSessionStatus(userId: mongoose.Types.ObjectId, fileId: string, status: 'uploaded' | 'processing' | 'done' | 'rejected', reason?: string) {
-  await UploadSession.updateOne(
+async function setSessionStatus(
+  userId: Types.ObjectId,
+  fileId: string,
+  status: UploadSession['files'][number]['status'],
+  reason?: string
+) {
+  await UploadSessionModel.updateOne(
     { userId, 'files.fileId': fileId },
     {
       $set: {
@@ -116,48 +88,82 @@ async function setSessionStatus(userId: mongoose.Types.ObjectId, fileId: string,
         ...(reason ? { 'files.$.reason': reason } : { 'files.$.reason': null }),
       },
     }
-  );
+  ).exec();
 }
 
-function classifyDocument(originalName: string) {
+function classifyDocument(originalName: string | null | undefined): Classification {
   const lower = (originalName || '').toLowerCase();
   if (lower.includes('p60') || lower.includes('self assessment') || lower.includes('hmrc')) {
     return { type: 'hmrc_correspondence', confidence: 0.8, employerName: null, institutionName: null };
   }
   if (lower.includes('payslip') || lower.includes('pay slip') || lower.includes('salary')) {
-    return { type: 'payslip', confidence: 0.85, employerName: guessEmployer(originalName), institutionName: null };
+    return {
+      type: 'payslip',
+      confidence: 0.85,
+      employerName: guessEmployer(originalName || ''),
+      institutionName: null,
+    };
   }
   if (lower.includes('isa')) {
-    return { type: 'isa_statement', confidence: 0.75, employerName: null, institutionName: guessInstitution(originalName) };
+    return {
+      type: 'isa_statement',
+      confidence: 0.75,
+      employerName: null,
+      institutionName: guessInstitution(originalName || ''),
+    };
   }
   if (lower.includes('pension')) {
-    return { type: 'pension_statement', confidence: 0.75, employerName: null, institutionName: guessInstitution(originalName) };
+    return {
+      type: 'pension_statement',
+      confidence: 0.75,
+      employerName: null,
+      institutionName: guessInstitution(originalName || ''),
+    };
   }
   if (lower.includes('investment') || lower.includes('brokerage')) {
-    return { type: 'investment_statement', confidence: 0.7, employerName: null, institutionName: guessInstitution(originalName) };
+    return {
+      type: 'investment_statement',
+      confidence: 0.7,
+      employerName: null,
+      institutionName: guessInstitution(originalName || ''),
+    };
   }
   if (lower.includes('savings')) {
-    return { type: 'savings_account_statement', confidence: 0.7, employerName: null, institutionName: guessInstitution(originalName) };
+    return {
+      type: 'savings_account_statement',
+      confidence: 0.7,
+      employerName: null,
+      institutionName: guessInstitution(originalName || ''),
+    };
   }
   if (lower.includes('statement')) {
-    return { type: 'current_account_statement', confidence: 0.65, employerName: null, institutionName: guessInstitution(originalName) };
+    return {
+      type: 'current_account_statement',
+      confidence: 0.65,
+      employerName: null,
+      institutionName: guessInstitution(originalName || ''),
+    };
   }
-  return { type: 'unknown', confidence: 0.0, employerName: null, institutionName: null };
+  return { type: 'unknown', confidence: 0, employerName: null, institutionName: null };
 }
 
-function guessEmployer(name: string) {
+function isSupportedClassification(classification: Classification): classification is SupportedClassification {
+  return classification.type !== 'unknown';
+}
+
+function guessEmployer(name: string): string | null {
   const match = name.split(/[-_]/)[0];
   return canonicaliseEmployer(match.trim());
 }
 
-function guessInstitution(name: string) {
+function guessInstitution(name: string): string | null {
   const words = name.split(/[-_\s]/).filter(Boolean);
   const candidate = words.slice(0, 2).join(' ');
   const { canonical } = canonicaliseInstitution(candidate);
   return canonical || candidate || null;
 }
 
-function mapAccountType(catalogueKey: string): 'Current' | 'Savings' | 'ISA' | 'Investments' | 'Pension' {
+function mapAccountType(catalogueKey: Classification['type']): 'Current' | 'Savings' | 'ISA' | 'Investments' | 'Pension' {
   switch (catalogueKey) {
     case 'savings_account_statement':
       return 'Savings';
@@ -172,14 +178,18 @@ function mapAccountType(catalogueKey: string): 'Current' | 'Savings' | 'ISA' | '
   }
 }
 
-async function ensureAccount(userId: mongoose.Types.ObjectId, classification: { type: string; institutionName: string | null; accountNumberMasked?: string | null }) {
+async function ensureAccount(
+  userId: Types.ObjectId,
+  classification: SupportedClassification
+): Promise<AccountDoc | null> {
   if (!classification.institutionName) return null;
   const { canonical, raw } = canonicaliseInstitution(classification.institutionName);
+  if (!canonical) return null;
   const accountType = mapAccountType(classification.type);
   const masked = classification.accountNumberMasked || '••••0000';
   const displayName = `${canonical} – ${accountType} (${masked})`;
   const fingerprint = `${canonical}|${masked}|${accountType}`;
-  const account = await Account.findOneAndUpdate(
+  return AccountModel.findOneAndUpdate(
     { userId, institutionName: canonical, accountNumberMasked: masked, accountType },
     {
       $setOnInsert: {
@@ -189,39 +199,42 @@ async function ensureAccount(userId: mongoose.Types.ObjectId, classification: { 
         firstSeenAt: new Date(),
       },
       $set: { lastSeenAt: new Date() },
-      $addToSet: raw ? { rawInstitutionNames: raw } : {},
+      ...(raw ? { $addToSet: { rawInstitutionNames: raw } } : {}),
     },
     { upsert: true, new: true }
-  );
-  return account;
+  ).exec();
 }
 
-function formatDate(date: Date) {
+function formatDate(date: Date): string {
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
-function formatMonth(date: Date) {
+function formatMonth(date: Date): string {
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   return `${year}-${month}`;
 }
 
-function monthStart(date: Date) {
+function monthStart(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
-function monthEnd(date: Date) {
+function monthEnd(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
 }
 
-function buildInsightPayload(job: any, classification: any, buffer: Buffer) {
+function buildInsightPayload(
+  job: UserDocumentJobDoc,
+  classification: SupportedClassification,
+  buffer: Buffer
+): InsightUpsertPayload {
   const today = new Date();
   const documentDate = formatDate(today);
   const documentMonth = formatMonth(today);
-  const metadata: any = {
+  const metadata: Record<string, unknown> = {
     period: {
       start: formatDate(monthStart(today)),
       end: formatDate(monthEnd(today)),
@@ -236,7 +249,9 @@ function buildInsightPayload(job: any, classification: any, buffer: Buffer) {
     metadata.rawInstitutionName = raw;
   }
 
-  const basePayload = {
+  const basePayload: InsightUpsertPayload = {
+    userId: job.userId,
+    fileId: job.fileId,
     catalogueKey: classification.type,
     baseKey: classification.type,
     schemaVersion: job.schemaVersion,
@@ -248,8 +263,8 @@ function buildInsightPayload(job: any, classification: any, buffer: Buffer) {
     contentHash: sha256(buffer),
     documentDate,
     documentMonth,
-    collectionId: job.collectionId || null,
-    metadata,
+    collectionId: job.collectionId ?? null,
+    metadata: metadata as DocumentInsight['metadata'],
     metrics: {},
     transactions: [],
     narrative: [`classification=${classification.type}`, `confidence=${classification.confidence}`],
@@ -270,15 +285,16 @@ function buildInsightPayload(job: any, classification: any, buffer: Buffer) {
         takeHomePercent: 0,
         effectiveMarginalRate: 0,
       };
-      metadata.accountHolder = null;
+      (basePayload.metadata as Record<string, unknown>).accountHolder = null;
       break;
     case 'current_account_statement':
     case 'savings_account_statement':
     case 'isa_statement':
     case 'investment_statement':
     case 'pension_statement':
-      metadata.accountType = mapAccountType(classification.type);
-      metadata.accountNumberMasked = classification.accountNumberMasked || '••••0000';
+      (basePayload.metadata as Record<string, unknown>).accountType = mapAccountType(classification.type);
+      (basePayload.metadata as Record<string, unknown>).accountNumberMasked =
+        classification.accountNumberMasked || '••••0000';
       basePayload.metrics = {
         openingBalance: 0,
         closingBalance: 0,
@@ -305,7 +321,7 @@ function buildInsightPayload(job: any, classification: any, buffer: Buffer) {
   return basePayload;
 }
 
-async function processJob(job: any) {
+async function processJob(job: UserDocumentJobDoc): Promise<void> {
   logger.info({ jobId: job.jobId, fileId: job.fileId }, 'Processing job');
   await setSessionStatus(job.userId, job.fileId, 'processing');
   const key = fileIdToKey(job.fileId);
@@ -328,7 +344,13 @@ async function processJob(job: any) {
     throw new Error('File is not a valid PDF');
   }
 
-  const existing = await DocumentInsight.findOne({ userId: job.userId, fileId: job.fileId, schemaVersion: job.schemaVersion });
+  const existing = await DocumentInsightModel.findOne({
+    userId: job.userId,
+    fileId: job.fileId,
+    schemaVersion: job.schemaVersion,
+  })
+    .lean<DocumentInsight | null>()
+    .exec();
   if (existing) {
     logger.info({ jobId: job.jobId }, 'Insight already exists; skipping');
     await finalizeJob(job, 'succeeded');
@@ -337,7 +359,7 @@ async function processJob(job: any) {
   }
 
   const classification = classifyDocument(job.originalName || '');
-  if (classification.type === 'unknown' || classification.confidence < 0.6) {
+  if (!isSupportedClassification(classification) || classification.confidence < 0.6) {
     await rejectJob(job, 'Unsupported or low confidence document');
     return;
   }
@@ -345,43 +367,23 @@ async function processJob(job: any) {
   const payload = buildInsightPayload(job, classification, buffer);
   const account = await ensureAccount(job.userId, classification);
   if (account) {
-    payload.metadata.accountId = account._id;
-    payload.metadata.institutionName = account.institutionName;
+    (payload.metadata as Record<string, unknown>).accountId = account._id;
+    (payload.metadata as Record<string, unknown>).institutionName = account.institutionName;
   }
 
-  await UserDocumentJob.updateOne(
-    { _id: job._id },
-    { $set: { candidateType: classification.type } }
-  );
+  await UserDocumentJobModel.updateOne({ _id: job._id }, { $set: { candidateType: classification.type } }).exec();
 
-  await DocumentInsight.findOneAndUpdate(
+  await DocumentInsightModel.findOneAndUpdate(
     { userId: job.userId, fileId: job.fileId, schemaVersion: job.schemaVersion },
     {
       $set: {
-        userId: job.userId,
-        fileId: job.fileId,
-        catalogueKey: payload.catalogueKey,
-        baseKey: payload.baseKey,
-        schemaVersion: payload.schemaVersion,
-        parserVersion: payload.parserVersion,
-        promptVersion: payload.promptVersion,
-        model: payload.model,
-        extractionSource: payload.extractionSource,
-        confidence: payload.confidence,
-        contentHash: payload.contentHash,
-        documentDate: payload.documentDate,
-        documentMonth: payload.documentMonth,
-        collectionId: payload.collectionId,
-        metadata: payload.metadata,
-        metrics: payload.metrics,
-        transactions: payload.transactions,
-        narrative: payload.narrative,
+        ...payload,
         updatedAt: new Date(),
       },
       $setOnInsert: { createdAt: new Date() },
     },
     { upsert: true }
-  );
+  ).exec();
 
   await rebuildMonthlyAnalytics({ userId: job.userId, month: payload.documentMonth });
 
@@ -389,8 +391,8 @@ async function processJob(job: any) {
   await setSessionStatus(job.userId, job.fileId, 'done');
 }
 
-async function finalizeJob(job: any, outcome: 'succeeded' | 'failed') {
-  await UserDocumentJob.updateOne(
+async function finalizeJob(job: UserDocumentJobDoc, outcome: 'succeeded' | 'failed'): Promise<void> {
+  await UserDocumentJobModel.updateOne(
     { _id: job._id },
     {
       $set: {
@@ -399,11 +401,11 @@ async function finalizeJob(job: any, outcome: 'succeeded' | 'failed') {
         updatedAt: new Date(),
       },
     }
-  );
+  ).exec();
 }
 
-async function rejectJob(job: any, reason: string) {
-  await UserDocumentJob.updateOne(
+async function rejectJob(job: UserDocumentJobDoc, reason: string): Promise<void> {
+  await UserDocumentJobModel.updateOne(
     { _id: job._id },
     {
       $set: {
@@ -413,7 +415,7 @@ async function rejectJob(job: any, reason: string) {
         updatedAt: new Date(),
       },
     }
-  );
+  ).exec();
   await setSessionStatus(job.userId, job.fileId, 'rejected', reason);
   logger.warn({ jobId: job.jobId, reason }, 'Job rejected');
 }
@@ -437,7 +439,7 @@ export async function startDocumentJobLoop(): Promise<void> {
         logger.error({ err: error, jobId: job.jobId }, 'Failed to process job');
         const attempts = job.attempts;
         const status = attempts >= 5 ? 'dead_letter' : 'failed';
-        await UserDocumentJob.updateOne(
+        await UserDocumentJobModel.updateOne(
           { _id: job._id },
           {
             $set: {
@@ -446,7 +448,7 @@ export async function startDocumentJobLoop(): Promise<void> {
               lastError: { code: 'PROCESSING_ERROR', message: (error as Error).message },
             },
           }
-        );
+        ).exec();
         if (status === 'dead_letter') {
           await setSessionStatus(job.userId, job.fileId, 'rejected', 'Exceeded retry attempts');
         }
