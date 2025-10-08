@@ -21,6 +21,9 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const userId = req.user.id;
     const userObjectId = new mongoose.Types.ObjectId(userId);
+    if (!req.file) {
+      return res.status(400).json({ error: 'File is required' });
+    }
     let collectionId = null;
     if (req.body?.collectionId) {
       if (!mongoose.Types.ObjectId.isValid(req.body.collectionId)) {
@@ -94,7 +97,10 @@ router.get('/tiles', async (req, res) => {
     },
   ]);
 
-  const jobsInFlight = await UserDocumentJob.countDocuments({ userId: req.user.id, processState: { $in: ['pending', 'in_progress'] } });
+  const jobsInFlight = await UserDocumentJob.countDocuments({
+    userId: userObjectId,
+    processState: { $in: ['pending', 'in_progress'] },
+  });
 
   const map = Object.fromEntries(
     insights.map((row) => [row._id, { count: row.count, lastUpdated: row.lastUpdated }])
@@ -290,6 +296,9 @@ router.post('/collections/:collectionId/upload', upload.single('file'), async (r
     return res.status(404).json({ error: 'Collection not found' });
   }
   try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'File is required' });
+    }
     const { sessionId, files } = await handleUpload({ userId, file: req.file, collectionId });
     const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
     res.status(201).json({
@@ -312,7 +321,7 @@ module.exports = router;
 
 function mapLight(state) {
   if (state === 'succeeded') return 'green';
-  if (state === 'in_progress') return 'amber';
+  if (state === 'in_progress' || state === 'pending') return 'amber';
   return 'red';
 }
 
