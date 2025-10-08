@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "echo \"No worker-specific tests yet\""
+    "test": "npm run build && node dist/tests/rawInstitutionNames.test.js"
   },
   "dependencies": {
     "@types/express": "^4.17.21",

@@ -8,6 +8,14 @@ import { isPdf } from './lib/pdf.js';
 import { sha256 } from './lib/hash.js';
 import { canonicaliseInstitution, canonicaliseEmployer } from './lib/canonicalise.js';
 import {
+  buildRawInstitutionNamesUpdate,
+  createNoopSummary,
+  ensureSingleOperatorForRawInstitutionNames,
+  normalizeRawInstitutionNamesInput,
+  summarizeForLogging,
+  type RawInstitutionNamesUpdatePlanSummary,
+} from './lib/rawInstitutionNames.js';
+import {
   AccountModel,
   DocumentInsightModel,
   UploadSessionModel,
@@ -21,6 +29,13 @@ import { rebuildMonthlyAnalytics } from './services/analytics.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 
+const LOG_UPDATE_DOCS = process.env.LOG_UPDATE_DOCS === '1';
+const MAX_ATTEMPTS = Math.max(1, parseEnvInt(process.env.DOCUMENT_JOB_MAX_ATTEMPTS, 5));
+const BASE_BACKOFF_MS = Math.max(100, parseEnvInt(process.env.DOCUMENT_JOB_BASE_BACKOFF_MS, 1000));
+const MAX_BACKOFF_MS = Math.max(BASE_BACKOFF_MS, parseEnvInt(process.env.DOCUMENT_JOB_MAX_BACKOFF_MS, 30000));
+
+export const DOCUMENT_JOB_MAX_ATTEMPTS = MAX_ATTEMPTS;
+
 let running = false;
 
 function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -32,11 +47,77 @@ function streamToBuffer(stream: Readable): Promise<Buffer> {
   });
 }
 
+function parseEnvInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return parsed;
+}
+
+export function calculateBackoffDelay(attempt: number): number {
+  const normalizedAttempt = Math.max(1, attempt);
+  const delay = BASE_BACKOFF_MS * 2 ** (normalizedAttempt - 1);
+  return Math.min(delay, MAX_BACKOFF_MS);
+}
+
+export function determineRetryOutcome(attempts: number): {
+  status: 'failed' | 'dead_letter';
+  delayMs: number;
+} {
+  const status = attempts >= MAX_ATTEMPTS ? 'dead_letter' : 'failed';
+  const delayMs = status === 'failed' ? calculateBackoffDelay(attempts) : 0;
+  return { status, delayMs };
+}
+
+function mergeUpdates(
+  base: Record<string, any>,
+  addition: Record<string, any>
+): Record<string, any> {
+  const merged: Record<string, any> = { ...base };
+  for (const [operator, payload] of Object.entries(addition)) {
+    if (!operator.startsWith('$') || typeof payload !== 'object' || payload === null) continue;
+    const target = (merged[operator] ??= {});
+    Object.assign(target, payload);
+  }
+  return merged;
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+function buildIdempotencyKey(
+  job: UserDocumentJobDoc,
+  summary: RawInstitutionNamesUpdatePlanSummary
+): string {
+  const digest = sha256(Buffer.from(JSON.stringify(summary)));
+  return `${job.jobId}:${job.fileId}:${digest}`;
+}
+
+function safeParseSummary(
+  summaryString: string | null
+): RawInstitutionNamesUpdatePlanSummary | null {
+  if (!summaryString) return null;
+  try {
+    return JSON.parse(summaryString) as RawInstitutionNamesUpdatePlanSummary;
+  } catch {
+    return null;
+  }
+}
+
 type UserDocumentJobDoc = HydratedDocument<UserDocumentJob>;
 type AccountDoc = HydratedDocument<Account>;
 type InsightUpsertPayload = Omit<DocumentInsight, '_id' | 'createdAt' | 'updatedAt'>;
 type SupportedClassificationType = Exclude<Classification['type'], 'unknown'>;
 type SupportedClassification = Classification & { type: SupportedClassificationType };
+
+type EnsureAccountResult = {
+  account: AccountDoc | null;
+  planSummary: RawInstitutionNamesUpdatePlanSummary;
+  idempotencyKey: string;
+  skipped: boolean;
+};
 
 type Classification = {
   type:
@@ -55,11 +136,17 @@ type Classification = {
 };
 
 async function claimJob(): Promise<UserDocumentJobDoc | null> {
+  const now = new Date();
   return UserDocumentJobModel.findOneAndUpdate(
     {
       status: { $in: ['pending', 'failed'] },
       processState: { $ne: 'in_progress' },
-      attempts: { $lt: 5 },
+      attempts: { $lt: MAX_ATTEMPTS },
+      $or: [
+        { retryAt: { $lte: now } },
+        { retryAt: { $exists: false } },
+        { retryAt: null },
+      ],
     },
     {
       $set: {
@@ -67,10 +154,11 @@ async function claimJob(): Promise<UserDocumentJobDoc | null> {
         processState: 'in_progress',
         lastError: null,
         updatedAt: new Date(),
+        retryAt: now,
       },
       $inc: { attempts: 1 },
     },
-    { sort: { createdAt: 1 }, new: true }
+    { sort: { retryAt: 1, createdAt: 1 }, new: true }
   ).exec();
 }
 
@@ -179,30 +267,132 @@ function mapAccountType(catalogueKey: Classification['type']): 'Current' | 'Savi
 }
 
 async function ensureAccount(
-  userId: Types.ObjectId,
+  job: UserDocumentJobDoc,
   classification: SupportedClassification
-): Promise<AccountDoc | null> {
-  if (!classification.institutionName) return null;
+): Promise<EnsureAccountResult> {
+  if (!classification.institutionName) {
+    const planSummary = createNoopSummary(0);
+    return {
+      account: null,
+      planSummary,
+      idempotencyKey: buildIdempotencyKey(job, planSummary),
+      skipped: true,
+    };
+  }
+
   const { canonical, raw } = canonicaliseInstitution(classification.institutionName);
-  if (!canonical) return null;
+  if (!canonical) {
+    const planSummary = createNoopSummary(0);
+    return {
+      account: null,
+      planSummary,
+      idempotencyKey: buildIdempotencyKey(job, planSummary),
+      skipped: true,
+    };
+  }
+
   const accountType = mapAccountType(classification.type);
   const masked = classification.accountNumberMasked || '••••0000';
   const displayName = `${canonical} – ${accountType} (${masked})`;
   const fingerprint = `${canonical}|${masked}|${accountType}`;
-  return AccountModel.findOneAndUpdate(
-    { userId, institutionName: canonical, accountNumberMasked: masked, accountType },
-    {
-      $setOnInsert: {
-        rawInstitutionNames: raw ? [raw] : [],
-        displayName,
-        fingerprints: [fingerprint],
-        firstSeenAt: new Date(),
-      },
-      $set: { lastSeenAt: new Date() },
-      ...(raw ? { $addToSet: { rawInstitutionNames: raw } } : {}),
+  const query = { userId: job.userId, institutionName: canonical, accountNumberMasked: masked, accountType };
+
+  const existingAccount = await AccountModel.findOne(query).exec();
+  const currentArray = normalizeRawInstitutionNamesInput(existingAccount?.rawInstitutionNames ?? []);
+
+  let planSummary: RawInstitutionNamesUpdatePlanSummary;
+  let plan = null as ReturnType<typeof buildRawInstitutionNamesUpdate> | null;
+
+  if (!existingAccount) {
+    plan = buildRawInstitutionNamesUpdate('replace', currentArray, raw ? [raw] : currentArray);
+    planSummary = plan.summary;
+  } else if (raw) {
+    plan = buildRawInstitutionNamesUpdate('appendUnique', currentArray, [raw]);
+    planSummary = plan.summary;
+  } else {
+    planSummary = createNoopSummary(currentArray.length);
+  }
+
+  const idempotencyKey = buildIdempotencyKey(job, planSummary);
+  const planSummaryString = JSON.stringify(planSummary);
+
+  if (existingAccount && (!plan || !plan.applied) && job.lastCompletedUpdateKey === idempotencyKey) {
+    if (LOG_UPDATE_DOCS) {
+      logger.info(
+        {
+          jobId: job.jobId,
+          fileId: job.fileId,
+          updatePlanSummary: summarizeForLogging(planSummary),
+        },
+        'rawInstitutionNames update already applied'
+      );
+    }
+    return { account: existingAccount, planSummary, idempotencyKey, skipped: true };
+  }
+
+  const baseUpdate: Record<string, any> = {
+    $set: { lastSeenAt: new Date() },
+    $setOnInsert: {
+      displayName,
+      fingerprints: [fingerprint],
+      firstSeenAt: new Date(),
     },
-    { upsert: true, new: true }
-  ).exec();
+  };
+
+  const updateDoc = plan ? mergeUpdates(baseUpdate, plan.update) : baseUpdate;
+
+  try {
+    ensureSingleOperatorForRawInstitutionNames(updateDoc);
+  } catch (error) {
+    const conflictError = error as Error & {
+      updatePlanSummaryString?: string;
+      updatePlanSummaryObject?: RawInstitutionNamesUpdatePlanSummary;
+      idempotencyKey?: string;
+    };
+    conflictError.updatePlanSummaryString = planSummaryString;
+    conflictError.updatePlanSummaryObject = planSummary;
+    conflictError.idempotencyKey = idempotencyKey;
+    logger.warn(
+      {
+        jobId: job.jobId,
+        fileId: job.fileId,
+        conflictingUpdateDetected: true,
+        updatePlanSummary: summarizeForLogging(planSummary),
+      },
+      'Conflicting rawInstitutionNames update blocked'
+    );
+    throw conflictError;
+  }
+
+  if (LOG_UPDATE_DOCS) {
+    logger.info(
+      { jobId: job.jobId, fileId: job.fileId, updatePlanSummary: summarizeForLogging(planSummary) },
+      'rawInstitutionNames update plan'
+    );
+  }
+
+  const options: Parameters<typeof AccountModel.findOneAndUpdate>[2] = {
+    upsert: true,
+    new: true,
+  };
+  if (plan?.arrayFilters && plan.arrayFilters.length > 0) {
+    options.arrayFilters = plan.arrayFilters;
+  }
+
+  try {
+    const account = await AccountModel.findOneAndUpdate(query, updateDoc, options).exec();
+    return { account, planSummary, idempotencyKey, skipped: false };
+  } catch (error) {
+    const dbError = error as Error & {
+      updatePlanSummaryString?: string;
+      updatePlanSummaryObject?: RawInstitutionNamesUpdatePlanSummary;
+      idempotencyKey?: string;
+    };
+    dbError.updatePlanSummaryString = planSummaryString;
+    dbError.updatePlanSummaryObject = planSummary;
+    dbError.idempotencyKey = idempotencyKey;
+    throw dbError;
+  }
 }
 
 function formatDate(date: Date): string {
@@ -323,6 +513,9 @@ function buildInsightPayload(
 
 async function processJob(job: UserDocumentJobDoc): Promise<void> {
   logger.info({ jobId: job.jobId, fileId: job.fileId }, 'Processing job');
+  let lastPlanSummary: RawInstitutionNamesUpdatePlanSummary | null = null;
+  let lastPlanSummaryString: string | null = null;
+  let lastIdempotencyKey: string | null = null;
   await setSessionStatus(job.userId, job.fileId, 'processing');
   const key = fileIdToKey(job.fileId);
   const object = await getObject(key);
@@ -365,13 +558,21 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
   }
 
   const payload = buildInsightPayload(job, classification, buffer);
-  const account = await ensureAccount(job.userId, classification);
-  if (account) {
-    (payload.metadata as Record<string, unknown>).accountId = account._id;
-    (payload.metadata as Record<string, unknown>).institutionName = account.institutionName;
+  const accountResult = await ensureAccount(job, classification);
+  lastPlanSummary = accountResult.planSummary;
+  lastPlanSummaryString = JSON.stringify(accountResult.planSummary);
+  lastIdempotencyKey = accountResult.idempotencyKey;
+  job.lastUpdatePlanSummary = lastPlanSummaryString;
+  job.lastCompletedUpdateKey = lastIdempotencyKey;
+  if (accountResult.account) {
+    (payload.metadata as Record<string, unknown>).accountId = accountResult.account._id;
+    (payload.metadata as Record<string, unknown>).institutionName = accountResult.account.institutionName;
   }
 
-  await UserDocumentJobModel.updateOne({ _id: job._id }, { $set: { candidateType: classification.type } }).exec();
+  await UserDocumentJobModel.updateOne(
+    { _id: job._id },
+    { $set: { candidateType: classification.type, lastUpdatePlanSummary: lastPlanSummaryString ?? null } }
+  ).exec();
 
   await DocumentInsightModel.findOneAndUpdate(
     { userId: job.userId, fileId: job.fileId, schemaVersion: job.schemaVersion },
@@ -387,21 +588,29 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
 
   await rebuildMonthlyAnalytics({ userId: job.userId, month: payload.documentMonth });
 
-  await finalizeJob(job, 'succeeded');
+  await finalizeJob(job, 'succeeded', {
+    lastUpdatePlanSummary: lastPlanSummaryString,
+    lastCompletedUpdateKey: lastIdempotencyKey,
+  });
   await setSessionStatus(job.userId, job.fileId, 'done');
 }
 
-async function finalizeJob(job: UserDocumentJobDoc, outcome: 'succeeded' | 'failed'): Promise<void> {
-  await UserDocumentJobModel.updateOne(
-    { _id: job._id },
-    {
-      $set: {
-        status: outcome,
-        processState: outcome === 'succeeded' ? 'succeeded' : 'failed',
-        updatedAt: new Date(),
-      },
-    }
-  ).exec();
+async function finalizeJob(
+  job: UserDocumentJobDoc,
+  outcome: 'succeeded' | 'failed',
+  extra: Record<string, unknown> = {}
+): Promise<void> {
+  const baseSet: Record<string, unknown> = {
+    status: outcome,
+    processState: outcome === 'succeeded' ? 'succeeded' : 'failed',
+    updatedAt: new Date(),
+    ...extra,
+  };
+  if (outcome === 'succeeded') {
+    baseSet.lastError = null;
+    baseSet.retryAt = new Date();
+  }
+  await UserDocumentJobModel.updateOne({ _id: job._id }, { $set: baseSet }).exec();
 }
 
 async function rejectJob(job: UserDocumentJobDoc, reason: string): Promise<void> {
@@ -438,16 +647,38 @@ export async function startDocumentJobLoop(): Promise<void> {
       } catch (error) {
         logger.error({ err: error, jobId: job.jobId }, 'Failed to process job');
         const attempts = job.attempts;
-        const status = attempts >= 5 ? 'dead_letter' : 'failed';
+        const { status, delayMs } = determineRetryOutcome(attempts);
+        const retryAt = status === 'failed' ? new Date(Date.now() + delayMs) : new Date();
+        const enrichedError = error as Error & {
+          updatePlanSummaryString?: string | null;
+          updatePlanSummaryObject?: RawInstitutionNamesUpdatePlanSummary | null;
+          idempotencyKey?: string | null;
+        };
+        const summaryStringFromError =
+          enrichedError.updatePlanSummaryString ?? job.lastUpdatePlanSummary ?? null;
+        const summaryObjectFromError =
+          enrichedError.updatePlanSummaryObject ?? safeParseSummary(summaryStringFromError);
+        const idempotencyKey = enrichedError.idempotencyKey ?? job.lastCompletedUpdateKey ?? null;
+        const failureMetadata = JSON.stringify({
+          message: (error as Error).message,
+          updatePlanSummary: summaryObjectFromError,
+          idempotencyKey,
+        });
+        const update: Record<string, unknown> = {
+          status,
+          processState: 'failed',
+          lastError: { code: 'PROCESSING_ERROR', message: failureMetadata },
+          updatedAt: new Date(),
+          lastUpdatePlanSummary: summaryStringFromError ?? null,
+        };
+        if (status === 'failed') {
+          update.retryAt = retryAt;
+        } else {
+          update.retryAt = null;
+        }
         await UserDocumentJobModel.updateOne(
           { _id: job._id },
-          {
-            $set: {
-              status,
-              processState: 'failed',
-              lastError: { code: 'PROCESSING_ERROR', message: (error as Error).message },
-            },
-          }
+          { $set: update }
         ).exec();
         if (status === 'dead_letter') {
           await setSessionStatus(job.userId, job.fileId, 'rejected', 'Exceeded retry attempts');
