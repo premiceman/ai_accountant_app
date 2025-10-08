@@ -164,7 +164,8 @@
     const emailMeta = state.user.emailVerified ? 'All secure' : 'Verify in settings';
 
     const usage = state.user.usageStats || {};
-    const saved = Number(usage.moneySavedCumulative ?? usage.moneySavedEstimate || 0);
+    const savedEstimate = usage.moneySavedEstimate || 0;
+    const saved = Number(usage.moneySavedCumulative ?? savedEstimate);
     const savedDelta = usage.moneySavedChangePct;
     const savedTone = savedDelta == null ? 'info' : savedDelta >= 0 ? 'up' : 'down';
     let savedMeta = '';
