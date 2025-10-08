@@ -1,6 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const dayjs = require('dayjs');
+const archiver = require('archiver');
+const path = require('path');
 const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const DocumentInsight = require('../models/DocumentInsight');
@@ -10,12 +12,54 @@ const Account = require('../models/Account');
 const { handleUpload } = require('../src/services/vault/storage');
 const { registerUpload } = require('../src/services/vault/jobService');
 const VaultCollection = require('../models/VaultCollection');
+const { getObject, deleteObject, fileIdToKey } = require('../src/lib/r2');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const router = express.Router();
 
 router.use(auth);
+
+function validateFileOwnership(userId, key) {
+  if (!key) return false;
+  const prefix = `${userId}/`;
+  return key.startsWith(prefix);
+}
+
+function decodeFileKey(fileId) {
+  try {
+    return fileIdToKey(fileId);
+  } catch (error) {
+    return null;
+  }
+}
+
+async function streamFile(res, key, { inline = true, filename = null } = {}) {
+  try {
+    const object = await getObject(key);
+    if (object.ContentType) {
+      res.setHeader('Content-Type', object.ContentType);
+    } else {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
+    const safeName = filename || path.basename(key) || 'document.pdf';
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(safeName)}"`);
+    if (object.ContentLength != null) {
+      res.setHeader('Content-Length', String(object.ContentLength));
+    }
+    if (object.Body && typeof object.Body.pipe === 'function') {
+      object.Body.pipe(res);
+    } else if (object.Body && typeof object.Body.arrayBuffer === 'function') {
+      const buffer = Buffer.from(await object.Body.arrayBuffer());
+      res.end(buffer);
+    } else {
+      res.status(500).json({ error: 'Unsupported file stream' });
+    }
+  } catch (error) {
+    console.error('streamFile error', error);
+    res.status(404).json({ error: 'File not found' });
+  }
+}
 
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
@@ -82,6 +126,50 @@ router.get('/files/:fileId/status', async (req, res) => {
   const processing = mapLight(job.processState);
   const message = job.lastError?.message || null;
   res.json({ upload, processing, message });
+});
+
+router.get('/files/:fileId/view', async (req, res) => {
+  const { fileId } = req.params;
+  const key = decodeFileKey(fileId);
+  if (!key) {
+    return res.status(400).json({ error: 'Invalid fileId' });
+  }
+  if (!validateFileOwnership(req.user.id, key)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  await streamFile(res, key, { inline: true });
+});
+
+router.get('/files/:fileId/download', async (req, res) => {
+  const { fileId } = req.params;
+  const key = decodeFileKey(fileId);
+  if (!key) {
+    return res.status(400).json({ error: 'Invalid fileId' });
+  }
+  if (!validateFileOwnership(req.user.id, key)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  await streamFile(res, key, { inline: false });
+});
+
+router.delete('/files/:fileId', async (req, res) => {
+  const { fileId } = req.params;
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const key = decodeFileKey(fileId);
+  if (!key) {
+    return res.status(400).json({ error: 'Invalid fileId' });
+  }
+  if (!validateFileOwnership(req.user.id, key)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  await DocumentInsight.deleteMany({ userId: userObjectId, fileId });
+  await UserDocumentJob.deleteMany({ userId: userObjectId, fileId });
+  try {
+    await deleteObject(key);
+  } catch (error) {
+    console.warn('delete file object failed', error);
+  }
+  res.json({ ok: true });
 });
 
 router.get('/tiles', async (req, res) => {
@@ -180,6 +268,52 @@ router.get('/statements/institutions/:institutionId/accounts', async (req, res) 
       accountType: account.accountType,
       accountNumberMasked: account.accountNumberMasked,
       lastSeenAt: account.lastSeenAt,
+    })),
+  });
+});
+
+router.get('/statements/institutions/:institutionId/files', async (req, res) => {
+  const institutionName = Buffer.from(req.params.institutionId, 'base64url').toString('utf8');
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const accounts = await Account.find({ userId: userObjectId, institutionName }).sort({ displayName: 1 });
+  const accountIds = accounts.map((account) => account._id);
+  const documents = await DocumentInsight.find({
+    userId: userObjectId,
+    'metadata.accountId': { $in: accountIds },
+    catalogueKey: { $in: ['current_account_statement', 'savings_account_statement', 'isa_statement'] },
+  }).sort({ documentMonth: -1 });
+
+  const jobs = await UserDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
+    'fileId uploadState processState lastError'
+  );
+  const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
+
+  const docsByAccount = new Map();
+  for (const doc of documents) {
+    const accountId = doc.metadata?.accountId ? doc.metadata.accountId.toString() : null;
+    if (!accountId) continue;
+    const list = docsByAccount.get(accountId) || [];
+    list.push({
+      fileId: doc.fileId,
+      documentMonth: doc.documentMonth,
+      documentDate: doc.documentDate,
+      metrics: doc.metrics,
+      accountNumberMasked: doc.metadata?.accountNumberMasked || null,
+      upload: mapLight(jobMap.get(doc.fileId)?.uploadState || 'succeeded'),
+      processing: mapLight(jobMap.get(doc.fileId)?.processState || 'succeeded'),
+      message: jobMap.get(doc.fileId)?.lastError?.message || null,
+    });
+    docsByAccount.set(accountId, list);
+  }
+
+  res.json({
+    institution: { name: institutionName, accountCount: accounts.length },
+    accounts: accounts.map((account) => ({
+      accountId: account._id.toString(),
+      displayName: account.displayName,
+      accountType: account.accountType,
+      accountNumberMasked: account.accountNumberMasked,
+      files: docsByAccount.get(account._id.toString()) || [],
     })),
   });
 });
@@ -315,6 +449,97 @@ router.post('/collections/:collectionId/upload', upload.single('file'), async (r
     console.error('collection upload error', error);
     res.status(400).json({ error: error.message || 'Upload failed' });
   }
+});
+
+router.patch('/collections/:collectionId', async (req, res) => {
+  const { collectionId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(collectionId)) {
+    return res.status(400).json({ error: 'Invalid collectionId' });
+  }
+  const name = String(req.body?.name || '').trim();
+  if (!name) {
+    return res.status(400).json({ error: 'Name is required' });
+  }
+  try {
+    const updated = await VaultCollection.findOneAndUpdate(
+      { _id: collectionId, userId: new mongoose.Types.ObjectId(req.user.id) },
+      { $set: { name } },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(404).json({ error: 'Collection not found' });
+    }
+    res.json({ collection: { id: updated._id.toString(), name: updated.name } });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Collection name already exists' });
+    }
+    throw error;
+  }
+});
+
+router.delete('/collections/:collectionId', async (req, res) => {
+  const { collectionId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(collectionId)) {
+    return res.status(400).json({ error: 'Invalid collectionId' });
+  }
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const collection = await VaultCollection.findOne({ _id: collectionId, userId: userObjectId });
+  if (!collection) {
+    return res.status(404).json({ error: 'Collection not found' });
+  }
+  await DocumentInsight.updateMany({ userId: userObjectId, collectionId }, { $set: { collectionId: null } });
+  await UserDocumentJob.updateMany({ userId: userObjectId, collectionId }, { $set: { collectionId: null } });
+  await VaultCollection.deleteOne({ _id: collectionId, userId: userObjectId });
+  res.json({ ok: true });
+});
+
+router.get('/collections/:collectionId/archive', async (req, res) => {
+  const { collectionId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(collectionId)) {
+    return res.status(400).json({ error: 'Invalid collectionId' });
+  }
+  const userId = req.user.id;
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const collection = await VaultCollection.findOne({ _id: collectionId, userId: userObjectId });
+  if (!collection) {
+    return res.status(404).json({ error: 'Collection not found' });
+  }
+  const insights = await DocumentInsight.find({ userId: userObjectId, collectionId: new mongoose.Types.ObjectId(collectionId) }).sort({
+    updatedAt: -1,
+  });
+
+  const archive = archiver('zip', { zlib: { level: 9 } });
+  archive.on('error', (error) => {
+    console.error('collection archive error', error);
+    res.status(500).end();
+  });
+
+  const safeName = `${collection.name || 'collection'}`.replace(/[\\/:*?"<>|]+/g, '_');
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(`${safeName || 'collection'}.zip`)}"`);
+
+  archive.pipe(res);
+
+  for (const doc of insights) {
+    const key = decodeFileKey(doc.fileId);
+    if (!key) continue;
+    if (!validateFileOwnership(userId, key)) continue;
+    try {
+      const object = await getObject(key);
+      const entryName = path.basename(key) || `${doc.fileId}.pdf`;
+      if (object.Body && typeof object.Body.pipe === 'function') {
+        archive.append(object.Body, { name: entryName });
+      } else if (object.Body && typeof object.Body.arrayBuffer === 'function') {
+        const buffer = Buffer.from(await object.Body.arrayBuffer());
+        archive.append(buffer, { name: entryName });
+      }
+    } catch (error) {
+      console.warn('collection archive skip', error);
+    }
+  }
+
+  await archive.finalize();
 });
 
 module.exports = router;

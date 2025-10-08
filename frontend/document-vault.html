@@ -26,6 +26,12 @@
       --light-red: #ef4444;
       --light-amber: #f59e0b;
       --light-green: #10b981;
+      --mint-card: #d7f8eb;
+      --mint-card-selected: #9be7ca;
+      --viewer-overlay: rgba(15, 23, 42, 0.42);
+      --viewer-bg: rgba(255, 255, 255, 0.98);
+      --viewer-border: rgba(15, 23, 42, 0.08);
+      --viewer-muted: rgba(15, 23, 42, 0.6);
     }
 
     body {
@@ -427,6 +433,285 @@
       padding: 4px 0;
     }
 
+    .collection-card {
+      background: var(--mint-card);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+      cursor: pointer;
+      position: relative;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+      min-height: 140px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .collection-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 18px 32px rgba(15, 23, 42, 0.12);
+    }
+
+    .collection-card.is-selected {
+      background: var(--mint-card-selected);
+      box-shadow: 0 18px 32px rgba(15, 23, 42, 0.18);
+    }
+
+    .collection-card .collection-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: auto;
+    }
+
+    .collection-card .collection-actions button {
+      background: rgba(255, 255, 255, 0.6);
+      border: 1px solid rgba(15, 23, 42, 0.18);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      color: rgba(15, 23, 42, 0.75);
+      transition: background 0.18s ease, color 0.18s ease;
+    }
+
+    .collection-card .collection-actions button:hover {
+      background: rgba(15, 23, 42, 0.12);
+      color: rgba(15, 23, 42, 0.95);
+    }
+
+    .collection-card__title {
+      font-weight: 600;
+      font-size: 1rem;
+      margin: 0;
+    }
+
+    .collection-card__meta {
+      font-size: 0.85rem;
+      color: rgba(15, 23, 42, 0.65);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .collection-card__create {
+      border: 2px dashed rgba(15, 23, 42, 0.18);
+      background: rgba(215, 248, 235, 0.45);
+      color: rgba(15, 23, 42, 0.7);
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .collection-card__create:hover {
+      background: rgba(215, 248, 235, 0.7);
+    }
+
+    .viewer {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1100;
+    }
+
+    .viewer[aria-hidden="false"] {
+      display: flex;
+    }
+
+    .viewer__overlay {
+      position: absolute;
+      inset: 0;
+      background: var(--viewer-overlay);
+    }
+
+    .viewer__panel {
+      position: relative;
+      background: var(--viewer-bg);
+      border-radius: 20px;
+      border: 1px solid var(--viewer-border);
+      box-shadow: 0 32px 64px rgba(15, 23, 42, 0.18);
+      width: min(1040px, calc(100% - 32px));
+      max-height: calc(100vh - 60px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .viewer__header {
+      padding: 18px 24px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .viewer__title {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+
+    .viewer__subtitle {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--viewer-muted);
+    }
+
+    .viewer__body {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
+      height: 100%;
+      min-height: 420px;
+    }
+
+    @media (max-width: 960px) {
+      .viewer__body {
+        grid-template-columns: 1fr;
+        height: auto;
+        max-height: calc(100vh - 160px);
+        overflow: auto;
+      }
+    }
+
+    .viewer__list {
+      padding: 18px 20px;
+      overflow-y: auto;
+      border-right: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(245, 248, 255, 0.6);
+    }
+
+    .viewer__preview {
+      position: relative;
+      background: rgba(248, 250, 255, 0.85);
+      display: flex;
+      flex-direction: column;
+      justify-content: stretch;
+      align-items: stretch;
+    }
+
+    .viewer__iframe {
+      flex: 1;
+      border: 0;
+      width: 100%;
+      background: #fff;
+    }
+
+    .viewer__empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--viewer-muted);
+      font-size: 0.95rem;
+      padding: 18px;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .viewer__file {
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(15, 23, 42, 0.05);
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .viewer__file.is-selected {
+      border-color: rgba(103, 89, 255, 0.35);
+      box-shadow: 0 14px 28px rgba(103, 89, 255, 0.18);
+      background: rgba(103, 89, 255, 0.09);
+    }
+
+    .viewer__file-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+
+    .viewer__file-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin: 0;
+      flex: 1;
+    }
+
+    .viewer__file-subtitle {
+      font-size: 0.82rem;
+      color: var(--viewer-muted);
+    }
+
+    .viewer__file-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 6px 12px;
+      font-size: 0.85rem;
+      color: var(--viewer-muted);
+    }
+
+    .viewer__file-meta strong {
+      display: block;
+      font-weight: 600;
+      color: rgba(15, 23, 42, 0.82);
+    }
+
+    .viewer__file-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .viewer__file-actions button {
+      border: 1px solid rgba(103, 89, 255, 0.25);
+      background: rgba(255, 255, 255, 0.9);
+      color: rgba(103, 89, 255, 0.8);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      transition: background 0.18s ease, color 0.18s ease;
+    }
+
+    .viewer__file-actions button:hover {
+      background: rgba(103, 89, 255, 0.18);
+      color: rgba(103, 89, 255, 0.95);
+    }
+
+    .viewer__file-details {
+      font-size: 0.82rem;
+      color: var(--viewer-muted);
+      display: none;
+      gap: 6px 12px;
+      line-height: 1.5;
+    }
+
+    .viewer__file-details.is-expanded {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      margin-top: 4px;
+    }
+
+    .viewer__close {
+      border: 1px solid rgba(15, 23, 42, 0.18);
+      background: rgba(255, 255, 255, 0.85);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 0.85rem;
+      color: rgba(15, 23, 42, 0.75);
+    }
+
+    .viewer__close:hover {
+      background: rgba(15, 23, 42, 0.12);
+    }
+
     .sr-only {
       position: absolute;
       width: 1px;
@@ -474,6 +759,7 @@
           <div>
             <div class="headline">Drop PDF or ZIP</div>
             <p class="hint">We accept payslips, bank statements, ISA &amp; investment reports, pension statements, and HMRC letters (P60, P45, Self Assessment).</p>
+            <p class="hint" id="collection-target" hidden>Uploads will be saved to <strong></strong>.</p>
             <small class="hint">Per-user isolation is enforced; files never leave your R2 bucket.</small>
           </div>
         </div>
@@ -514,6 +800,26 @@
       <div class="grid" id="collection-grid"></div>
     </section>
   </main>
+
+  <div class="viewer" id="file-viewer" aria-hidden="true">
+    <div class="viewer__overlay" id="file-viewer-overlay"></div>
+    <section class="viewer__panel" role="dialog" aria-modal="true" aria-labelledby="file-viewer-title">
+      <header class="viewer__header">
+        <div>
+          <h3 class="viewer__title" id="file-viewer-title">Documents</h3>
+          <p class="viewer__subtitle" id="file-viewer-subtitle"></p>
+        </div>
+        <button type="button" class="viewer__close" id="file-viewer-close">Close</button>
+      </header>
+      <div class="viewer__body">
+        <div class="viewer__list" id="file-viewer-list" role="list"></div>
+        <div class="viewer__preview">
+          <iframe title="Document preview" id="file-viewer-frame" class="viewer__iframe" src="about:blank"></iframe>
+          <div class="viewer__empty" id="file-viewer-empty">Select a file to see the preview and actions.</div>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <script src="/js/vault.js"></script>
   <script src="/js/nav.js"></script>
