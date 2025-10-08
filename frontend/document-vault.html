@@ -2,385 +2,364 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Document Vault — AI Accountant</title>
+  <title>Vault — AI Accountant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Shared theme, Bootstrap, Bootstrap Icons, helpers -->
-  <script>window.__API_BASE = window.__API_BASE || 'https://ai-accountant-app.onrender.com';</script>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-  <link rel="stylesheet" href="/css/styles.css" fetchpriority="high">
+  <script>window.__API_BASE = window.__API_BASE || '';</script>
   <script src="/js/head-include.js"></script>
-
   <style>
-    :root{
-      /* Match landing look & feel */
-      --tile-gap: 14px;
-      --tile-radius: 16px;
-      --tile-shadow: 0 10px 30px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.06);
-      --tile-shadow-hover: 0 14px 34px rgba(0,0,0,.10), 0 4px 12px rgba(0,0,0,.06);
-      --muted: #6b7280;
-      --brand: var(--bs-primary, #7fdccb);
-      --chip-bg: rgba(111,66,193,.08);
-      --chip-fg: var(--brand);
-      --bg-soft: var(--bs-light-bg-subtle, #f8f9fa);
+    :root {
+      color-scheme: light dark;
+      --vault-bg: var(--bs-body-bg, #f6f7fb);
+      --vault-card-bg: var(--bs-body-bg, #fff);
+      --vault-border: rgba(15, 23, 42, 0.08);
+      --vault-radius: 18px;
+      --vault-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
+      --vault-shadow-soft: 0 12px 32px rgba(15, 23, 42, 0.06);
+      --vault-accent: #6759ff;
+      --vault-muted: rgba(15, 23, 42, 0.6);
+      --light-red: #ef4444;
+      --light-amber: #f59e0b;
+      --light-green: #10b981;
     }
 
-    body{ background: var(--bg-body); color: var(--fg); }
-
-    /* Page header */
-    .page-header{ position:relative; border-radius: 20px; padding: 18px 18px; background: linear-gradient(180deg, rgba(111,66,193,.10), rgba(111,66,193,.02)); border:1px solid var(--bs-border-color); box-shadow: var(--tile-shadow); }
-    .breadcrumbs a{ text-decoration:none }
-
-    /* Stat tiles */
-    .stat-card{ border-radius: var(--tile-radius); box-shadow: var(--tile-shadow); border:1px solid var(--bs-border-color); transition: .2s ease; background: var(--bs-body-bg) }
-    .stat-card:hover{ box-shadow: var(--tile-shadow-hover); transform: translateY(-1px) }
-    .stat-k{ font-weight:700; font-size: 1.3rem; }
-    .stat-sub{ color: var(--muted); font-size: .9rem }
-
-    /* Layout */
-    .vault-grid{ display:grid; grid-template-columns: 1fr 1.1fr; gap: var(--tile-gap) }
-    @media (max-width: 992px){
-      .vault-grid{ grid-template-columns: 1fr }
+    body {
+      background: var(--vault-bg);
+      color: var(--bs-body-color);
+      min-height: 100vh;
     }
 
-    /* Left column (collections + documents) */
-    .panel{ border-radius: var(--tile-radius); border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
-    .panel-header{ padding: 14px 16px; border-bottom: 1px solid var(--bs-border-color); display:flex; align-items:center; justify-content:space-between; gap:10px }
-    .panel-body{ padding: 10px }
+    main {
+      padding: 24px clamp(16px, 4vw, 40px);
+      max-width: 1280px;
+      margin: 0 auto 64px;
+    }
 
-    /* Collections list */
-    .collection-item{ display:flex; align-items:center; gap:10px; padding: 10px 12px; border-radius: 12px; cursor:pointer; user-select:none; border:1px solid transparent; text-decoration:none; color:inherit }
-    .collection-item:hover{ background: var(--bg-soft); border-color: var(--bs-border-color); }
-    .collection-item.active{ background: rgba(111,66,193,.08); border-color: rgba(111,66,193,.25) }
-    .collection-name{ font-weight:600 }
-    .collection-meta{ color: var(--muted); font-size:.88rem }
+    h1 {
+      font-size: clamp(1.6rem, 2.2vw, 2.1rem);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
 
-    /* Document list */
-    .doc-row{ display:grid; grid-template-columns: 1fr auto; gap:10px; padding: 12px 14px; border-radius: 14px; align-items:center; border:1px solid transparent; }
-    .doc-row:hover{ background: var(--bg-soft); border-color: var(--bs-border-color) }
-    .doc-main{ display:flex; align-items:center; gap:12px; min-width:0 }
-    .doc-title{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-    .doc-sub{ color: var(--muted); font-size:.88rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-    .doc-actions{ display:flex; align-items:center; gap:10px; opacity:.85 }
-    .doc-actions .btn-icon{ border:none; background:transparent; padding:6px; border-radius:10px }
-    .doc-actions .btn-icon:hover{ background: rgba(0,0,0,.06) }
+    p.lede {
+      color: var(--vault-muted);
+      margin: 0 0 24px;
+      max-width: 720px;
+    }
 
-    /* Right column (dropzone + preview) */
-    .dropzone-card{ border-radius: var(--tile-radius); border: 1px dashed rgba(111,66,193,.35); background: linear-gradient(180deg, rgba(111,66,193,.06), rgba(111,66,193,.02)); box-shadow: var(--tile-shadow); padding: 18px }
-    .dropzone-card .hint{ color: var(--muted) }
-    #dropzone{ border: 2px dashed rgba(111,66,193,.45); border-radius: 16px; padding: 0; background: rgba(111,66,193,.04); overflow:hidden }
-    #dropzone .dz-clickable-area{ padding: 28px; display:flex; align-items:center; justify-content:center; text-align:center; min-height: 96px; }
+    .upload-layout {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      align-items: start;
+    }
 
-    .preview-card{ border-radius: var(--tile-radius); border: 1px solid var(--bs-border-color); box-shadow: var(--tile-shadow); overflow:hidden; }
-    .preview-header{ display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom: 1px solid var(--bs-border-color) }
-    .preview-body{ background: #fff; height: 420px; }
-    .preview-body iframe{ width:100%; height:100%; border:0 }
+    @media (max-width: 960px) {
+      .upload-layout { grid-template-columns: 1fr; }
+    }
 
-    .search-input{ background: var(--bs-body-bg) }
+    .card {
+      background: var(--vault-card-bg);
+      border-radius: var(--vault-radius);
+      border: 1px solid var(--vault-border);
+      box-shadow: var(--vault-shadow-soft);
+    }
 
-    /* Keep counters readable */
-    .kpi{ display:flex; align-items:center; gap:8px }
-    .kpi i{ font-size: 1.15rem }
+    .dropzone {
+      position: relative;
+      padding: 32px;
+      border: 2px dashed rgba(103, 89, 255, 0.3);
+      border-radius: calc(var(--vault-radius) - 6px);
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
 
-    /* Subtle scrollbar for lists */
-    .scroll-area{ max-height: 48vh; overflow:auto; padding-right: 4px }
+    .dropzone.drag-active {
+      border-color: rgba(103, 89, 255, 0.6);
+      background: rgba(103, 89, 255, 0.06);
+    }
 
-    /* Utility */
-    .muted{ color: var(--muted) }
-    .chip{ font-size:.78rem; padding:.1rem .5rem; background: var(--chip-bg); color: var(--chip-fg); border-radius: 999px }
+    .dropzone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
 
-    /* Document catalogue */
-    .doc-progress-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:12px; }
-    .doc-progress-card{ border:1px solid var(--bs-border-color); border-radius:12px; padding:12px; background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
-    .doc-progress-card .progress{ height:10px; }
-    .doc-progress-meta{ color: var(--muted); font-size:.85rem; }
-    #doc-progress-updated{ color: var(--muted); font-size:.85rem; }
+    .dropzone .headline {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
 
-    .doc-accordion{ display:flex; flex-direction:column; gap:10px; }
-    .doc-accordion details{ border:1px solid var(--bs-border-color); border-radius:12px; background: var(--bs-body-bg); box-shadow:var(--tile-shadow); padding:12px 14px; }
-    .doc-accordion summary{ font-weight:600; cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:10px; list-style:none; }
-    .doc-accordion summary::-webkit-details-marker{ display:none; }
-    .doc-accordion .doc-meta{ color: var(--muted); font-size:.85rem; display:flex; flex-wrap:wrap; gap:14px; }
-    .doc-accordion .doc-meta span{ display:flex; align-items:center; gap:6px; }
-    .doc-accordion .doc-body{ margin-top:10px; font-size:.9rem; color: var(--muted); }
-    .doc-accordion .doc-actions{ margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
+    .dropzone .hint {
+      color: var(--vault-muted);
+      margin-bottom: 0;
+    }
 
-    .doc-files-panel{ border:1px solid var(--bs-border-color); border-radius:12px; padding:12px; background: var(--bs-body-bg); box-shadow: var(--tile-shadow); }
-    .doc-files-panel table{ margin-bottom:0; }
-    .doc-files-panel .table thead th{ font-size:.78rem; text-transform:uppercase; letter-spacing:.03em; }
-    .doc-files-panel .table td{ font-size:.85rem; }
-    .progress.progress-thin{ height:6px; }
-    .processing-indicator{ display:flex; align-items:center; gap:6px; }
-    .processing-indicator .spinner-border{ width:1rem; height:1rem; }
+    .session-panel {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: sticky;
+      top: 16px;
+    }
+
+    .session-panel h2 {
+      font-size: 1.05rem;
+      margin: 0;
+    }
+
+    .session-empty {
+      color: var(--vault-muted);
+      font-size: 0.9rem;
+    }
+
+    .muted {
+      color: var(--vault-muted);
+      font-size: 0.85rem;
+    }
+
+    .session-table {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .session-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(103, 89, 255, 0.08);
+      background: rgba(103, 89, 255, 0.03);
+    }
+
+    .session-row .filename {
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .lights {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .light {
+      position: relative;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--light-red);
+      box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08);
+    }
+
+    .light[data-state="amber"] { background: var(--light-amber); }
+    .light[data-state="green"] { background: var(--light-green); }
+
+    .light[role="status"]::after {
+      content: attr(aria-label);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      background: rgba(15, 23, 42, 0.88);
+      color: #fff;
+      padding: 4px 8px;
+      font-size: 0.75rem;
+      border-radius: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .light[role="status"]:focus-visible::after,
+    .light[role="status"]:hover::after {
+      opacity: 1;
+    }
+
+    .tiles-grid {
+      margin-top: 32px;
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .tile {
+      background: var(--vault-card-bg);
+      border-radius: var(--vault-radius);
+      border: 1px solid var(--vault-border);
+      padding: 20px;
+      box-shadow: var(--vault-shadow-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .tile:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--vault-shadow);
+    }
+
+    .tile span.label {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--vault-muted);
+    }
+
+    .tile strong {
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+
+    .processing-pill {
+      align-self: flex-start;
+      background: rgba(16, 185, 129, 0.12);
+      color: #047857;
+      font-size: 0.8rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    section.listing {
+      margin-top: 40px;
+    }
+
+    section.listing header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    section.listing header h2 {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .grid-card {
+      background: var(--vault-card-bg);
+      border: 1px solid var(--vault-border);
+      border-radius: var(--vault-radius);
+      padding: 16px;
+      box-shadow: var(--vault-shadow-soft);
+    }
+
+    .grid-card h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .grid-card dl {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--vault-muted);
+    }
+
+    .grid-card dl div {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 4px 0;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
   </style>
-
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // Enforce auth if present
-      if (window.Auth && typeof Auth.enforce === 'function') Auth.enforce(true);
-
-      // Enable Bootstrap tooltips (purely aesthetic)
-      if (window.bootstrap) {
-        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
+      if (window.Auth && typeof Auth.enforce === 'function') {
+        Auth.enforce(true);
       }
     });
   </script>
 </head>
 <body>
-    
   <div id="topbar-container"></div>
   <div id="sidebar-container"></div>
 
-  <main class="container-xxl py-4">
+  <main>
+    <header>
+      <h1>Smart Document Vault</h1>
+      <p class="lede">Upload payslips, statements, ISA and investment reports, pensions, and HMRC correspondence. We classify, extract, and surface insights automatically.</p>
+    </header>
 
-    <!-- Header / Breadcrumbs -->
-    <div class="page-header mb-3">
-      <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+    <section class="upload-layout">
+      <div class="card">
+        <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Upload PDF or ZIP">
+          <input id="file-input" type="file" accept="application/pdf,application/zip" />
+          <div>
+            <div class="headline">Drop PDF or ZIP</div>
+            <p class="hint">We accept payslips, bank statements, ISA &amp; investment reports, pension statements, and HMRC letters (P60, P45, Self Assessment).</p>
+            <small class="hint">Per-user isolation is enforced; files never leave your R2 bucket.</small>
+          </div>
+        </div>
+      </div>
+
+      <aside class="card session-panel" id="session-panel" aria-live="polite">
         <div>
-          <h1 class="h3 mb-1">Document Vault</h1>
+          <h2>Upload session</h2>
+          <p class="session-empty" id="session-empty">No files queued yet. Start by dragging in a PDF or ZIP.</p>
         </div>
-        <div class="d-flex align-items-center gap-2">
-          <span class="chip" id="active-tax-year">Tax year: <span id="tax-year-label">2025/26</span></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Document checklist -->
-    <section class="panel mb-4" id="catalogue-panel">
-      <div class="panel-header flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-2">
-          <i class="bi bi-clipboard-check text-primary"></i>
-          <strong>Document checklist</strong>
-        </div>
-        <div id="doc-progress-updated">Updated —</div>
-      </div>
-      <div class="panel-body">
-        <div class="doc-progress-grid mb-3">
-          <div class="doc-progress-card">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <span class="fw-semibold">Required</span>
-              <span id="doc-progress-required-count" class="doc-progress-meta">0 / 0</span>
-            </div>
-            <div class="progress mb-1">
-              <div id="doc-progress-required-bar" class="progress-bar bg-danger" style="width:0%"></div>
-            </div>
-            <div class="doc-progress-meta">Keep these up to date for compliance.</div>
-          </div>
-          <div class="doc-progress-card">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <span class="fw-semibold">Helpful</span>
-              <span id="doc-progress-helpful-count" class="doc-progress-meta">0 / 0</span>
-            </div>
-            <div class="progress mb-1">
-              <div id="doc-progress-helpful-bar" class="progress-bar bg-success" style="width:0%"></div>
-            </div>
-            <div class="doc-progress-meta">Extras that accelerate advice and prep.</div>
-          </div>
-          <div class="doc-progress-card">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <span class="fw-semibold">Analytics</span>
-              <span id="doc-progress-analytics-count" class="doc-progress-meta">0 / 0</span>
-            </div>
-            <div class="progress mb-1">
-              <div id="doc-progress-analytics-bar" class="progress-bar bg-info" style="width:0%"></div>
-            </div>
-            <div class="doc-progress-meta">Fuel dashboards and labs with source data.</div>
-          </div>
-        </div>
-
-        <div class="doc-accordion" id="doc-catalogue-body">
-          <div class="text-muted small">Loading…</div>
-        </div>
-        <div id="doc-catalogue-msg" class="small text-muted"></div>
-
-        <div id="doc-files-panel" class="doc-files-panel d-none">
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <h6 class="m-0" id="doc-files-title">Uploads</h6>
-            <button type="button" id="doc-files-close" class="btn btn-sm btn-light">Close</button>
-          </div>
-          <div class="table-responsive">
-            <table class="table table-sm align-middle">
-              <thead>
-                <tr>
-                  <th>Filename</th>
-                  <th>Uploaded</th>
-                  <th>Size</th>
-                  <th>Status</th>
-                  <th>Collection</th>
-                  <th class="text-end">Manage</th>
-                </tr>
-              </thead>
-              <tbody id="doc-files-table-body">
-                <tr><td colspan="5" class="text-muted small">Select a document to see uploads. Manage previews or deletions from the collections panel.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+        <div class="session-table" id="session-rows"></div>
+      </aside>
     </section>
 
-    <!-- KPIs -->
-    <div class="row g-3 mb-3">
-      <div class="col-12 col-md-4">
-        <div class="stat-card p-3 d-flex align-items-center justify-content-between">
-          <div>
-            <div class="stat-k" id="file-count">0</div>
-            <div class="stat-sub">Files</div>
-          </div>
-          <div class="kpi text-primary"><i class="bi bi-files"></i></div>
-        </div>
-      </div>
-      <div class="col-12 col-md-4">
-        <div class="stat-card p-3 d-flex align-items-center justify-content-between">
-          <div>
-            <div class="stat-k" id="total-gb">0 GB</div>
-            <div class="stat-sub">Total storage used</div>
-          </div>
-          <div class="kpi text-primary"><i class="bi bi-hdd"></i></div>
-        </div>
-      </div>
-      <div class="col-12 col-md-4">
-        <div class="stat-card p-3 d-flex align-items-center justify-content-between">
-          <div>
-            <div class="stat-k" id="collection-count">0</div>
-            <div class="stat-sub">Collections</div>
-          </div>
-          <div class="kpi text-primary"><i class="bi bi-folder2"></i></div>
-        </div>
-      </div>
-    </div>
+    <section class="tiles-grid" id="tiles-grid" aria-live="polite"></section>
 
-    <!-- Main grid: Left (lists) | Right (dropzone + preview) -->
-    <div class="vault-grid">
+    <section class="listing" id="payslips-section">
+      <header>
+        <h2>Payslips</h2>
+        <span class="muted" id="payslip-meta"></span>
+      </header>
+      <div class="grid" id="payslip-grid"></div>
+    </section>
 
-      <!-- LEFT: Collections + Documents -->
-      <section class="panel">
-        <div class="panel-header">
-          <div class="d-flex align-items-center gap-2">
-            <i class="bi bi-collection text-primary"></i>
-            <strong>Collections</strong>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <div class="input-group input-group-sm">
-              <span class="input-group-text bg-transparent border-end-0"><i class="bi bi-search"></i></span>
-              <input id="collection-search" class="form-control border-start-0 search-input" placeholder="Search collections…" />
-            </div>
-            <button id="new-collection-btn" type="button" class="btn btn-sm btn-primary">
-              <i class="bi bi-folder-plus"></i> New
-            </button>
-          </div>
-        </div>
-        <div class="panel-body">
-          <!-- Collections containers (compat: provide multiple expected IDs) -->
-          <div id="collections" class="mb-3">
-            <div id="collections-list" class="scroll-area"></div>
-            <!-- Some builds used #collection-list -->
-            <div id="collection-list" class="scroll-area d-none"></div>
-          </div>
+    <section class="listing" id="statements-section">
+      <header>
+        <h2>Statements</h2>
+        <span class="muted" id="statement-meta"></span>
+      </header>
+      <div class="grid" id="statement-grid"></div>
+    </section>
 
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <div class="d-flex align-items-center gap-2">
-              <i class="bi bi-journals text-primary"></i>
-              <strong>Documents</strong>
-            </div>
-            <a href="#" id="back-to-collections" class="small text-decoration-none"><i class="bi bi-arrow-left"></i> Back to all collections</a>
-          </div>
-
-          <!-- Documents containers (compat: several IDs) -->
-          <div id="documents">
-            <div id="documents-list" class="scroll-area"></div>
-            <div id="document-list" class="scroll-area"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- RIGHT: Dropzone + Preview (preview under dropzone) -->
-      <section class="d-flex flex-column gap-3">
-        <div class="dropzone-card">
-          <div class="d-flex align-items-center justify-content-between mb-2">
-            <div class="d-flex align-items-center gap-2">
-              <i class="bi bi-upload text-primary"></i>
-              <strong>Upload files</strong>
-            </div>
-            <div class="hint small">Drag and drop files, or click to browse</div>
-          </div>
-
-          <!-- Option B: native label/input — no JS .click() anywhere -->
-          <form id="dropzone" class="dropzone bg-white" action="#" method="post" enctype="multipart/form-data">
-            <label for="file-input" class="dz-clickable-area">
-              <i class="bi bi-cloud-arrow-up me-2"></i>
-              <span class="small text-muted">Drop files here or click to upload</span>
-            </label>
-            <input id="file-input" name="files" type="file" multiple class="visually-hidden" />
-          </form>
-        </div>
-
-        <!-- Preview card -->
-        <div class="preview-card">
-          <div class="preview-header">
-            <div class="d-flex align-items-center gap-2">
-              <i class="bi bi-eye text-primary"></i>
-              <strong>Preview</strong>
-            </div>
-            <div class="small text-muted" id="preview-filename">—</div>
-          </div>
-          <div class="preview-body">
-            <div class="h-100 d-flex align-items-center justify-content-center text-muted" id="preview-empty">Select a document to preview</div>
-            <iframe id="preview-frame" class="d-none" title="Preview"></iframe>
-          </div>
-        </div>
-      </section>
-
-    </div>
+    <section class="listing" id="collections-section">
+      <header>
+        <h2>My Collections</h2>
+        <span class="muted" id="collection-meta"></span>
+      </header>
+      <div class="grid" id="collection-grid"></div>
+    </section>
   </main>
 
-  <!-- New Collection Modal -->
-  <div class="modal fade" id="new-collection-modal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title"><i class="bi bi-folder-plus me-2"></i>Create collection</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <form id="new-collection-form">
-          <div class="modal-body">
-            <label for="new-collection-name" class="form-label">Name</label>
-            <input id="new-collection-name" class="form-control" placeholder="e.g., Payslips, Invoices" required />
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-            <button type="submit" class="btn btn-primary">Create</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <!-- Minimal, compatibility helpers (no programmatic .click()) -->
-  <script>
-    (function(){
-      // Mirror collections-list to collection-list if some code expects the old id
-      const colList = document.getElementById('collections-list');
-      const colListOld = document.getElementById('collection-list');
-      if (colList && colListOld) { colListOld.replaceWith(colList); colList.id = 'collection-list'; }
-
-      // Prefer one documents list id
-      const docsList = document.getElementById('documents-list');
-      const docList = document.getElementById('document-list');
-      if (docsList && docList) { docList.replaceWith(docsList); docsList.id = 'document-list'; }
-
-      // NOTE: deliberately no JS that calls fileInput.click() — Option B
-    })();
-  </script>
-
-  <!-- Page logic -->
-  <script src="/js/nav.js"></script>
-  <script src="/js/document-vault.js"></script>
-  <script src="/js/mobile-sidebar.js"></script>
-  <script src="/js/vault-rename-inline.js"></script>
-
+  <script src="/js/vault.js"></script>
 </body>
 </html>

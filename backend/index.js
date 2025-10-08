@@ -14,7 +14,6 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
 const aiRouter     = safeRequire('./routes/ai')                   || safeRequire('./src/routes/ai');
-const plaidRouter  = safeRequire('./routes/plaid')                || safeRequire('./src/routes/plaid');
 
 
 const docsRouter =
@@ -30,9 +29,7 @@ const vaultRouter  = safeRequire('./routes/vault')                || safeRequire
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
-const truelayerRouter  = safeRequire('./routes/truelayer')          || safeRequire('./src/routes/truelayer');
-
-const plaidSyncWorker = safeRequire('./services/plaidSyncWorker');
+const truelayerRouter  = null;
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -89,7 +86,6 @@ mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
-mount('/api/plaid', plaidRouter, 'plaid');
 mount('/api/analytics', analyticsRouter, 'analytics');
 mount('/api/tax', taxRouter, 'tax');
 
@@ -126,9 +122,6 @@ mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
     app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
-    if (plaidSyncWorker?.startPlaidSyncWorker) {
-      plaidSyncWorker.startPlaidSyncWorker({ force: true });
-    }
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err);
