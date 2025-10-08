@@ -24,6 +24,12 @@
   }
 
   function loadStylesheetFast(href) {
+    const existingSheet = document.head.querySelector(`link[rel="stylesheet"][href="${href}"]`);
+    if (existingSheet) {
+      existingSheet.setAttribute('fetchpriority', existingSheet.getAttribute('fetchpriority') || 'high');
+      return;
+    }
+
     const supportsPreload = (() => {
       const link = document.createElement('link');
       return !!(link.relList && link.relList.supports && link.relList.supports('preload'));
