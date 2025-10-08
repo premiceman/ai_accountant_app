@@ -164,7 +164,8 @@
     const emailMeta = state.user.emailVerified ? 'All secure' : 'Verify in settings';
 
     const usage = state.user.usageStats || {};
-    const saved = Number(usage.moneySavedCumulative ?? usage.moneySavedEstimate || 0);
+    const savedEstimate = usage.moneySavedEstimate || 0;
+    const saved = Number(usage.moneySavedCumulative ?? savedEstimate);
     const savedDelta = usage.moneySavedChangePct;
     const savedTone = savedDelta == null ? 'info' : savedDelta >= 0 ? 'up' : 'down';
     let savedMeta = '';
@@ -433,6 +434,17 @@
     });
   }
 
+  function bindOnboardingRerun() {
+    const btn = $('#btn-rerun-onboarding');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      if (state.user?.onboardingComplete) {
+        sessionStorage.setItem('onboarding_return_to', window.location.pathname);
+      }
+      window.location.href = '/onboarding.html?rerun=1';
+    });
+  }
+
   function initNotes() {
     const textarea = $('#notes-box');
     const saveBtn = $('#btn-notes-save');
@@ -511,6 +523,7 @@
       renderBilling();
       computeStats();
       bindProfileEditing();
+      bindOnboardingRerun();
       initNotes();
     } catch (err) {
       console.error('Profile initialisation failed', err);
@@ -518,5 +531,9 @@
     }
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();

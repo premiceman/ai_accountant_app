@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const PaymentMethod = require('../models/PaymentMethod');
+const Subscription = require('../models/Subscription');
 const { computeWealth } = require('../services/wealth/engine');
 let PDFDocument = null;
 try {
@@ -14,6 +15,10 @@ try {
 const { randomUUID } = require('crypto');
 
 const router = express.Router();
+
+function escapeRegex(str = '') {
+  return String(str).replace(/[.*+\-?^${}()|[\]\\]/g, '\$&');
+}
 
 function toPlain(obj) {
   if (!obj) return {};
@@ -180,6 +185,242 @@ function normaliseContract(contract) {
     collectionId: contract.collectionId || null,
     linkedAt: contract.linkedAt ? new Date(contract.linkedAt) : new Date()
   };
+}
+
+function normaliseSurveyAnswers(list = []) {
+  if (!Array.isArray(list)) return [];
+  return list.map((item) => ({
+    id: String(item?.id || item?.questionId || ''),
+    question: String(item?.question || ''),
+    response: (() => {
+      const val = String(item?.response || '').toLowerCase();
+      if (['yes','no','not_sure','not sure','unsure','maybe'].includes(val)) {
+        if (val === 'not sure' || val === 'unsure' || val === 'maybe') return 'not_sure';
+        return val;
+      }
+      return 'not_sure';
+    })(),
+    weight: Number.isFinite(Number(item?.weight)) ? Number(item.weight) : null
+  }));
+}
+
+function normaliseOnboardingSurvey(block = {}) {
+  const plain = toPlain(block || {});
+  return {
+    interests: Array.isArray(plain.interests) ? plain.interests : [],
+    motivations: Array.isArray(plain.motivations) ? plain.motivations : [],
+    valueSignals: normaliseSurveyAnswers(plain.valueSignals),
+    tierSignals: normaliseSurveyAnswers(plain.tierSignals),
+    recommendedTier: plain.recommendedTier || null,
+    recommendedSummary: plain.recommendedSummary || '',
+    planChoice: plain.planChoice || {},
+    completedAt: plain.completedAt || null
+  };
+}
+
+const LEGAL_VERSION = process.env.LEGAL_VERSION || '2025-09-15';
+
+const PLAN_PRICING = {
+  starter: {
+    monthly: 3.99,
+    yearly: Math.round(3.99 * 12 * 0.90 * 100) / 100
+  },
+  premium: {
+    monthly: 6.99,
+    yearly: Math.round(6.99 * 12 * 0.85 * 100) / 100
+  }
+};
+
+const STARTER_INTERESTS = new Set([
+  'cashflow-clarity',
+  'compliance-confidence',
+  'document-superpowers',
+  'tax-filing-readiness',
+  'starter-habits'
+]);
+
+const PREMIUM_INTERESTS = new Set([
+  'tax-optimisation',
+  'equity-planning',
+  'net-worth-growth',
+  'wealth-lab',
+  'ai-copilot'
+]);
+
+const VALUE_SIGNAL_WEIGHTS = {
+  'roi_savings':      { starter: 2, premium: 1 },
+  'roi_tax_relief':   { starter: 1, premium: 2 },
+  'roi_timeback':     { starter: 2, premium: 1 },
+  'roi_networth':     { starter: 1, premium: 2 },
+  'roi_confidence':   { starter: 1, premium: 1 }
+};
+
+const TIER_SIGNAL_WEIGHTS = {
+  'tier_bank_sync':      { starter: 2 },
+  'tier_tax_ai':         { premium: 3 },
+  'tier_equity':         { premium: 3 },
+  'tier_cashflow':       { starter: 2 },
+  'tier_collaboration':  { premium: 2 }
+};
+
+function slugify(value = '') {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+function normaliseUsername(value) {
+  if (!value) return '';
+  const cleaned = String(value).trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+  return cleaned.slice(0, 24);
+}
+
+async function usernameExists(value, excludeId) {
+  if (!value) return false;
+  const regex = new RegExp(`^${escapeRegex(value)}$`, 'i');
+  const query = { username: { $regex: regex } };
+  if (excludeId) query._id = { $ne: excludeId };
+  const existing = await User.findOne(query).select({ _id: 1 }).lean();
+  return !!existing;
+}
+
+async function suggestUsername(base, excludeId) {
+  const seed = normaliseUsername(base) || 'member';
+  for (let i = 0; i < 20; i += 1) {
+    const suffix = Math.floor(100 + Math.random() * 900);
+    const candidate = `${seed}${suffix}`.slice(0, 24);
+    if (!(await usernameExists(candidate, excludeId))) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function normaliseInterests(list = []) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const result = [];
+  list.forEach((item) => {
+    const slug = slugify(item);
+    if (!slug || seen.has(slug)) return;
+    seen.add(slug);
+    result.push(slug);
+  });
+  return result.slice(0, 10);
+}
+
+function sanitiseMotivations(list = []) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function weightForResponse(response) {
+  if (response === 'yes') return 1;
+  if (response === 'not_sure') return 0.5;
+  return 0;
+}
+
+function computeTierRecommendation({ interests = [], valueSignals = [], tierSignals = [] }) {
+  let starterScore = 0;
+  let premiumScore = 0;
+  const reasons = [];
+
+  interests.forEach((interest) => {
+    if (STARTER_INTERESTS.has(interest)) starterScore += 1.5;
+    if (PREMIUM_INTERESTS.has(interest)) premiumScore += 2;
+  });
+
+  valueSignals.forEach((signal) => {
+    const weights = VALUE_SIGNAL_WEIGHTS[signal.id] || { starter: 1, premium: 1 };
+    const factor = weightForResponse(signal.response);
+    starterScore += (weights.starter || 0) * factor;
+    premiumScore += (weights.premium || 0) * factor;
+    if (factor > 0.9 && signal.question) reasons.push(signal.question);
+  });
+
+  tierSignals.forEach((signal) => {
+    const weights = TIER_SIGNAL_WEIGHTS[signal.id] || {};
+    const factor = weightForResponse(signal.response);
+    starterScore += (weights.starter || 0) * factor;
+    premiumScore += (weights.premium || 0) * factor;
+    if (factor > 0.9 && signal.question) reasons.push(signal.question);
+  });
+
+  const delta = premiumScore - starterScore;
+  const tier = delta >= 2 ? 'premium' : 'starter';
+
+  let summary = '';
+  if (tier === 'premium') {
+    summary = 'Premium unlocks AI-led tax intelligence, equity planning and Scenario Lab automation that map to what you told us.';
+  } else {
+    summary = 'Starter gets you automated cashflow, document intelligence and nudges to build strong habits right away.';
+  }
+
+  return {
+    tier,
+    summary,
+    scores: { starter: Number(starterScore.toFixed(2)), premium: Number(premiumScore.toFixed(2)) },
+    reasons: reasons.slice(0, 5)
+  };
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + Number(days || 0));
+  return d;
+}
+
+function addMonths(date, months) {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + Number(months || 0));
+  return d;
+}
+
+function planPrice(tier, interval) {
+  const config = PLAN_PRICING[tier] || PLAN_PRICING.starter;
+  return interval === 'yearly' ? config.yearly : config.monthly;
+}
+
+function inferCardBrand(cardNumber = '') {
+  const digits = String(cardNumber);
+  if (/^4\d{6,}$/.test(digits)) return 'Visa';
+  if (/^5[1-5]\d{5,}$/.test(digits)) return 'Mastercard';
+  if (/^3[47]\d{5,}$/.test(digits)) return 'Amex';
+  if (/^6(?:011|5)\d{4,}$/.test(digits)) return 'Discover';
+  return 'Card';
+}
+
+function normalisePlanSelection(plan = {}, recommendation = {}) {
+  const selectionRaw = String(plan?.selection || '').toLowerCase();
+  const validSelections = ['trial', 'starter', 'premium'];
+  const selection = validSelections.includes(selectionRaw) ? selectionRaw : 'trial';
+  const intervalRaw = String(plan?.interval || '').toLowerCase();
+  const interval = ['yearly', 'annual', 'annually', 'yr', 'y'].includes(intervalRaw) ? 'yearly' : 'monthly';
+  const note = plan?.note ? String(plan.note).slice(0, 280) : '';
+  const requestedTier = selection === 'premium' ? 'premium' : 'starter';
+  return {
+    selection,
+    interval,
+    note,
+    requestedTier,
+    recommendedTier: recommendation?.tier || null
+  };
+}
+
+function calculateAge(dob) {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age -= 1;
+  return age;
 }
 
 function buildMockBenchmarks(pkg = {}, options = {}) {
@@ -406,6 +647,7 @@ function publicUser(u) {
     username: u.username || '',
     email: u.email || '',
     dateOfBirth: u.dateOfBirth || null,
+    profileInterests: Array.isArray(u.profileInterests) ? u.profileInterests : [],
     licenseTier: u.licenseTier || 'free',
     roles: Array.isArray(u.roles) ? u.roles : ['user'],
     country: u.country || 'uk',
@@ -413,6 +655,8 @@ function publicUser(u) {
     subscription: u.subscription || { tier: 'free', status: 'inactive' },
     trial: u.trial || null,
     onboarding: u.onboarding || {},
+    onboardingComplete: !!u.onboardingComplete,
+    onboardingSurvey: normaliseOnboardingSurvey(u.onboardingSurvey || {}),
     preferences: u.preferences || {},
     usageStats: {
       documentsUploaded: usage.documentsUploaded || 0,
@@ -450,6 +694,44 @@ function publicUser(u) {
   };
 }
 
+// GET /api/user/username-available?value=<candidate>
+router.get('/username-available', auth, async (req, res) => {
+  try {
+    const raw = typeof req.query.value === 'string' ? req.query.value : '';
+    const normalised = normaliseUsername(raw);
+    if (!normalised) {
+      return res.json({
+        available: false,
+        normalized: '',
+        reason: 'invalid',
+        message: 'Usernames must use letters, numbers or underscores.'
+      });
+    }
+    if (normalised.length < 3) {
+      return res.json({
+        available: false,
+        normalized: normalised,
+        reason: 'too_short',
+        message: 'Usernames must be at least 3 characters.'
+      });
+    }
+    const exists = await usernameExists(normalised, req.user.id);
+    let suggestion = null;
+    if (exists) {
+      suggestion = await suggestUsername(normalised, req.user.id);
+    }
+    res.json({
+      available: !exists,
+      normalized: normalised,
+      suggestion,
+      reason: exists ? 'taken' : 'ok'
+    });
+  } catch (err) {
+    console.error('GET /user/username-available error:', err);
+    res.status(500).json({ error: 'Unable to check username' });
+  }
+});
+
 // GET /api/user/me
 router.get('/me', auth, async (req, res) => {
   const u = await User.findById(req.user.id);
@@ -468,6 +750,7 @@ router.put('/me', auth, async (req, res) => {
     preferences,
     onboarding
   } = req.body || {};
+  const trimmedUsername = normaliseUsername(username);
   if (!firstName || !lastName || !email) {
     return res.status(400).json({ error: 'firstName, lastName and email are required' });
   }
@@ -478,15 +761,18 @@ router.put('/me', auth, async (req, res) => {
       const exists = await User.findOne({ email, _id: { $ne: req.user.id } }).lean();
       if (exists) return res.status(400).json({ error: 'Email already in use' });
     }
-    if (username) {
-      const existsU = await User.findOne({ username, _id: { $ne: req.user.id } }).lean();
+    if (trimmedUsername) {
+      const existsU = await User.findOne({
+        _id: { $ne: req.user.id },
+        username: { $regex: new RegExp(`^${escapeRegex(trimmedUsername)}$`, 'i') }
+      }).lean();
       if (existsU) return res.status(400).json({ error: 'Username already in use' });
     }
 
     const existing = await User.findById(req.user.id);
     if (!existing) return res.status(404).json({ error: 'User not found' });
     const update = { firstName, lastName, email };
-    if (typeof username === 'string') update.username = username;
+    if (trimmedUsername) update.username = trimmedUsername;
     if (country && ['uk','us'].includes(country)) update.country = country;
     if (preferences && typeof preferences === 'object') {
       update.preferences = {
@@ -561,6 +847,286 @@ router.patch('/onboarding', auth, async (req, res) => {
   } catch (e) {
     console.error('PATCH /user/onboarding error:', e);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/user/onboarding/complete
+router.post('/onboarding/complete', auth, async (req, res) => {
+  try {
+    let user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const payload = req.body || {};
+    const isRerun = !!user.onboardingComplete;
+
+    const cleanedUsername = normaliseUsername(payload.username);
+    if (!cleanedUsername || cleanedUsername.length < 3) {
+      return res.status(400).json({ error: 'Choose a username with at least 3 characters.' });
+    }
+    if (await usernameExists(cleanedUsername, user._id)) {
+      return res.status(400).json({ error: 'Username already in use' });
+    }
+
+    const dob = payload.dateOfBirth ? new Date(payload.dateOfBirth) : null;
+    if (!dob || Number.isNaN(dob.getTime())) {
+      return res.status(400).json({ error: 'Enter a valid date of birth.' });
+    }
+    const age = calculateAge(dob);
+    if (age != null && age < 16) {
+      return res.status(400).json({ error: 'You must be at least 16 years old to use Phloat.' });
+    }
+
+    const interests = normaliseInterests(payload.interests);
+    if (!interests.length) {
+      return res.status(400).json({ error: 'Select at least one area you want Phloat to focus on.' });
+    }
+
+    const motivations = sanitiseMotivations(payload.motivations || payload.goals);
+    const valueSignals = normaliseSurveyAnswers(payload.valueSignals || payload.resonance || []).slice(0, 5);
+    const tierSignals = normaliseSurveyAnswers(payload.tierSignals || payload.tierAlignment || []).slice(0, 5);
+
+    if (valueSignals.length < 3 || tierSignals.length < 3) {
+      return res.status(400).json({ error: 'Tell us how our value props land so we can tailor the experience.' });
+    }
+
+    if (!payload.acceptEula && !user.eulaAcceptedAt) {
+      return res.status(400).json({ error: 'You must accept the EULA to continue.' });
+    }
+    if (!payload.acceptPrivacy && !user.eulaAcceptedAt) {
+      return res.status(400).json({ error: 'You must accept the privacy policy to continue.' });
+    }
+
+    const recommendation = computeTierRecommendation({
+      interests,
+      valueSignals,
+      tierSignals
+    });
+
+    const planSelection = normalisePlanSelection(payload.plan || {}, recommendation);
+
+    const billing = payload.billing || {};
+    const holder = String(billing.holder || billing.cardholderName || '').trim().slice(0, 120);
+    const rawNumber = String(billing.cardNumber || '').replace(/[^0-9]/g, '');
+    let expMonth = Number(billing.expMonth || billing.expiryMonth || 0);
+    let expYear = Number(billing.expYear || billing.expiryYear || 0);
+    const expiryRaw = typeof billing.expiry === 'string' ? billing.expiry : '';
+    if ((!expMonth || !expYear) && expiryRaw) {
+      const match = expiryRaw.match(/^(\d{1,2})\s*\/\s*(\d{2,4})$/);
+      if (match) {
+        expMonth = Number(match[1]);
+        expYear = Number(match[2]);
+      }
+    }
+    const cvc = String(billing.cvc || '').trim();
+    const hasNewBilling = rawNumber.length >= 12;
+    const useExistingPayment = Boolean(payload.useExistingPayment && isRerun);
+
+    let paymentSnapshot = null;
+    let paymentMethod = null;
+
+    if (hasNewBilling) {
+      if (!holder || holder.length < 3 || !expMonth || !expYear || !cvc || cvc.length < 3) {
+        return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
+      }
+      if (expYear < 100) expYear += 2000;
+      if (expMonth < 1 || expMonth > 12) {
+        return res.status(400).json({ error: 'Card expiry month looks incorrect.' });
+      }
+      const expiryDate = new Date(expYear, expMonth, 0);
+      if (expiryDate < new Date()) {
+        return res.status(400).json({ error: 'The card you entered appears to be expired.' });
+      }
+      const brand = inferCardBrand(rawNumber);
+      const last4 = rawNumber.slice(-4);
+      await PaymentMethod.updateMany({ userId: user._id }, { $set: { isDefault: false } });
+      try {
+        paymentMethod = await PaymentMethod.create({
+          userId: user._id,
+          holder,
+          brand,
+          last4,
+          expMonth,
+          expYear,
+          isDefault: true
+        });
+      } catch (err) {
+        console.error('Failed to capture onboarding payment method', err);
+        return res.status(500).json({ error: 'Unable to store billing details right now.' });
+      }
+      paymentSnapshot = {
+        holder,
+        brand,
+        last4,
+        expMonth,
+        expYear,
+        capturedAt: paymentMethod?.createdAt || new Date()
+      };
+    } else if (useExistingPayment) {
+      const fromPayload = toPlain(payload.existingPayment || {});
+      let fallback = fromPayload;
+      if (!fallback?.last4) {
+        const existingSnapshot = toPlain(user.onboardingSurvey?.planChoice?.paymentSnapshot || {});
+        fallback = existingSnapshot.last4 ? existingSnapshot : fallback;
+      }
+      if (!fallback?.last4) {
+        const existingMethod = await PaymentMethod.findOne({ userId: user._id, isDefault: true }).sort({ createdAt: -1 });
+        if (existingMethod) {
+          fallback = {
+            holder: existingMethod.holder || '',
+            brand: existingMethod.brand || 'Card',
+            last4: existingMethod.last4 || '',
+            expMonth: existingMethod.expMonth || null,
+            expYear: existingMethod.expYear || null,
+            capturedAt: existingMethod.createdAt || new Date()
+          };
+        }
+      }
+      if (!fallback?.last4) {
+        return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
+      }
+      paymentSnapshot = {
+        holder: fallback.holder || '',
+        brand: fallback.brand || 'Card',
+        last4: fallback.last4,
+        expMonth: fallback.expMonth || null,
+        expYear: fallback.expYear || null,
+        capturedAt: fallback.capturedAt || fallback.createdAt || new Date()
+      };
+    } else {
+      return res.status(400).json({ error: 'Add billing details so we can activate your workspace.' });
+    }
+
+    const now = new Date();
+    const resolvedTier = planSelection.selection === 'premium' ? 'premium' : 'starter';
+    const subscriptionStatus = planSelection.selection === 'trial' ? 'trial' : 'active';
+
+    const existingOnboarding = user.onboarding?.toObject ? user.onboarding.toObject() : (user.onboarding || {});
+    const onboardingState = {
+      ...existingOnboarding,
+      wizardCompletedAt: existingOnboarding.wizardCompletedAt || now,
+      tourCompletedAt: existingOnboarding.tourCompletedAt || now,
+      mandatoryCompletedAt: existingOnboarding.mandatoryCompletedAt || now,
+      lastPromptedAt: now,
+      goals: motivations.length ? motivations : (existingOnboarding.goals || [])
+    };
+
+    const existingSubscription = toPlain(user.subscription || {});
+    const previousPlanChoice = toPlain(user.onboardingSurvey?.planChoice || {});
+    const existingSubscriptionRecord = await Subscription.findOne({ userId: user._id }).sort({ createdAt: -1 });
+    const existingTrial = user.trial ? toPlain(user.trial) : null;
+    let renewsAt = safeDate(existingSubscription.renewsAt || existingSubscription.currentPeriodEnd || user.onboardingSurvey?.planChoice?.renewsAt);
+    let trialEndsAt = safeDate(existingTrial?.endsAt || user.onboardingSurvey?.planChoice?.trialEndsAt);
+    if (!renewsAt) {
+      renewsAt = planSelection.selection === 'trial'
+        ? addDays(now, 30)
+        : (planSelection.interval === 'yearly' ? addMonths(now, 12) : addMonths(now, 1));
+    }
+    if (!trialEndsAt && planSelection.selection === 'trial') {
+      trialEndsAt = addDays(now, 30);
+    }
+
+    const onboardingSurvey = {
+      interests,
+      motivations,
+      valueSignals,
+      tierSignals,
+      recommendedTier: recommendation.tier,
+      recommendedSummary: recommendation.summary,
+      planChoice: {
+        ...planSelection,
+        paymentSnapshot,
+        scores: recommendation.scores,
+        reasons: recommendation.reasons,
+        renewsAt,
+        trialEndsAt,
+        price: planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval)
+      },
+      completedAt: now
+    };
+
+    const trialState = isRerun
+      ? (existingTrial || null)
+      : (planSelection.selection === 'trial'
+        ? { startedAt: now, endsAt: trialEndsAt, coupon: null, requiresPaymentMethod: true }
+        : { startedAt: now, endsAt: planSelection.selection === 'premium' ? null : addDays(now, 30), coupon: null, requiresPaymentMethod: false });
+
+    const updateDoc = {
+      username: cleanedUsername,
+      dateOfBirth: dob,
+      profileInterests: interests,
+      onboardingSurvey,
+      onboardingComplete: true,
+      onboarding: onboardingState
+    };
+
+    const subscriptionPrice = planSelection.selection === 'trial' ? 0 : planPrice(resolvedTier, planSelection.interval);
+    const previousInterval = existingSubscriptionRecord?.interval || previousPlanChoice.interval || null;
+    const subscriptionChanged = (
+      existingSubscription.tier !== resolvedTier ||
+      existingSubscription.status !== subscriptionStatus ||
+      (planSelection.interval && planSelection.interval !== previousInterval)
+    );
+    const shouldUpdateSubscription = !isRerun || subscriptionChanged;
+
+    if (shouldUpdateSubscription) {
+      updateDoc.licenseTier = resolvedTier;
+      updateDoc.subscription = {
+        tier: resolvedTier,
+        status: subscriptionStatus,
+        lastPlanChange: subscriptionChanged
+          ? now
+          : (existingSubscription.lastPlanChange || now),
+        renewsAt
+      };
+    }
+
+    if (!isRerun) {
+      updateDoc.trial = trialState;
+      updateDoc.eulaAcceptedAt = now;
+      updateDoc.eulaVersion = LEGAL_VERSION;
+    } else {
+      if (trialState) updateDoc.trial = trialState;
+      if (!user.eulaAcceptedAt) updateDoc.eulaAcceptedAt = now;
+      if (!user.eulaVersion) updateDoc.eulaVersion = LEGAL_VERSION;
+    }
+
+    user = await User.findByIdAndUpdate(
+      user._id,
+      { $set: updateDoc },
+      { new: true, runValidators: true }
+    );
+
+    if (!user) {
+      throw new Error('User update failed during onboarding completion');
+    }
+
+    if (shouldUpdateSubscription) {
+      try {
+        await Subscription.findOneAndUpdate(
+          { userId: user._id },
+          {
+            userId: user._id,
+            plan: resolvedTier,
+            interval: planSelection.interval,
+            price: subscriptionPrice,
+            currency: 'GBP',
+            status: 'active',
+            startedAt: subscriptionChanged
+              ? now
+              : (existingSubscriptionRecord?.startedAt || now),
+            currentPeriodEnd: renewsAt
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } catch (err) {
+        console.warn('Unable to upsert subscription during onboarding', err.message || err);
+      }
+    }
+
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    console.error('POST /user/onboarding/complete error:', err);
+    res.status(500).json({ error: 'Unable to complete onboarding right now.' });
   }
 });
 

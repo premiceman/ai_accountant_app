@@ -282,10 +282,168 @@ html.app-bento-open, body.app-bento-open{ overflow:hidden; height:100%; }
   /* modals/tooltips */
   .modal-content{background:var(--bg-surface); border:1px solid var(--bd-hairline); box-shadow:var(--shadow)}
   .tooltip .tooltip-inner{background:#0E151A;color:#fff;border:1px solid #0E151A}
-  
+
   /* utilities */
   .text-muted,.muted{color:var(--fg-2)!important}
   .shadow-soft{box-shadow:var(--shadow)}
+
+/* ==========================================================================
+   Onboarding Glacier Mint theme overrides
+   ========================================================================== */
+body.onboarding-body{
+  background:radial-gradient(circle at top left,
+    color-mix(in oklab, var(--brand) 32%, white) 0%,
+    color-mix(in oklab, var(--bg-body) 90%, var(--brand) 12%) 55%,
+    var(--bg-body) 100%) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .onboarding-shell{background:transparent !important;}
+body.onboarding-body .onboarding-sidebar{
+  background:linear-gradient(165deg,
+    color-mix(in oklab, var(--brand) 85%, #083d33) 0%,
+    color-mix(in oklab, var(--brand-hover) 78%, #0C1520) 100%) !important;
+  border-right:1px solid color-mix(in oklab, var(--brand) 35%, white) !important;
+  color:rgba(255,255,255,0.94) !important;
+  box-shadow:0 24px 48px rgba(12,21,32,0.22);
+}
+body.onboarding-body .onboarding-logo{color:rgba(255,255,255,0.95) !important;}
+body.onboarding-body .onboarding-logo span.badge{
+  background:color-mix(in oklab, rgba(255,255,255,0.9) 70%, transparent) !important;
+  color:var(--brand-hover) !important;
+}
+body.onboarding-body .onboarding-progress{color:rgba(255,255,255,0.78) !important;}
+body.onboarding-body .onboarding-progress-bar{
+  background:color-mix(in oklab, rgba(255,255,255,0.65) 75%, transparent) !important;
+}
+body.onboarding-body .onboarding-progress-bar span{
+  background:linear-gradient(90deg, var(--brand), color-mix(in oklab, var(--brand-hover) 70%, white)) !important;
+}
+body.onboarding-body .insight-card{
+  background:color-mix(in oklab, rgba(255,255,255,0.16) 70%, transparent) !important;
+  border:1px solid color-mix(in oklab, var(--brand) 28%, transparent);
+  color:rgba(255,255,255,0.9);
+  box-shadow:0 18px 44px rgba(12,21,32,0.22);
+}
+body.onboarding-body .insight-card .insight-body{color:rgba(238,247,244,0.78) !important;}
+body.onboarding-body .onboarding-main{
+  background:linear-gradient(140deg, var(--bg-surface) 0%, color-mix(in oklab, var(--bg-body) 86%, white) 65%, #FFFFFF 100%) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .step-eyebrow{color:color-mix(in oklab, var(--brand) 45%, var(--fg-2)) !important;}
+body.onboarding-body .choice-grid .choice-tile{
+  border:1px solid color-mix(in oklab, var(--brand) 16%, var(--bd-hairline)) !important;
+  background:var(--bg-surface) !important;
+  box-shadow:0 12px 32px rgba(12,21,32,0.08) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .choice-grid .choice-tile.active{
+  border-color:var(--brand) !important;
+  box-shadow:0 20px 46px color-mix(in oklab, var(--brand) 28%, rgba(12,21,32,0.25)) !important;
+  background:color-mix(in oklab, var(--brand) 15%, #FFFFFF) !important;
+}
+body.onboarding-body .choice-grid .choice-tile span.label{color:var(--fg) !important;}
+body.onboarding-body .choice-grid .choice-tile span.caption{color:var(--fg-2) !important;}
+body.onboarding-body .pill-set .pill{
+  border:1px solid color-mix(in oklab, var(--brand) 18%, var(--bd-hairline)) !important;
+  background:var(--bg-surface) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .pill-set .pill.active{
+  background:var(--brand) !important;
+  border-color:var(--brand) !important;
+  color:#0E151A !important;
+  box-shadow:0 14px 36px color-mix(in oklab, var(--brand) 30%, rgba(12,21,32,0.18)) !important;
+}
+body.onboarding-body .question-card{
+  border:1px solid color-mix(in oklab, var(--brand) 18%, var(--bd-hairline)) !important;
+  background:var(--bg-surface) !important;
+  box-shadow:0 14px 36px rgba(12,21,32,0.08) !important;
+}
+body.onboarding-body .question-text{color:var(--fg) !important;}
+body.onboarding-body .question-actions button{
+  border:1px solid color-mix(in oklab, var(--brand) 14%, var(--bd-hairline)) !important;
+  background:color-mix(in oklab, var(--bg-surface-2) 92%, white) !important;
+  color:color-mix(in oklab, var(--fg) 80%, var(--fg-2)) !important;
+}
+body.onboarding-body .question-actions button.active{
+  background:var(--brand) !important;
+  border-color:var(--brand) !important;
+  color:#0E151A !important;
+  box-shadow:0 12px 32px color-mix(in oklab, var(--brand) 25%, rgba(12,21,32,0.18));
+}
+body.onboarding-body .summary-card{
+  background:var(--bg-surface) !important;
+  border:1px solid color-mix(in oklab, var(--brand) 18%, var(--bd-hairline)) !important;
+  box-shadow:0 24px 50px rgba(12,21,32,0.1) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .summary-card h3{color:var(--fg) !important;}
+body.onboarding-body .summary-card ul{color:var(--fg-2) !important;}
+body.onboarding-body .plan-toggle{
+  border:1px solid color-mix(in oklab, var(--brand) 20%, var(--bd-hairline)) !important;
+  background:color-mix(in oklab, var(--brand) 10%, var(--bg-surface)) !important;
+}
+body.onboarding-body .plan-toggle button{color:color-mix(in oklab, var(--fg) 78%, var(--fg-2)) !important;}
+body.onboarding-body .plan-toggle button.active{
+  background:var(--bg-surface) !important;
+  color:var(--brand) !important;
+  box-shadow:0 10px 28px color-mix(in oklab, var(--brand) 26%, rgba(12,21,32,0.2)) !important;
+}
+body.onboarding-body .plan-grid .plan-card{
+  border:2px solid color-mix(in oklab, var(--brand) 12%, var(--bd-hairline)) !important;
+  background:var(--bg-surface) !important;
+  box-shadow:0 20px 44px rgba(12,21,32,0.09) !important;
+}
+body.onboarding-body .plan-grid .plan-card.active{
+  border-color:var(--brand) !important;
+  box-shadow:0 28px 60px color-mix(in oklab, var(--brand) 28%, rgba(12,21,32,0.22)) !important;
+  background:color-mix(in oklab, var(--brand) 12%, #FFFFFF) !important;
+}
+body.onboarding-body .plan-grid .plan-card .plan-price{color:color-mix(in oklab, var(--fg) 85%, var(--brand) 15%) !important;}
+body.onboarding-body .plan-grid .plan-card ul{color:var(--fg-2) !important;}
+body.onboarding-body .billing-form{
+  background:color-mix(in oklab, var(--bg-surface) 95%, white) !important;
+  border:1px solid color-mix(in oklab, var(--brand) 16%, var(--bd-hairline)) !important;
+  box-shadow:0 1px 0 rgba(255,255,255,0.6) inset;
+}
+body.onboarding-body .billing-form label{color:color-mix(in oklab, var(--fg-2) 70%, var(--brand) 25%) !important;}
+body.onboarding-body .billing-form input{
+  border:1px solid color-mix(in oklab, var(--brand) 14%, var(--bd-hairline)) !important;
+  background:var(--bg-surface) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .billing-form input:focus{
+  border-color:var(--brand) !important;
+  box-shadow:0 0 0 3px color-mix(in oklab, var(--brand) 35%, rgba(189,239,231,0.9)) !important;
+}
+body.onboarding-body .legal-box{
+  background:color-mix(in oklab, var(--bg-surface) 94%, white) !important;
+  border:1px solid color-mix(in oklab, var(--brand) 12%, var(--bd-hairline)) !important;
+  color:var(--fg) !important;
+}
+body.onboarding-body .step-actions .btn-secondary{
+  border:1px solid color-mix(in oklab, var(--brand) 18%, var(--bd-hairline)) !important;
+  color:color-mix(in oklab, var(--fg) 78%, var(--fg-2)) !important;
+  background:color-mix(in oklab, var(--bg-surface) 92%, white) !important;
+}
+body.onboarding-body .step-actions .btn-primary{
+  background:linear-gradient(135deg,
+    color-mix(in oklab, var(--brand) 88%, #0E151A) 0%,
+    color-mix(in oklab, var(--brand-hover) 88%, #0E151A) 100%) !important;
+  color:#0E151A !important;
+  box-shadow:0 18px 42px color-mix(in oklab, var(--brand) 32%, rgba(12,21,32,0.24)) !important;
+}
+body.onboarding-body .step-actions .btn-primary:not(:disabled):hover{
+  box-shadow:0 24px 54px color-mix(in oklab, var(--brand) 36%, rgba(12,21,32,0.28)) !important;
+}
+body.onboarding-body .alert-banner{
+  background:color-mix(in oklab, var(--bg-surface) 95%, white) !important;
+  border:1px solid color-mix(in oklab, var(--danger) 35%, white) !important;
+  color:color-mix(in oklab, var(--danger) 88%, #301010) !important;
+}
+body.onboarding-body .onboarding-sidebar a,
+body.onboarding-body .onboarding-sidebar strong{color:rgba(255,255,255,0.94) !important;}
+body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255,255,0.98) !important;}
 
 
   
