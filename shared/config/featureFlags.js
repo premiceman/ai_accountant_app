@@ -1,3 +1,4 @@
+// NOTE: Triage diagnostics for empty transactions (non-destructive). Remove after issue is resolved.
 // NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 'use strict';
 
@@ -10,6 +11,7 @@ const DEFAULTS = Object.freeze({
   ENABLE_ANALYTICS_LEGACY: 'true',
   ENABLE_STAGED_LOADER_ANALYTICS: 'true',
   ENABLE_QA_DEV_ENDPOINTS: 'false',
+  ENABLE_TRIAGE_LOGS: 'false',
 });
 
 function readFlag(name) {
@@ -42,6 +44,7 @@ function buildFeatureFlags() {
     enableAnalyticsLegacy: toBoolean(readFlag('ENABLE_ANALYTICS_LEGACY')),
     enableStagedLoaderAnalytics: toBoolean(readFlag('ENABLE_STAGED_LOADER_ANALYTICS')),
     enableQaDevEndpoints: toBoolean(readFlag('ENABLE_QA_DEV_ENDPOINTS')),
+    enableTriageLogs: toBoolean(readFlag('ENABLE_TRIAGE_LOGS')),
   });
 }
 
@@ -63,6 +66,7 @@ const FLAG_NAME_MAP = Object.freeze({
   ENABLE_ANALYTICS_LEGACY: 'enableAnalyticsLegacy',
   ENABLE_STAGED_LOADER_ANALYTICS: 'enableStagedLoaderAnalytics',
   ENABLE_QA_DEV_ENDPOINTS: 'enableQaDevEndpoints',
+  ENABLE_TRIAGE_LOGS: 'enableTriageLogs',
 });
 
 function getFlag(name) {
@@ -94,6 +98,7 @@ module.exports = {
   ENABLE_ANALYTICS_LEGACY: featureFlags.enableAnalyticsLegacy,
   ENABLE_STAGED_LOADER_ANALYTICS: featureFlags.enableStagedLoaderAnalytics,
   ENABLE_QA_DEV_ENDPOINTS: featureFlags.enableQaDevEndpoints,
+  ENABLE_TRIAGE_LOGS: featureFlags.enableTriageLogs,
   toBoolean,
   toNumber,
   readFlag,

@@ -1,3 +1,4 @@
+// NOTE: Triage diagnostics for empty transactions (non-destructive). Remove after issue is resolved.
 // NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 /**
@@ -40,6 +41,7 @@ import {
 import { rebuildMonthlyAnalytics } from './services/analytics.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
+const TRIAGE_AREA = 'statement-triage';
 
 const LOG_UPDATE_DOCS = process.env.LOG_UPDATE_DOCS === '1';
 const MAX_ATTEMPTS = Math.max(1, parseEnvInt(process.env.DOCUMENT_JOB_MAX_ATTEMPTS, 5));
@@ -146,6 +148,71 @@ type Classification = {
   institutionName: string | null;
   accountNumberMasked?: string | null;
 };
+
+function isStatementClassification(type: Classification['type']): boolean {
+  return type.endsWith('_statement');
+}
+
+function coerceMinorUnits(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^-?\d+$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isNaN(parsed) ? null : Math.round(parsed);
+    }
+  }
+  return null;
+}
+
+function parseStatementAmountToMinor(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.round(value * 100);
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const withoutSpaces = trimmed
+    .replace(/[\u202f\u00a0]/gu, '')
+    .replace(/\s+/gu, '')
+    .replace(/(GBP|USD|EUR)/gi, '')
+    .replace(/[£€$]/g, '');
+  const negativeByParens = /^\(.*\)$/.test(withoutSpaces);
+  const stripped = withoutSpaces.replace(/[()]/g, '');
+  const sanitised = stripped.replace(/[,']/g, '');
+  const numericPortion = sanitised.replace(/[^0-9.\-]/g, '');
+  if (!numericPortion) return null;
+  const parsed = Number.parseFloat(numericPortion);
+  if (!Number.isFinite(parsed)) return null;
+  let amountMinor = Math.round(parsed * 100);
+  if (negativeByParens || /^-/.test(stripped)) {
+    amountMinor = -Math.abs(amountMinor);
+  }
+  return amountMinor;
+}
+
+function parseStatementDateValue(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const match = trimmed.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    if (match) {
+      const day = match[1].padStart(2, '0');
+      const month = match[2].padStart(2, '0');
+      const year = match[3].length === 2 ? `20${match[3]}` : match[3].padStart(4, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return v1.ensureIsoDate(value);
+}
 
 async function claimJob(): Promise<UserDocumentJobDoc | null> {
   const now = new Date();
@@ -339,6 +406,22 @@ async function ensureAccount(
         'rawInstitutionNames update already applied'
       );
     }
+    if (featureFlags.enableTriageLogs && isStatementClassification(classification.type)) {
+      logger.info(
+        {
+          area: TRIAGE_AREA,
+          phase: 'idempotency',
+          jobId: job.jobId,
+          fileId: job.fileId,
+          contentHash: null,
+          parserVersion: job.parserVersion,
+          promptVersion: job.promptVersion,
+          decision: 'skip',
+          reason: 'account-update-unchanged',
+        },
+        'statement triage'
+      );
+    }
     return { account: existingAccount, planSummary, idempotencyKey, skipped: true };
   }
 
@@ -455,7 +538,8 @@ function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
 
 export function enrichPayloadWithV1(
   payload: InsightUpsertPayload,
-  classification: SupportedClassification
+  classification: SupportedClassification,
+  options?: { jobId?: string }
 ): InsightUpsertPayload {
   const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
   const fallbackIso =
@@ -470,6 +554,8 @@ export function enrichPayloadWithV1(
   payload.documentMonth = inferredMonth ?? payload.documentMonth;
 
   const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
+  const triageJobId = options?.jobId ?? null;
+  const shouldLogTriage = featureFlags.enableTriageLogs && isStatementClassification(classification.type);
 
   if (classification.type === 'payslip') {
     const employerName = typeof metadata.employerName === 'string' ? metadata.employerName : null;
@@ -520,34 +606,65 @@ export function enrichPayloadWithV1(
 
   const rawTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
   const normalizedTransactions: v1.TransactionV1[] = [];
+  let droppedCount = 0;
+  const dropSummary: { invalidAmount: number; invalidDate: number; validationFailed: number } = {
+    invalidAmount: 0,
+    invalidDate: 0,
+    validationFailed: 0,
+  };
+
+  if (shouldLogTriage) {
+    logger.info(
+      { area: TRIAGE_AREA, phase: 'extraction', jobId: triageJobId ?? undefined, fileId: payload.fileId, linesParsed: rawTransactions.length },
+      'statement triage'
+    );
+  }
 
   rawTransactions.forEach((tx, index) => {
     const record = (tx ?? {}) as Record<string, unknown>;
     const rawId = record.id ?? record.transactionId ?? `legacy-${index}`;
-    const isoDate =
-      v1.ensureIsoDate(record.date ?? record.postedAt ?? fallbackIso) ?? fallbackIso;
-    const baseAmountMinor =
-      typeof record.amountMinor === 'number'
-        ? Math.round(record.amountMinor as number)
-        : v1.toMinorUnits(record.amount);
-    const rawDirection = String(record.direction ?? '').toLowerCase();
-    let direction: 'inflow' | 'outflow' = baseAmountMinor < 0 ? 'outflow' : 'inflow';
-    if (rawDirection === 'inflow' || rawDirection === 'outflow') {
-      direction = rawDirection;
+    const amountMinorFromField = coerceMinorUnits((record as Record<string, unknown>).amountMinor);
+    const computedAmountMinor =
+      amountMinorFromField ??
+      parseStatementAmountToMinor(
+        record.amount ?? (record as Record<string, unknown>).value ?? (record as Record<string, unknown>).total
+      );
+    if (computedAmountMinor == null) {
+      droppedCount += 1;
+      dropSummary.invalidAmount += 1;
+      if (shouldLogTriage) {
+        logger.info(
+          { area: TRIAGE_AREA, phase: 'normalisation-drop', jobId: triageJobId ?? undefined, fileId: payload.fileId, index, reason: 'invalid_amount' },
+          'statement triage'
+        );
+      }
+      return;
     }
-    let amountMinor = baseAmountMinor;
-    if (direction === 'outflow' && amountMinor > 0) {
-      amountMinor = -Math.abs(amountMinor);
-    } else if (direction === 'inflow' && amountMinor < 0) {
-      amountMinor = Math.abs(amountMinor);
+
+    const isoDate = parseStatementDateValue(record.date ?? record.postedAt ?? (record as Record<string, unknown>).valueDate);
+    if (!isoDate) {
+      droppedCount += 1;
+      dropSummary.invalidDate += 1;
+      if (shouldLogTriage) {
+        logger.info(
+          { area: TRIAGE_AREA, phase: 'normalisation-drop', jobId: triageJobId ?? undefined, fileId: payload.fileId, index, reason: 'invalid_date' },
+          'statement triage'
+        );
+      }
+      return;
     }
+
+    const normalizedAmountMinor = Math.abs(computedAmountMinor);
+    const direction: 'inflow' | 'outflow' = computedAmountMinor < 0 ? 'outflow' : 'inflow';
+    const finalAmountMinor = direction === 'outflow' ? -Math.abs(normalizedAmountMinor) : Math.abs(normalizedAmountMinor);
+
     const candidate: v1.TransactionV1 = {
       id: String(rawId || `legacy-${index}`),
       date: isoDate,
-      description: String(record.description ?? record.name ?? ''),
-      amountMinor,
+      description: String(record.description ?? record.name ?? record.memo ?? ''),
+      amountMinor: finalAmountMinor,
       direction,
-      category: v1.normaliseCategory(record.category ?? record.normalisedCategory),
+      category: v1.normaliseCategory(record.category ?? record.normalisedCategory ?? record.type),
       accountId:
         typeof record.accountId === 'string'
           ? record.accountId
@@ -560,10 +677,12 @@ export function enrichPayloadWithV1(
           : typeof metadata.accountName === 'string'
           ? metadata.accountName
           : null,
-      currency: payload.currency ?? 'GBP',
+      currency: v1.normaliseCurrency((record.currency as string | undefined) ?? payload.currency ?? 'GBP'),
     };
 
     if (!v1.validateTransactionV1(candidate)) {
+      droppedCount += 1;
+      dropSummary.validationFailed += 1;
       const errors = v1.validateTransactionV1.errors as ValidationError[] | null | undefined;
       if (featureFlags.enableAjvStrict) {
         throw buildSchemaError('shared/schemas/transactionV1.json', errors);
@@ -576,10 +695,34 @@ export function enrichPayloadWithV1(
         },
         'Statement transaction failed v1 validation'
       );
+      if (shouldLogTriage) {
+        logger.info(
+          { area: TRIAGE_AREA, phase: 'normalisation-drop', jobId: triageJobId ?? undefined, fileId: payload.fileId, index, reason: 'validation_failed' },
+          'statement triage'
+        );
+      }
       return;
     }
     normalizedTransactions.push(candidate);
   });
+
+  if (shouldLogTriage) {
+    const sample = normalizedTransactions.slice(0, 3);
+    logger.info(
+      {
+        area: TRIAGE_AREA,
+        phase: 'normalisation',
+        jobId: triageJobId ?? undefined,
+        fileId: payload.fileId,
+        txNormalised: normalizedTransactions.length,
+        dropped: droppedCount,
+        dropSummary,
+        sampleDates: sample.map((tx) => tx.date),
+        sampleAmounts: sample.map((tx) => tx.amountMinor),
+      },
+      'statement triage'
+    );
+  }
 
   payload.transactionsV1 = normalizedTransactions;
 
@@ -761,6 +904,22 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     throw new Error('File is not a valid PDF');
   }
 
+  const classification = classifyDocument(job.originalName || '');
+  const shouldLogTriage = featureFlags.enableTriageLogs && isStatementClassification(classification.type);
+  if (shouldLogTriage) {
+    logger.info(
+      {
+        area: TRIAGE_AREA,
+        phase: 'classification',
+        jobId: job.jobId,
+        fileId: job.fileId,
+        predictedType: classification.type,
+        confidence: Number.parseFloat(classification.confidence.toFixed(2)),
+      },
+      'statement triage'
+    );
+  }
+
   const existing = await DocumentInsightModel.findOne({
     userId: job.userId,
     fileId: job.fileId,
@@ -769,20 +928,50 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     .lean<DocumentInsight | null>()
     .exec();
   if (existing) {
+    if (shouldLogTriage) {
+      logger.info(
+        {
+          area: TRIAGE_AREA,
+          phase: 'idempotency',
+          jobId: job.jobId,
+          fileId: job.fileId,
+          contentHash: existing.contentHash ?? null,
+          parserVersion: job.parserVersion,
+          promptVersion: job.promptVersion,
+          decision: 'skip',
+          reason: 'insight-exists',
+        },
+        'statement triage'
+      );
+    }
     logger.info({ jobId: job.jobId }, 'Insight already exists; skipping');
     await finalizeJob(job, 'succeeded');
     await setSessionStatus(job.userId, job.fileId, 'done');
     return;
   }
 
-  const classification = classifyDocument(job.originalName || '');
   if (!isSupportedClassification(classification) || classification.confidence < 0.6) {
     await rejectJob(job, 'Unsupported or low confidence document');
     return;
   }
 
   const payload = buildInsightPayload(job, classification, buffer);
-  enrichPayloadWithV1(payload, classification);
+  enrichPayloadWithV1(payload, classification, { jobId: job.jobId });
+  if (shouldLogTriage) {
+    logger.info(
+      {
+        area: TRIAGE_AREA,
+        phase: 'idempotency',
+        jobId: job.jobId,
+        fileId: job.fileId,
+        contentHash: payload.contentHash,
+        parserVersion: payload.parserVersion,
+        promptVersion: payload.promptVersion,
+        decision: 'process',
+      },
+      'statement triage'
+    );
+  }
   const accountResult = await ensureAccount(job, classification);
   lastPlanSummary = accountResult.planSummary;
   lastPlanSummaryString = JSON.stringify(accountResult.planSummary);
@@ -799,15 +988,42 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     { $set: { candidateType: classification.type, lastUpdatePlanSummary: lastPlanSummaryString ?? null } }
   ).exec();
 
+  const legacyTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+  const normalisedTransactions = Array.isArray(payload.transactionsV1) ? payload.transactionsV1 : [];
+  payload.transactions = legacyTransactions;
+  payload.transactionsV1 = normalisedTransactions;
+
+  const updateDoc = {
+    $set: {
+      ...payload,
+      transactions: legacyTransactions,
+      transactionsV1: normalisedTransactions,
+      updatedAt: new Date(),
+    },
+    $setOnInsert: { createdAt: new Date() },
+  } as const;
+
+  if (shouldLogTriage) {
+    const keysWritten = Object.keys(updateDoc.$set ?? updateDoc);
+    logger.info(
+      {
+        area: TRIAGE_AREA,
+        phase: 'persist',
+        jobId: job.jobId,
+        fileId: job.fileId,
+        keysWritten,
+        counts: {
+          txLegacyCount: legacyTransactions.length,
+          txV1Count: normalisedTransactions.length,
+        },
+      },
+      'statement triage'
+    );
+  }
+
   await DocumentInsightModel.findOneAndUpdate(
     { userId: job.userId, fileId: job.fileId, schemaVersion: job.schemaVersion },
-    {
-      $set: {
-        ...payload,
-        updatedAt: new Date(),
-      },
-      $setOnInsert: { createdAt: new Date() },
-    },
+    updateDoc,
     { upsert: true }
   ).exec();
 

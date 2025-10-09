@@ -1,3 +1,4 @@
+// NOTE: Triage diagnostics for empty transactions (non-destructive). Remove after issue is resolved.
 // NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -11,6 +12,7 @@ type SharedFeatureFlagsModule = {
   ENABLE_QA_DEV_ENDPOINTS: boolean;
   ENABLE_RECONCILIATION: boolean;
   ENABLE_STAGED_LOADER_ANALYTICS: boolean;
+  ENABLE_TRIAGE_LOGS: boolean;
   featureFlags: {
     enableAnalyticsV1: boolean;
     enableReconciliation: boolean;
@@ -20,6 +22,7 @@ type SharedFeatureFlagsModule = {
     enableAnalyticsLegacy: boolean;
     enableStagedLoaderAnalytics: boolean;
     enableQaDevEndpoints: boolean;
+    enableTriageLogs: boolean;
   };
   getAllFlags(): Record<string, boolean>;
   getFlag(name: string): boolean;
@@ -53,6 +56,7 @@ export const {
   ENABLE_QA_DEV_ENDPOINTS,
   ENABLE_RECONCILIATION,
   ENABLE_STAGED_LOADER_ANALYTICS,
+  ENABLE_TRIAGE_LOGS,
   featureFlags,
   getAllFlags,
   getFlag,

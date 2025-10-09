@@ -1,10 +1,13 @@
+// NOTE: Triage diagnostics for empty transactions (non-destructive). Remove after issue is resolved.
 import express from 'express';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import pino from 'pino';
 import { createServer } from 'node:http';
+import { URL } from 'node:url';
 import { createHealthRouter } from './http/health.js';
 import { startDocumentJobLoop, stopDocumentJobLoop } from './documentJobLoop.js';
+import { featureFlags } from './config/featureFlags.js';
 
 dotenv.config();
 
@@ -29,6 +32,28 @@ async function bootstrap() {
 
   try {
     const mongoUri = process.env.MONGODB_URI ?? 'mongodb://localhost:27017/ai_accountant_app';
+    if (featureFlags.enableTriageLogs) {
+      try {
+        const safeUriForParsing = mongoUri.replace(/^mongodb\+srv:\/\//i, 'mongodb://');
+        const parsed = new URL(safeUriForParsing);
+        const mongoHost = parsed.host || 'unknown';
+        const rawPath = parsed.pathname || '';
+        const mongoDb = rawPath.replace(/^\//, '').split('?')[0] || 'admin';
+        logger.info(
+          { area: 'statement-triage', phase: 'boot', mongoHost, mongoDb },
+          'statement triage'
+        );
+      } catch (error) {
+        logger.warn(
+          {
+            area: 'statement-triage',
+            phase: 'boot',
+            parsingError: (error as Error).message ?? 'unknown',
+          },
+          'statement triage'
+        );
+      }
+    }
     await mongoose.connect(mongoUri);
     logger.info({ mongoUri }, 'Connected to MongoDB');
     await startDocumentJobLoop();
