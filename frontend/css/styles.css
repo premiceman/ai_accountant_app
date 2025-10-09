@@ -522,6 +522,15 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
   --brand-dot-size: 10px;
   box-shadow:0 0 18px color-mix(in oklab, var(--brand) 38%, transparent);
 }
+.topbar-logo-img{
+  height: 42px;
+  width: auto;
+  display: block;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(12, 26, 40, 0.18);
+  background: rgba(255,255,255,0.72);
+  padding: 4px;
+}
 .topbar-right{ justify-self: end; padding-right: 8px; }
 
 @media (max-width: 767.98px){
@@ -532,6 +541,10 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
   }
   .topbar-logo{
     font-size:.95rem;
+  }
+  .topbar-logo-img{
+    height: 36px;
+    padding: 3px;
   }
 }
 
