@@ -22,8 +22,9 @@
 
     .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter: saturate(1.2) blur(8px)}
     .landing-nav .btn{ padding:.55rem 1rem }
-    .brand-mark{ display:inline-flex; align-items:center; gap:.75rem; text-decoration:none; color:var(--fg) }
-    .brand-logo{ height:44px; width:auto; display:block; border-radius:16px; background:rgba(255,255,255,0.72); padding:5px 6px; box-shadow:0 12px 28px rgba(12,21,32,0.14); }
+    .brand-mark{ text-decoration:none; color:var(--fg) }
+    .landing-nav .brand-mark{ gap:.75rem; font-size:1.05rem; }
+    .landing-nav .brand-mark .brand-dot{ --brand-dot-size:14px; }
 
     .hero{ min-height: var(--hero-h); position: relative; display:grid; place-items:center; overflow:hidden }
     .hero-inner{ position:relative; z-index:2; max-width:1100px; padding:6rem 1.25rem 4rem }
@@ -181,7 +182,8 @@
         </span>
       </button>
       <a class="brand-mark" href="/">
-        <img src="/assets/phloat-logo.svg" class="brand-logo" alt="Phloat AI Accountant" width="320" height="320">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span>Phloat-AI Accounant</span>
       </a>
       <div class="landing-nav-actions">
         <a class="btn btn-outline" href="#features">Features</a>
