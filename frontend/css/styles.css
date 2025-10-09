@@ -569,7 +569,27 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
 }
 
 /* Navigation items */
-.app-nav{ padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.app-nav{
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+.app-nav::-webkit-scrollbar{
+  width: 8px;
+}
+.app-nav::-webkit-scrollbar-thumb{
+  background: color-mix(in oklab, var(--fg-3) 65%, transparent);
+  border-radius: 999px;
+}
+.app-nav::-webkit-scrollbar-track{
+  background: transparent;
+}
 .app-nav-item{
   display: flex; align-items: center; gap: 12px;
   padding: 10px 12px;

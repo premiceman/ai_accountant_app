@@ -4,11 +4,21 @@
     const top = await fetch('/components/topbar.html', { cache: 'no-store' });
     if (top.ok) {
       document.getElementById('topbar-container')?.insertAdjacentHTML('beforeend', await top.text());
+      try {
+        const brandLabel = document.querySelector('#topbar-container .topbar-logo span:last-child')?.textContent?.trim() || null;
+        console.info?.('[instrumentation] nav:topbar:injected', { brandLabel, timestamp: new Date().toISOString() });
+      } catch { /* no-op */ }
       wireCountryToggle();
       hydrateTopbarMeta();
     }
     const side = await fetch('/components/sidebar.html', { cache: 'no-store' });
-    if (side.ok) document.getElementById('sidebar-container')?.insertAdjacentHTML('beforeend', await side.text());
+    if (side.ok) {
+      document.getElementById('sidebar-container')?.insertAdjacentHTML('beforeend', await side.text());
+      try {
+        const navItemCount = document.querySelectorAll('#sidebar-container .app-nav-item').length;
+        console.info?.('[instrumentation] nav:sidebar:injected', { navItemCount, timestamp: new Date().toISOString() });
+      } catch { /* no-op */ }
+    }
   } catch (e) { console.warn('nav inject failed', e); }
 })();
 
@@ -79,22 +89,18 @@ document.addEventListener('click', (ev) => {
   if (!btn) return;
   ev.preventDefault();
   try {
+    console.info?.('[instrumentation] nav:signout:click', { from: location.pathname, timestamp: new Date().toISOString() });
+  } catch { /* no-op */ }
+  try {
     if (window.Auth && typeof Auth.signOut === 'function') {
-      Auth.signOut();
+      Auth.signOut({ reason: 'sidebar-nav' });
     } else {
       // Hard fallback: clear tokens + go to login
       ['token','jwt','authToken','me'].forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} });
-      const nextPath = location.pathname + location.search;
-      const url = (window.Auth && typeof Auth.buildWorkOSUrl === 'function')
-        ? Auth.buildWorkOSUrl({ intent: 'login', next: nextPath })
-        : `/api/auth/workos/login?next=${encodeURIComponent(nextPath)}`;
-      location.href = url;
+      location.href = '/index.html';
     }
   } catch {
-    const url = (window.Auth && typeof Auth.buildWorkOSUrl === 'function')
-      ? Auth.buildWorkOSUrl({ intent: 'login' })
-      : '/api/auth/workos/login';
-    location.href = url;
+    location.href = '/index.html';
   }
 });
 
