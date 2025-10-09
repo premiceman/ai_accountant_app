@@ -422,13 +422,14 @@ function buildInsightPayload(
   buffer: Buffer
 ): InsightUpsertPayload {
   const today = new Date();
-  const documentDate = formatDate(today);
+  const documentDate = today;
   const documentMonth = formatMonth(today);
   const metadata: Record<string, unknown> = {
     period: {
       start: formatDate(monthStart(today)),
       end: formatDate(monthEnd(today)),
     },
+    documentDate: formatDate(today),
   };
   if (classification.employerName) {
     metadata.employerName = canonicaliseEmployer(classification.employerName);
@@ -453,11 +454,15 @@ function buildInsightPayload(
     contentHash: sha256(buffer),
     documentDate,
     documentMonth,
+    documentLabel: null as unknown as DocumentInsight['documentLabel'],
+    documentName: null as unknown as DocumentInsight['documentName'],
+    nameMatchesUser: null as unknown as DocumentInsight['nameMatchesUser'],
     collectionId: job.collectionId ?? null,
     metadata: metadata as DocumentInsight['metadata'],
     metrics: {},
     transactions: [],
     narrative: [`classification=${classification.type}`, `confidence=${classification.confidence}`],
+    extractedAt: new Date(),
   };
 
   switch (classification.type) {

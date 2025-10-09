@@ -237,10 +237,7 @@ router.get('/payslips/employers/:employerId/files', async (req, res) => {
   res.json({
     employer: employerName,
     files: documents.map((doc) => ({
-      documentMonth: doc.documentMonth,
-      documentDate: doc.documentDate,
-      metrics: doc.metrics,
-      fileId: doc.fileId,
+      ...mapDocumentForResponse(doc),
       status: doc.narrative?.length ? 'processed' : 'pending',
     })),
   });
@@ -294,14 +291,8 @@ router.get('/statements/institutions/:institutionId/files', async (req, res) => 
     if (!accountId) continue;
     const list = docsByAccount.get(accountId) || [];
     list.push({
-      fileId: doc.fileId,
-      documentMonth: doc.documentMonth,
-      documentDate: doc.documentDate,
-      metrics: doc.metrics,
-      accountNumberMasked: doc.metadata?.accountNumberMasked || null,
-      upload: mapLight(jobMap.get(doc.fileId)?.uploadState || 'succeeded'),
-      processing: mapLight(jobMap.get(doc.fileId)?.processState || 'succeeded'),
-      message: jobMap.get(doc.fileId)?.lastError?.message || null,
+      doc,
+      job: jobMap.get(doc.fileId) || null,
     });
     docsByAccount.set(accountId, list);
   }
@@ -313,9 +304,15 @@ router.get('/statements/institutions/:institutionId/files', async (req, res) => 
       displayName: account.displayName,
       accountType: account.accountType,
       accountNumberMasked: account.accountNumberMasked,
-      files: docsByAccount.get(account._id.toString()) || [],
-    })),
-  });
+    files: (docsByAccount.get(account._id.toString()) || []).map((entry) => {
+      const payload = mapDocumentForResponse(entry.doc, entry.job);
+      if (payload && !payload.accountNumberMasked && entry.doc?.metadata?.accountNumberMasked) {
+        payload.accountNumberMasked = entry.doc.metadata.accountNumberMasked;
+      }
+      return payload;
+    }),
+  })),
+});
 });
 
 router.get('/statements/accounts/:accountId/files', async (req, res) => {
@@ -324,18 +321,19 @@ router.get('/statements/accounts/:accountId/files', async (req, res) => {
   if (!account) {
     return res.status(404).json({ error: 'Account not found' });
   }
-  const documents = await DocumentInsight.find({ userId: new mongoose.Types.ObjectId(req.user.id), 'metadata.accountId': account._id }).sort({ documentMonth: -1 });
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const documents = await DocumentInsight.find({ userId: userObjectId, 'metadata.accountId': account._id }).sort({ documentMonth: -1 });
+  const jobs = await UserDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
+    'fileId uploadState processState lastError'
+  );
+  const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
   res.json({
     account: {
       displayName: account.displayName,
       accountType: account.accountType,
       accountNumberMasked: account.accountNumberMasked,
     },
-    files: documents.map((doc) => ({
-      documentMonth: doc.documentMonth,
-      metrics: doc.metrics,
-      fileId: doc.fileId,
-    })),
+    files: documents.map((doc) => mapDocumentForResponse(doc, jobMap.get(doc.fileId))),
   });
 });
 
@@ -403,18 +401,7 @@ router.get('/collections/:collectionId/files', async (req, res) => {
       id: collection._id.toString(),
       name: collection.name,
     },
-    files: insights.map((doc) => {
-      const job = jobMap.get(doc.fileId);
-      return {
-        fileId: doc.fileId,
-        catalogueKey: doc.catalogueKey,
-        documentMonth: doc.documentMonth,
-        metrics: doc.metrics,
-        upload: mapLight(job?.uploadState || 'succeeded'),
-        processing: mapLight(job?.processState || 'succeeded'),
-        message: job?.lastError?.message || null,
-      };
-    }),
+    files: insights.map((doc) => mapDocumentForResponse(doc, jobMap.get(doc.fileId))),
   });
 });
 
@@ -555,4 +542,65 @@ function normaliseTile(entry) {
     return { count: 0, lastUpdated: null };
   }
   return { count: entry.count, lastUpdated: entry.lastUpdated ? dayjs(entry.lastUpdated).toISOString() : null };
+}
+
+function toIsoDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function pickFirstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function mapDocumentForResponse(doc, job = null) {
+  if (!doc) return null;
+  const metadataRaw = doc.metadata || {};
+  const metricsRaw = doc.metrics || {};
+  const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
+  const metrics = typeof metricsRaw?.toObject === 'function' ? metricsRaw.toObject() : metricsRaw;
+  const uploadState = job?.uploadState || 'succeeded';
+  const processState = job?.processState || 'succeeded';
+  const uploadedAt = metadata.uploadedAt || doc.updatedAt || doc.createdAt || null;
+  const size = metadata.fileSize || metadata.size || metadata.bytes || metrics.fileSize || metrics.bytes || null;
+  const displayName =
+    pickFirstString(
+      doc.documentName,
+      doc.documentLabel,
+      metadata.documentName,
+      metadata.documentLabel,
+      metadata.originalName,
+      metadata.fileName
+    ) || `Document ${doc.documentMonth || ''}`.trim();
+
+  return {
+    id: doc.fileId,
+    fileId: doc.fileId,
+    name: displayName,
+    catalogueKey: doc.catalogueKey,
+    documentMonth: doc.documentMonth,
+    documentDate: toIsoDate(doc.documentDate || metadata.documentDate),
+    documentLabel: doc.documentLabel || metadata.documentLabel || null,
+    uploadedAt: toIsoDate(uploadedAt),
+    size: typeof size === 'number' ? size : Number(size) || null,
+    metrics,
+    metadata,
+    accountNumberMasked: metadata.accountNumberMasked || null,
+    employerName: metadata.employerName || null,
+    viewUrl: `/api/vault/files/${encodeURIComponent(doc.fileId)}/view`,
+    downloadUrl: `/api/vault/files/${encodeURIComponent(doc.fileId)}/download`,
+    upload: mapLight(uploadState),
+    processing: mapLight(processState),
+    message: job?.lastError?.message || null,
+  };
 }
