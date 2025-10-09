@@ -7,8 +7,8 @@
 // - NEW: delete collection (and all files)
 // - NEW: download collection as ZIP
 //
-// Collections: <userId>/_collections.json
-// Files:       <userId>/<collectionId>/<YYYYMMDD>-<uuid>-<safeName>.pdf
+// Collections control doc: <accountSlug>/_collections.json (accountSlug = firstname-lastname-uid)
+// Files:                   <accountSlug>/<collectionId>/<YYYYMMDD>-<uuid>-<safeName>.pdf
 //
 const express = require('express');
 const multer = require('multer');
@@ -50,10 +50,76 @@ const ANALYTICS_KEYS = getKeysByCategory('analytics');
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 
+const STORAGE_CONTEXT_TTL_MS = 5 * 60 * 1000; // cache storage slug for 5 minutes per user
+const storageContextCache = new Map();
+
+function stripDiacritics(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function slugifyNamePart(part) {
+  return stripDiacritics(part)
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+function sanitizeUniquePart(part, fallback) {
+  const raw = stripDiacritics(part || fallback || '');
+  const cleaned = raw.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return cleaned || fallback || '';
+}
+
+function fallbackUniqueFromId(userId) {
+  const id = String(userId || '').replace(/[^a-f0-9]/gi, '');
+  if (!id) return `user-${String(userId || 'unknown')}`;
+  return `user-${id.slice(-8)}`;
+}
+
+function buildAccountStorageSlug(userDoc, userId) {
+  if (!userDoc) return fallbackUniqueFromId(userId);
+  const parts = [slugifyNamePart(userDoc.firstName), slugifyNamePart(userDoc.lastName)];
+  const unique = sanitizeUniquePart(userDoc.uid, fallbackUniqueFromId(userId));
+  const filtered = parts.filter(Boolean);
+  filtered.push(unique || fallbackUniqueFromId(userId));
+  const slug = filtered.filter(Boolean).join('-').replace(/-+/g, '-');
+  return slug || fallbackUniqueFromId(userId);
+}
+
+function sanitizeCollectionSegment(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '-');
+}
+
+async function getStorageContext(userId) {
+  const key = String(userId || '');
+  const now = Date.now();
+  const cached = storageContextCache.get(key);
+  if (cached && cached.expires > now) return cached.value;
+
+  const doc = await User.findById(userId, 'firstName lastName uid').lean();
+  const slug = buildAccountStorageSlug(doc, userId);
+  const context = {
+    userId: key,
+    accountSlug: slug,
+    rootPrefix: `${slug}/`,
+    collectionsKey: `${slug}/_collections.json`,
+    collectionPrefix: (collectionId) => `${slug}/${sanitizeCollectionSegment(collectionId)}/`,
+    objectKey: (collectionId, fileName) => `${slug}/${sanitizeCollectionSegment(collectionId)}/${fileName}`,
+  };
+  storageContextCache.set(key, { value: context, expires: now + STORAGE_CONTEXT_TTL_MS });
+  return context;
+}
+
 const DEFAULT_COLLECTIONS = [
-  { id: 'default-required', name: 'Required evidence', locked: true, category: 'required' },
-  { id: 'default-analytics', name: 'Analytics sources', locked: true, category: 'analytics' },
-  { id: 'default-helpful', name: 'Helpful extras', locked: true, category: 'helpful' },
+  { id: 'payslips', name: 'Payslips', locked: true, category: null },
+  { id: 'hmrc', name: 'HMRC correspondence', locked: true, category: null },
+  { id: 'account-statements', name: 'Account statements', locked: true, category: null },
+  { id: 'investments', name: 'Investments', locked: true, category: null },
+  { id: 'pensions', name: 'Pensions', locked: true, category: null },
 ];
 
 // ---- auth ----
@@ -73,18 +139,15 @@ function b64urlDecode(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s
 function keyToFileId(key) { return b64url(key); }
 function fileIdToKey(id) { return b64urlDecode(id); }
 
-const userPrefix = (userId) => `${userId}/`;
-const collectionsKey = (userId) => `${userId}/_collections.json`;
-const collectionPrefix = (userId, colId) => `${userId}/${colId}/`;
-
 function catalogueCollectionId(key) {
   return `catalogue-${key}`;
 }
 
 async function ensureCatalogueStorageCollection(userId, key) {
+  const storage = await getStorageContext(userId);
   const entry = getCatalogueEntry(key);
   const storageId = catalogueCollectionId(key);
-  const cols = await loadCollectionsDoc(userId);
+  const cols = await loadCollectionsDoc(userId, storage);
   if (!cols.some((c) => c.id === storageId)) {
     cols.push({
       id: storageId,
@@ -94,8 +157,8 @@ async function ensureCatalogueStorageCollection(userId, key) {
       locked: true,
       category: null,
     });
-    await saveCollectionsDoc(userId, cols);
-    await putObject(collectionPrefix(userId, storageId), Buffer.alloc(0), 'application/x-directory').catch(() => {});
+    await saveCollectionsDoc(userId, cols, storage);
+    await putObject(storage.collectionPrefix(storageId), Buffer.alloc(0), 'application/x-directory').catch(() => {});
   }
   return storageId;
 }
@@ -132,9 +195,10 @@ function docMatchesFile(doc, file) {
 }
 
 // ---- collections control doc ----
-async function loadCollectionsDoc(userId) {
+async function loadCollectionsDoc(userId, storageContext = null) {
+  const storage = storageContext || (await getStorageContext(userId));
   try {
-    const url = await presign(s3, new GetObjectCommand({ Bucket: BUCKET, Key: collectionsKey(userId) }), { expiresIn: 60 });
+    const url = await presign(s3, new GetObjectCommand({ Bucket: BUCKET, Key: storage.collectionsKey }), { expiresIn: 60 });
     const res = await fetch(url);
     if (!res.ok) throw new Error('not found');
     const json = await res.json();
@@ -157,19 +221,25 @@ async function loadCollectionsDoc(userId) {
       cleaned.push({ ...def, system: true, hidden: false });
       mutated = true;
     }
-    if (mutated) await saveCollectionsDoc(userId, cleaned);
+    if (mutated) await saveCollectionsDoc(userId, cleaned, storage);
     return cleaned;
   } catch {
     // ensure defaults persisted if doc missing
-    await saveCollectionsDoc(userId, DEFAULT_COLLECTIONS.map((c) => ({ ...c, system: true, hidden: false }))).catch(() => {});
+    await saveCollectionsDoc(
+      userId,
+      DEFAULT_COLLECTIONS.map((c) => ({ ...c, system: true, hidden: false })),
+      storage
+    ).catch(() => {});
     return DEFAULT_COLLECTIONS.map((c) => ({ ...c, system: true, hidden: false }));
   }
 }
-async function saveCollectionsDoc(userId, arr) {
+async function saveCollectionsDoc(userId, arr, storageContext = null) {
+  const storage = storageContext || (await getStorageContext(userId));
   const payload = Buffer.from(JSON.stringify({ collections: arr }, null, 2));
-  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: collectionsKey(userId), Body: payload, ContentType: 'application/json' }));
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: storage.collectionsKey, Body: payload, ContentType: 'application/json' }));
 }
-async function computeCollectionMetrics(userId, cols) {
+async function computeCollectionMetrics(userId, cols, storageContext = null) {
+  const storage = storageContext || (await getStorageContext(userId));
   const state = await getUserCatalogueState(userId);
   const out = [];
   for (const c of cols) {
@@ -191,7 +261,7 @@ async function computeCollectionMetrics(userId, cols) {
       });
       continue;
     }
-    const objs = await listAll(collectionPrefix(userId, c.id));
+    const objs = await listAll(storage.collectionPrefix(c.id));
     const files = objs.filter(o => !String(o.Key).endsWith('/'));
     out.push({
       id: c.id,
@@ -376,7 +446,8 @@ async function streamR2Object(req, res, key, { inline = true, downloadName = nul
 // ---- routes ----
 router.get('/stats', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const objs = await listAll(userPrefix(u.id));
+  const storage = await getStorageContext(u.id);
+  const objs = await listAll(storage.rootPrefix);
   const files = objs.filter(o => !String(o.Key).endsWith('/'));
   const totalBytes = files.reduce((n, o) => n + (o.Size || 0), 0);
   res.json({ totalFiles: files.length, totalBytes, totalGB: +(totalBytes / (1024 ** 3)).toFixed(2), lastUpdated: new Date().toISOString() });
@@ -385,9 +456,10 @@ router.get('/stats', async (req, res) => {
 router.get('/catalogue', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
 
+  const storage = await getStorageContext(u.id);
   const [cols, objects, state] = await Promise.all([
-    loadCollectionsDoc(u.id),
-    listAll(userPrefix(u.id)),
+    loadCollectionsDoc(u.id, storage),
+    listAll(storage.rootPrefix),
     getUserCatalogueState(u.id)
   ]);
 
@@ -498,9 +570,10 @@ router.get('/catalogue', async (req, res) => {
 
 router.get('/collections', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const all = await loadCollectionsDoc(u.id);
+  const storage = await getStorageContext(u.id);
+  const all = await loadCollectionsDoc(u.id, storage);
   const visible = all.filter((c) => !c.hidden);
-  const metrics = await computeCollectionMetrics(u.id, visible);
+  const metrics = await computeCollectionMetrics(u.id, visible, storage);
   const metricMap = new Map(metrics.map((m) => [m.id, m]));
   const collections = visible.map((c) => ({
     id: c.id,
@@ -518,17 +591,19 @@ router.post('/collections', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const name = String(req.body?.name || '').trim() || 'Untitled';
   const id = randomUUID();
-  const curr = await loadCollectionsDoc(u.id);
+  const storage = await getStorageContext(u.id);
+  const curr = await loadCollectionsDoc(u.id, storage);
   curr.push({ id, name, locked: false, system: false, hidden: false });
-  await saveCollectionsDoc(u.id, curr);
-  await putObject(collectionPrefix(u.id, id), Buffer.alloc(0), 'application/x-directory').catch(() => {});
+  await saveCollectionsDoc(u.id, curr, storage);
+  await putObject(storage.collectionPrefix(id), Buffer.alloc(0), 'application/x-directory').catch(() => {});
   res.json({ collection: { id, name, fileCount: 0, bytes: 0 } });
 });
 
 router.get('/collections/:id/files', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const colId = String(req.params.id);
-  const cols = await loadCollectionsDoc(u.id);
+  const storage = await getStorageContext(u.id);
+  const cols = await loadCollectionsDoc(u.id, storage);
   const collection = cols.find((c) => c.id === colId);
   if (!collection || collection.hidden) return res.status(404).json({ error: 'Collection not found' });
 
@@ -555,7 +630,7 @@ router.get('/collections/:id/files', async (req, res) => {
     return res.json(files);
   }
 
-  const pref = collectionPrefix(u.id, colId);
+  const pref = storage.collectionPrefix(colId);
   const objs = (await listAll(pref)).filter(o => !String(o.Key).endsWith('/'));
   const { perFile } = state;
 
@@ -580,7 +655,8 @@ router.get('/collections/:id/files', async (req, res) => {
 router.post('/collections/:id/files', upload.array('files'), async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const colId = String(req.params.id);
-  const cols = await loadCollectionsDoc(u.id);
+  const storage = await getStorageContext(u.id);
+  const cols = await loadCollectionsDoc(u.id, storage);
   const targetCollection = cols.find((c) => c.id === colId && !c.hidden);
   if (!targetCollection) return res.status(404).json({ error: 'Collection not found' });
 
@@ -639,7 +715,10 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
 
       const date = dayjs().format('YYYYMMDD');
       const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
-      const key = `${u.id}/${storageCollectionId}/${date}-${randomUUID()}-${safeBase}`;
+      const key = storage.objectKey(
+        storageCollectionId,
+        `${date}-${randomUUID()}-${safeBase}`
+      );
       await putObject(key, f.buffer, 'application/pdf');
       const id = keyToFileId(key);
       await setInsightsProcessing(u.id, normalizedCatalogueKey, {
@@ -695,7 +774,8 @@ router.delete('/files/:id', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const fileId = String(req.params.id || '');
   const key = fileIdToKey(fileId);
-  if (!key.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  const storage = await getStorageContext(u.id);
+  if (!key.startsWith(storage.rootPrefix)) return res.status(403).json({ error: 'Forbidden' });
   await deleteObject(key).catch(() => {});
   await recordCatalogueDeletion(u.id, fileId);
   res.json({ ok: true });
@@ -704,14 +784,16 @@ router.delete('/files/:id', async (req, res) => {
 router.get('/files/:id/view', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const key = fileIdToKey(String(req.params.id || ''));
-  if (!key.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  const storage = await getStorageContext(u.id);
+  if (!key.startsWith(storage.rootPrefix)) return res.status(403).json({ error: 'Forbidden' });
   await streamR2Object(req, res, key, { inline: true });
 });
 
 router.get('/files/:id/download', async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const key = fileIdToKey(String(req.params.id || ''));
-  if (!key.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  const storage = await getStorageContext(u.id);
+  if (!key.startsWith(storage.rootPrefix)) return res.status(403).json({ error: 'Forbidden' });
   await streamR2Object(req, res, key, { inline: false, downloadName: key.split('/').pop() || 'file.pdf' });
 });
 
@@ -720,7 +802,8 @@ router.patch('/files/:id', express.json(), async (req, res) => {
   const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
   const oldId = String(req.params.id || '');
   const oldKey = fileIdToKey(oldId);
-  if (!oldKey.startsWith(userPrefix(u.id))) return res.status(403).json({ error: 'Forbidden' });
+  const storage = await getStorageContext(u.id);
+  if (!oldKey.startsWith(storage.rootPrefix)) return res.status(403).json({ error: 'Forbidden' });
 
   const newNameRaw = String(req.body?.name || '').trim();
   if (!newNameRaw) return res.status(400).json({ error: 'Missing name' });
@@ -729,13 +812,14 @@ router.patch('/files/:id', express.json(), async (req, res) => {
   if (!/\.pdf$/i.test(safeBase)) safeBase += '.pdf';
 
   const parts = oldKey.split('/');
-  const userId = parts[0], colId = parts[1];
+  const accountSegment = parts[0];
+  const colId = parts[1];
   const tail = parts.slice(2).join('/');
   const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/);
   const date = m ? m[1] : dayjs().format('YYYYMMDD');
   const uuid = m ? m[2] : randomUUID();
 
-  const newKey = `${userId}/${colId}/${date}-${uuid}-${safeBase}`;
+  const newKey = `${accountSegment}/${colId}/${date}-${uuid}-${safeBase}`;
   if (newKey === oldKey) {
     const id = keyToFileId(oldKey);
     await recordCatalogueRename(u.id, oldId, safeBase);
@@ -765,13 +849,14 @@ router.delete('/collections/:id', async (req, res) => {
   if (!colId) return res.status(400).json({ error: 'Missing collection id' });
 
   // Ensure the collection exists for this user
-  const cols = await loadCollectionsDoc(u.id);
+  const storage = await getStorageContext(u.id);
+  const cols = await loadCollectionsDoc(u.id, storage);
   const col = cols.find(c => c.id === colId);
   if (!col) return res.status(404).json({ error: 'Collection not found' });
   if (col.locked) return res.status(403).json({ error: 'Default collections cannot be deleted' });
 
   // List all objects with this prefix
-  const prefix = collectionPrefix(u.id, colId);
+  const prefix = storage.collectionPrefix(colId);
   const objs = await listAll(prefix);
   const toDelete = objs
     .filter(o => String(o.Key).startsWith(prefix))
@@ -785,7 +870,7 @@ router.delete('/collections/:id', async (req, res) => {
 
   // Remove collection entry from control doc
   const remaining = cols.filter(c => c.id !== colId);
-  await saveCollectionsDoc(u.id, remaining);
+  await saveCollectionsDoc(u.id, remaining, storage);
 
   res.json({ ok: true, removed: { objects: toDelete.length, collectionId: colId } });
 });
@@ -798,13 +883,14 @@ router.get('/collections/:id/archive', async (req, res) => {
   if (!archiver) return res.status(503).json({ error: 'Archive support unavailable' });
 
   // Verify ownership and get collection name for filename
-  const cols = await loadCollectionsDoc(u.id);
+  const storage = await getStorageContext(u.id);
+  const cols = await loadCollectionsDoc(u.id, storage);
   const col = cols.find(c => c.id === colId);
   if (!col) return res.status(404).json({ error: 'Collection not found' });
   const zipName = `${col.name || 'collection'}.zip`.replace(/[\\/:*?"<>|]+/g, '_');
 
   // List files for this collection
-  const prefix = collectionPrefix(u.id, colId);
+  const prefix = storage.collectionPrefix(colId);
   const objs = (await listAll(prefix)).filter(o => !String(o.Key).endsWith('/'));
   if (!objs.length) {
     // Return an empty ZIP rather than 404 for a better UX
