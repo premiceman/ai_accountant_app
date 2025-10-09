@@ -357,5 +357,20 @@ Reads prefer `user.documentInsights` (v1 envelope), else monthly/quarterly mater
 
 ---
 
+## Phase-3 QA Harness
+
+- **Run**: `npm run qa:phase3` (defaults to `http://localhost:3000` with the current year range). Override the base URL or window with `--base`, `--start`, `--end`, `--granularity`, and `--token` CLI flags.
+- **Required dev flags**: set `ENABLE_FRONTEND_ANALYTICS_V1=true`, `ENABLE_AJV_STRICT=true`, `ENABLE_STAGED_LOADER_ANALYTICS=true`, and `ENABLE_QA_DEV_ENDPOINTS=true` before starting the backend. Keep `ENABLE_ANALYTICS_LEGACY=false` for v1-only dashboards.
+- **Expected output**:
+  - Each `/api/analytics/v1/*` call returns `200`, validates against the v1 schemas, and reports ISO dates, integer minor units, and canonical categories.
+  - The repeated summary call prints cache behaviour ("cache: likely" when a hit header or ≥30% latency improvement is observed).
+  - Dev-only validation flow: `GET /__qa__/emitInvalidV1` followed by `POST /__qa__/validate/summary` → `422` with `{ code: 'SCHEMA_VALIDATION_FAILED', details: [...] }`.
+- **Common failures**:
+  - Missing feature flags → 404/legacy responses; re-run with the required env vars.
+  - Authentication gaps → harness prints `status 401`; supply `--token=<jwt>`.
+  - Ajv strict disabled → dev validator returns `200`; harness reports "expected 422".
+
+---
+
 **End of MASTER SPEC.**
 

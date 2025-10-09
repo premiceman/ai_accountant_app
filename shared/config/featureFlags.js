@@ -9,6 +9,7 @@ const DEFAULTS = Object.freeze({
   ENABLE_AJV_STRICT: 'true',
   ENABLE_ANALYTICS_LEGACY: 'false',
   ENABLE_STAGED_LOADER_ANALYTICS: 'true',
+  ENABLE_QA_DEV_ENDPOINTS: 'false',
 });
 
 function readFlag(name) {
@@ -40,6 +41,7 @@ function buildFeatureFlags() {
     enableAjvStrict: toBoolean(readFlag('ENABLE_AJV_STRICT')),
     enableAnalyticsLegacy: toBoolean(readFlag('ENABLE_ANALYTICS_LEGACY')),
     enableStagedLoaderAnalytics: toBoolean(readFlag('ENABLE_STAGED_LOADER_ANALYTICS')),
+    enableQaDevEndpoints: toBoolean(readFlag('ENABLE_QA_DEV_ENDPOINTS')),
   });
 }
 
