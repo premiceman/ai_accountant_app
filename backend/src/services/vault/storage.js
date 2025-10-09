@@ -16,12 +16,19 @@ function ensureWithinSize(buffer) {
   }
 }
 
-async function persistPdf({ userId, collectionId = 'auto', sessionPrefix, originalName, buffer }) {
+async function persistPdf({ userId, userPrefix, collectionId = 'auto', sessionPrefix, originalName, buffer }) {
   ensureWithinSize(buffer);
   if (!isPdf(buffer)) {
     throw new Error('Only PDF files are supported');
   }
-  const key = buildObjectKey({ userId, collectionSegment: collectionId || 'auto', sessionPrefix, originalName, extension: '.pdf' });
+  const key = buildObjectKey({
+    userId,
+    userPrefix,
+    collectionSegment: collectionId || 'auto',
+    sessionPrefix,
+    originalName,
+    extension: '.pdf',
+  });
   await putObject({ key, body: buffer, contentType: 'application/pdf' });
   return {
     key,
@@ -31,7 +38,7 @@ async function persistPdf({ userId, collectionId = 'auto', sessionPrefix, origin
   };
 }
 
-async function handleUpload({ userId, file, collectionId = 'auto' }) {
+async function handleUpload({ userId, userPrefix, file, collectionId = 'auto' }) {
   if (!file) throw new Error('File missing');
   const ext = path.extname(file.originalname || '').toLowerCase();
   const isZip = ext === '.zip';
@@ -40,7 +47,13 @@ async function handleUpload({ userId, file, collectionId = 'auto' }) {
     ensureWithinSize(file.buffer);
     const sessionId = randomUUID();
     const sessionPrefix = `${sessionId}`;
-    const zipKey = buildObjectKey({ userId, collectionSegment: sessionPrefix, originalName: 'upload.zip', extension: '.zip' });
+    const zipKey = buildObjectKey({
+      userId,
+      userPrefix,
+      collectionSegment: sessionPrefix,
+      originalName: 'upload.zip',
+      extension: '.zip',
+    });
     await putObject({ key: zipKey, body: file.buffer, contentType: 'application/zip' });
     const entries = await enumerateZipBuffers(file.buffer, (entry) => entry.fileName.toLowerCase().endsWith('.pdf'));
     const storedFiles = [];
@@ -49,6 +62,7 @@ async function handleUpload({ userId, file, collectionId = 'auto' }) {
       try {
         const stored = await persistPdf({
           userId,
+          userPrefix,
           collectionId,
           sessionPrefix,
           originalName: pdfName,
@@ -65,6 +79,7 @@ async function handleUpload({ userId, file, collectionId = 'auto' }) {
   const sessionId = randomUUID();
   const stored = await persistPdf({
     userId,
+    userPrefix,
     collectionId,
     sessionPrefix: sessionId,
     originalName: file.originalname,

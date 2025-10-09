@@ -12,6 +12,7 @@ const Account = require('../models/Account');
 const { handleUpload } = require('../src/services/vault/storage');
 const { registerUpload } = require('../src/services/vault/jobService');
 const VaultCollection = require('../models/VaultCollection');
+const User = require('../models/User');
 const { getObject, deleteObject, fileIdToKey } = require('../src/lib/r2');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -20,10 +21,22 @@ const router = express.Router();
 
 router.use(auth);
 
+const TILE_KEY_MAP = {
+  payslips: ['payslip'],
+  statements: ['current_account_statement', 'savings_account_statement'],
+  'savings-isa': ['savings_account_statement', 'isa_statement'],
+  investments: ['investment_statement'],
+  pensions: ['pension_statement'],
+  hmrc: ['hmrc_correspondence'],
+};
+
 function validateFileOwnership(userId, key) {
   if (!key) return false;
-  const prefix = `${userId}/`;
-  return key.startsWith(prefix);
+  const normalizedKey = String(key);
+  const firstSegment = normalizedKey.split('/')[0] || '';
+  if (!firstSegment) return false;
+  if (firstSegment === userId) return true;
+  return firstSegment.endsWith(`-${userId}`);
 }
 
 function decodeFileKey(fileId) {
@@ -79,7 +92,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       }
       collectionId = collection._id.toString();
     }
-    const { sessionId, files } = await handleUpload({ userId, file: req.file, collectionId });
+    const userPrefix = await resolveUserStoragePrefix(userObjectId, userId);
+    const { sessionId, files } = await handleUpload({ userId, userPrefix, file: req.file, collectionId });
     const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
 
     res.status(201).json({
@@ -170,6 +184,44 @@ router.delete('/files/:fileId', async (req, res) => {
     console.warn('delete file object failed', error);
   }
   res.json({ ok: true });
+});
+
+router.delete('/tiles/:tileId', async (req, res) => {
+  const tileId = String(req.params.tileId || '').toLowerCase();
+  const catalogueKeys = TILE_KEY_MAP[tileId];
+  if (!catalogueKeys) {
+    return res.status(400).json({ error: 'Unknown tile identifier' });
+  }
+
+  const userId = req.user.id;
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+
+  const docs = await DocumentInsight.find({ userId: userObjectId, catalogueKey: { $in: catalogueKeys } }).select('fileId');
+  if (!docs.length) {
+    return res.json({ ok: true, deleted: 0, removedFromR2: 0 });
+  }
+
+  const fileIds = docs.map((doc) => doc.fileId).filter(Boolean);
+  const keys = fileIds
+    .map((id) => decodeFileKey(id))
+    .filter((key) => key && validateFileOwnership(userId, key));
+
+  await DocumentInsight.deleteMany({ userId: userObjectId, catalogueKey: { $in: catalogueKeys } });
+  if (fileIds.length) {
+    await UserDocumentJob.deleteMany({ userId: userObjectId, fileId: { $in: fileIds } });
+  }
+
+  let removedFromR2 = 0;
+  for (const key of keys) {
+    try {
+      await deleteObject(key);
+      removedFromR2 += 1;
+    } catch (error) {
+      console.warn('tile delete R2 error', error);
+    }
+  }
+
+  res.json({ ok: true, deleted: fileIds.length, removedFromR2 });
 });
 
 router.get('/tiles', async (req, res) => {
@@ -420,7 +472,8 @@ router.post('/collections/:collectionId/upload', upload.single('file'), async (r
     if (!req.file) {
       return res.status(400).json({ error: 'File is required' });
     }
-    const { sessionId, files } = await handleUpload({ userId, file: req.file, collectionId });
+    const userPrefix = await resolveUserStoragePrefix(userObjectId, userId);
+    const { sessionId, files } = await handleUpload({ userId, userPrefix, file: req.file, collectionId });
     const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
     res.status(201).json({
       sessionId,
@@ -528,6 +581,34 @@ router.get('/collections/:collectionId/archive', async (req, res) => {
 
   await archive.finalize();
 });
+
+async function resolveUserStoragePrefix(userObjectId, userId) {
+  try {
+    const user = await User.findById(userObjectId).select('firstName lastName').lean();
+    return buildUserPrefix(user, userId);
+  } catch (error) {
+    console.warn('user prefix fallback', error);
+    return buildUserPrefix(null, userId);
+  }
+}
+
+function buildUserPrefix(user, fallbackId) {
+  const parts = [];
+  if (user?.firstName) parts.push(String(user.firstName));
+  if (user?.lastName) parts.push(String(user.lastName));
+  const raw = parts.join(' ').trim();
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (cleaned) return cleaned;
+  const fallback = String(fallbackId || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (fallback) return `user-${fallback}`;
+  return 'user';
+}
 
 module.exports = router;
 

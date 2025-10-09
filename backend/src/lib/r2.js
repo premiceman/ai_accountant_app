@@ -30,22 +30,49 @@ function getClient() {
   return s3Client;
 }
 
-function buildObjectKey({ userId, collectionSegment = 'auto', sessionPrefix, originalName, extension = '.pdf' }) {
-  const safeName = String(originalName || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-');
+function buildObjectKey({
+  userId,
+  userPrefix = '',
+  collectionSegment = 'auto',
+  sessionPrefix,
+  originalName,
+  extension = '.pdf',
+}) {
+  const sanitize = (value) => String(value || '').replace(/[^a-zA-Z0-9._-]+/g, '-');
+  const safeName = sanitize(originalName || 'document');
+  const prefix = String(userPrefix || '').replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '') || null;
+  let baseSegment;
+  if (prefix) {
+    baseSegment = prefix.endsWith(`-${userId}`) ? prefix : `${prefix}-${userId}`;
+  } else {
+    baseSegment = userId;
+  }
+
+  const decorate = (value) => {
+    const cleaned = sanitize(value);
+    if (!cleaned) return cleaned;
+    return prefix ? `${prefix}-${cleaned}` : cleaned;
+  };
+
   const now = new Date();
   const parts = [
-    userId,
-    collectionSegment,
+    baseSegment,
+    decorate(collectionSegment),
     now.getUTCFullYear().toString().padStart(4, '0'),
     String(now.getUTCMonth() + 1).padStart(2, '0'),
     String(now.getUTCDate()).padStart(2, '0'),
   ];
+
   if (sessionPrefix) {
-    parts.push(sessionPrefix);
+    parts.push(decorate(sessionPrefix));
   }
+
   const uuid = crypto.randomUUID();
-  parts.push(`${uuid}__${safeName}${extension}`);
-  return parts.join('/');
+  const prefixStub = prefix ? `${prefix}-` : '';
+  const fileSegment = `${prefixStub}${sanitize(uuid)}__${safeName}${extension}`;
+  parts.push(fileSegment);
+
+  return parts.filter(Boolean).join('/');
 }
 
 async function putObject({ key, body, contentType, metadata }) {
