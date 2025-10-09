@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["period", "inflowsMinor", "outflowsMinor", "netMinor"],
+  "properties": {
+    "period": {
+      "type": "object",
+      "required": ["start", "end", "month"],
+      "additionalProperties": false,
+      "properties": {
+        "start": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "end": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "month": { "type": "string", "pattern": "^\\d{4}-\\d{2}$" }
+      }
+    },
+    "inflowsMinor": { "type": "integer" },
+    "outflowsMinor": { "type": "integer" },
+    "netMinor": { "type": "integer" }
+  }
+}

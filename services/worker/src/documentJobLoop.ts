@@ -1,7 +1,16 @@
+/**
+ * ## Intent (Phase-1 only — additive, no breaking changes)
+ *
+ * Fix inconsistent dashboards by introducing a tiny, normalised v1 data layer alongside
+ * today’s legacy fields. Worker dual-writes new normalised shapes, analytics prefers v1 with
+ * legacy fallbacks, and Ajv validators warn without breaking existing flows.
+ */
+
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Readable } from 'node:stream';
 import type { HydratedDocument, Types } from 'mongoose';
 import pino from 'pino';
+import * as v1 from '../../../shared/v1/index.js';
 
 import { fileIdToKey, getObject } from './lib/r2.js';
 import { isPdf } from './lib/pdf.js';
@@ -416,6 +425,183 @@ function monthEnd(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
 }
 
+type ValidationError = { instancePath?: string; schemaPath?: string; message?: string };
+
+function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
+  if (!errors || !errors.length) return 'unknown validation error';
+  return errors
+    .map((err) => {
+      const path = err.instancePath || err.schemaPath;
+      return `${path}: ${err.message ?? 'invalid'}`;
+    })
+    .join('; ');
+}
+
+export function enrichPayloadWithV1(
+  payload: InsightUpsertPayload,
+  classification: SupportedClassification
+): InsightUpsertPayload {
+  const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
+  const fallbackIso =
+    v1.ensureIsoDate(
+      metadata.documentDate ?? payload.documentDate ?? new Date()
+    ) ?? new Date().toISOString().slice(0, 10);
+  const inferredMonth = v1.ensureIsoMonth(metadata.documentMonth ?? payload.documentMonth ?? fallbackIso);
+
+  payload.version = 'v1';
+  payload.currency = v1.normaliseCurrency((metadata.currency as string | undefined) ?? 'GBP');
+  payload.documentDateV1 = fallbackIso;
+  payload.documentMonth = inferredMonth ?? payload.documentMonth;
+
+  const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
+
+  if (classification.type === 'payslip') {
+    const employerName = typeof metadata.employerName === 'string' ? metadata.employerName : null;
+    const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
+    const periodMetric = (metrics.period ?? {}) as Record<string, unknown>;
+    const periodStart =
+      v1.ensureIsoDate(periodMetric.start ?? periodMeta.start) ?? fallbackIso;
+    const periodEnd = v1.ensureIsoDate(periodMetric.end ?? periodMeta.end) ?? fallbackIso;
+    const periodMonth =
+      v1.ensureIsoMonth(periodMetric.month ?? periodMeta.month ?? inferredMonth) ??
+      (fallbackIso ? fallbackIso.slice(0, 7) : '1970-01');
+    const payDate = v1.ensureIsoDate(metrics.payDate ?? metadata.payDate ?? fallbackIso) ?? fallbackIso;
+    const normalizedMetrics = {
+      payDate,
+      period: { start: periodStart, end: periodEnd, month: periodMonth },
+      employer: employerName,
+      grossMinor: v1.toMinorUnits(metrics.gross),
+      netMinor: v1.toMinorUnits(metrics.net),
+      taxMinor: v1.toMinorUnits(metrics.tax),
+      nationalInsuranceMinor: v1.toMinorUnits(metrics.ni ?? metrics.nationalInsurance),
+      pensionMinor: v1.toMinorUnits(metrics.pension),
+      studentLoanMinor: v1.toMinorUnits(metrics.studentLoan),
+      taxCode:
+        typeof metrics.taxCode === 'string'
+          ? metrics.taxCode
+          : typeof metadata.taxCode === 'string'
+          ? metadata.taxCode
+          : null,
+    } satisfies v1.PayslipMetricsV1;
+
+    if (!v1.validatePayslipMetricsV1(normalizedMetrics)) {
+      logger.warn(
+        {
+          fileId: payload.fileId,
+          type: classification.type,
+          errors: formatAjvErrors(v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined),
+        },
+        'Payslip v1 metrics failed validation'
+      );
+    } else {
+      payload.metricsV1 = normalizedMetrics;
+    }
+  }
+
+  const rawTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+  const normalizedTransactions: v1.TransactionV1[] = [];
+
+  rawTransactions.forEach((tx, index) => {
+    const record = (tx ?? {}) as Record<string, unknown>;
+    const rawId = record.id ?? record.transactionId ?? `legacy-${index}`;
+    const isoDate =
+      v1.ensureIsoDate(record.date ?? record.postedAt ?? fallbackIso) ?? fallbackIso;
+    const baseAmountMinor =
+      typeof record.amountMinor === 'number'
+        ? Math.round(record.amountMinor as number)
+        : v1.toMinorUnits(record.amount);
+    const rawDirection = String(record.direction ?? '').toLowerCase();
+    let direction: 'inflow' | 'outflow' = baseAmountMinor < 0 ? 'outflow' : 'inflow';
+    if (rawDirection === 'inflow' || rawDirection === 'outflow') {
+      direction = rawDirection;
+    }
+    let amountMinor = baseAmountMinor;
+    if (direction === 'outflow' && amountMinor > 0) {
+      amountMinor = -Math.abs(amountMinor);
+    } else if (direction === 'inflow' && amountMinor < 0) {
+      amountMinor = Math.abs(amountMinor);
+    }
+    const candidate: v1.TransactionV1 = {
+      id: String(rawId || `legacy-${index}`),
+      date: isoDate,
+      description: String(record.description ?? record.name ?? ''),
+      amountMinor,
+      direction,
+      category: v1.normaliseCategory(record.category ?? record.normalisedCategory),
+      accountId:
+        typeof record.accountId === 'string'
+          ? record.accountId
+          : typeof metadata.accountId === 'string'
+          ? metadata.accountId
+          : null,
+      accountName:
+        typeof record.accountName === 'string'
+          ? record.accountName
+          : typeof metadata.accountName === 'string'
+          ? metadata.accountName
+          : null,
+      currency: payload.currency ?? 'GBP',
+    };
+
+    if (!v1.validateTransactionV1(candidate)) {
+      logger.warn(
+        {
+          fileId: payload.fileId,
+          index,
+          errors: formatAjvErrors(v1.validateTransactionV1.errors as ValidationError[] | null | undefined),
+        },
+        'Statement transaction failed v1 validation'
+      );
+      return;
+    }
+    normalizedTransactions.push(candidate);
+  });
+
+  payload.transactionsV1 = normalizedTransactions;
+
+  if (
+    classification.type === 'current_account_statement' ||
+    classification.type === 'savings_account_statement' ||
+    classification.type === 'isa_statement' ||
+    classification.type === 'investment_statement' ||
+    classification.type === 'pension_statement'
+  ) {
+    const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
+    const periodStart = v1.ensureIsoDate(periodMeta.start) ?? fallbackIso;
+    const periodEnd = v1.ensureIsoDate(periodMeta.end) ?? fallbackIso;
+    const periodMonth =
+      v1.ensureIsoMonth(periodMeta.month ?? inferredMonth) ??
+      (fallbackIso ? fallbackIso.slice(0, 7) : '1970-01');
+    const inflowsMinor = normalizedTransactions
+      .filter((tx) => tx.direction === 'inflow')
+      .reduce((acc, tx) => acc + tx.amountMinor, 0);
+    const outflowsMinor = normalizedTransactions
+      .filter((tx) => tx.direction === 'outflow')
+      .reduce((acc, tx) => acc + Math.abs(tx.amountMinor), 0);
+    const metricsV1 = {
+      period: { start: periodStart, end: periodEnd, month: periodMonth },
+      inflowsMinor,
+      outflowsMinor,
+      netMinor: inflowsMinor - outflowsMinor,
+    } satisfies v1.StatementMetricsV1;
+
+    if (!v1.validateStatementMetricsV1(metricsV1)) {
+      logger.warn(
+        {
+          fileId: payload.fileId,
+          type: classification.type,
+          errors: formatAjvErrors(v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined),
+        },
+        'Statement v1 metrics failed validation'
+      );
+    } else {
+      payload.metricsV1 = metricsV1;
+    }
+  }
+
+  return payload;
+}
+
 function buildInsightPayload(
   job: UserDocumentJobDoc,
   classification: SupportedClassification,
@@ -461,6 +647,11 @@ function buildInsightPayload(
     metadata: metadata as DocumentInsight['metadata'],
     metrics: {},
     transactions: [],
+    version: 'v1',
+    currency: 'GBP',
+    documentDateV1: formatDate(today),
+    metricsV1: null,
+    transactionsV1: [],
     narrative: [`classification=${classification.type}`, `confidence=${classification.confidence}`],
     extractedAt: new Date(),
   };
@@ -563,6 +754,7 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
   }
 
   const payload = buildInsightPayload(job, classification, buffer);
+  enrichPayloadWithV1(payload, classification);
   const accountResult = await ensureAccount(job, classification);
   lastPlanSummary = accountResult.planSummary;
   lastPlanSummaryString = JSON.stringify(accountResult.planSummary);

@@ -1,3 +1,11 @@
+/**
+ * ## Intent (Phase-1 only — additive, no breaking changes)
+ *
+ * Fix inconsistent dashboards by introducing a tiny, normalised v1 data layer alongside
+ * today’s legacy fields. Worker dual-writes new normalised shapes, analytics prefers v1 with
+ * legacy fallbacks, and Ajv validators warn without breaking existing flows.
+ */
+
 import mongoose, { Schema, InferSchemaType, Model } from 'mongoose';
 
 const DocumentInsightSchema = new Schema(
@@ -32,9 +40,14 @@ const DocumentInsightSchema = new Schema(
     documentName: { type: String, default: null },
     nameMatchesUser: { type: Boolean, default: null },
     collectionId: { type: Schema.Types.ObjectId, ref: 'VaultCollection', default: null },
+    version: { type: String, default: null },
+    currency: { type: String, default: null },
+    documentDateV1: { type: String, default: null },
     metadata: { type: Schema.Types.Mixed, default: () => ({}) },
     metrics: { type: Schema.Types.Mixed, default: () => ({}) },
+    metricsV1: { type: Schema.Types.Mixed, default: null },
     transactions: { type: [Schema.Types.Mixed], default: () => [] },
+    transactionsV1: { type: [Schema.Types.Mixed], default: null },
     narrative: { type: [String], default: () => [] },
     extractedAt: { type: Date, default: null },
     createdAt: { type: Date, default: () => new Date() },
