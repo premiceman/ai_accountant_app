@@ -1,3 +1,4 @@
+// NOTE: Phase-2 — backfill v1 & add /api/analytics/v1/* endpoints. Legacy endpoints unchanged.
 // backend/routes/analytics.js
 const express = require('express');
 const dayjs = require('dayjs');
@@ -6,6 +7,15 @@ const User = require('../models/User');
 const { paths, readJsonSafe } = require('../src/store/jsondb');
 
 const router = express.Router();
+try {
+  // lazily require to avoid circular deps when worker package not installed
+  const analyticsV1Router = require('../src/routes/analytics.v1.routes.js');
+  if (analyticsV1Router) {
+    router.use('/v1', analyticsV1Router);
+  }
+} catch (error) {
+  console.warn('⚠️  analytics v1 routes unavailable', error?.message || error);
+}
 
 // TODO(analytics-cache): Swap range parsing + payload assembly to read from AnalyticsCache
 // and trigger background recompute via /_internal/analytics/recompute (see docs/compatibility-map.md).
