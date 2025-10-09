@@ -8,6 +8,55 @@ Module._load = function patchedLoader(request, parent, isMain) {
   if (request === 'pino') {
     return () => ({ info() {}, warn() {}, error() {}, debug() {} });
   }
+  if (request === 'express') {
+    const expressMock = () => ({ use() {}, get() {}, post() {} });
+    expressMock.Router = () => ({ use() {}, get() {}, post() {} });
+    return expressMock;
+  }
+  if (request === 'mongoose') {
+    class ObjectId {
+      constructor(value) {
+        this.value = value;
+      }
+      toString() {
+        return String(this.value);
+      }
+    }
+    ObjectId.isValid = () => true;
+
+    class Schema {
+      constructor() {}
+      index() {}
+    }
+    Schema.Types = { ObjectId };
+
+    return {
+      Schema,
+      model: () => ({ find: () => ({ lean: () => ({ exec: async () => [] }) }) }),
+      Types: { ObjectId },
+      connection: { readyState: 0, once() {} },
+    };
+  }
+  if (request === 'jsonwebtoken') {
+    return { verify: () => ({ id: 'stub-user' }), sign: () => 'token' };
+  }
+  if (request === 'dayjs') {
+    const stub = () => ({
+      isValid: () => true,
+      startOf: () => ({ ...stub(), toDate: () => new Date() }),
+      endOf: () => ({ ...stub(), toDate: () => new Date() }),
+      toDate: () => new Date(),
+      isAfter: () => false,
+      isBefore: () => false,
+      diff: () => 0,
+      add: () => stub(),
+      subtract: () => stub(),
+      month: () => 0,
+      year: () => 0,
+      format: () => '1970-01-01',
+    });
+    return stub;
+  }
   return originalLoad.call(this, request, parent, isMain);
 };
 

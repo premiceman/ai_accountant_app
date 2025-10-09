@@ -32,18 +32,51 @@ function buildCacheKey(userId, path, query) {
   return parts.join('|');
 }
 
+function buildInsightMatch(userId, range) {
+  const startIso = range.start;
+  const endIso = range.end;
+  const startDate = new Date(`${startIso}T00:00:00.000Z`);
+  const endDate = new Date(`${endIso}T23:59:59.999Z`);
+
+  const overlapConditions = [
+    {
+      'metadata.period.start': { $lte: endIso },
+      'metadata.period.end': { $gte: startIso },
+    },
+    {
+      'metadata.periodStart': { $lte: endIso },
+      'metadata.periodEnd': { $gte: startIso },
+    },
+    {
+      'metrics.period.start': { $lte: endIso },
+      'metrics.period.end': { $gte: startIso },
+    },
+    {
+      'metrics.periodStart': { $lte: endIso },
+      'metrics.periodEnd': { $gte: startIso },
+    },
+    {
+      'metricsV1.period.start': { $lte: endIso },
+      'metricsV1.period.end': { $gte: startIso },
+    },
+  ];
+
+  return {
+    userId,
+    $or: [
+      { documentDateV1: { $gte: startIso, $lte: endIso } },
+      { documentDate: { $gte: startDate, $lte: endDate } },
+      { createdAt: { $gte: startDate, $lte: endDate } },
+      ...overlapConditions,
+    ],
+  };
+}
+
 async function loadInsights(userId, range) {
   const objectId = mongoose.Types.ObjectId.isValid(userId)
     ? new mongoose.Types.ObjectId(userId)
     : userId;
-  const match = {
-    userId: objectId,
-    $or: [
-      { documentDateV1: { $gte: range.start, $lte: range.end } },
-      { documentDate: { $gte: new Date(range.start), $lte: new Date(`${range.end}T23:59:59.999Z`) } },
-      { createdAt: { $gte: new Date(range.start), $lte: new Date(`${range.end}T23:59:59.999Z`) } },
-    ],
-  };
+  const match = buildInsightMatch(objectId, range);
   return DocumentInsight.find(match).lean().exec();
 }
 
@@ -187,3 +220,7 @@ router.get('/timeseries', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.__test = {
+  buildCacheKey,
+  buildInsightMatch,
+};
