@@ -1,3 +1,4 @@
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // backend/index.js
 require('dotenv').config();
 
@@ -28,6 +29,7 @@ const billingRouter = safeRequire('./routes/billing')               || safeRequi
 const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
+const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
 const truelayerRouter  = null;
 const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
@@ -88,6 +90,7 @@ mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
 mount('/api/analytics', analyticsRouter, 'analytics');
+mount('/api/flags', flagsRouter, 'flags');
 mount('/api/tax', taxRouter, 'tax');
 if (qaDevRouter) {
   mount('/__qa__', qaDevRouter, 'qa-dev');

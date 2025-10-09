@@ -1,3 +1,4 @@
+<!-- // NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking. -->
 # AI Accountant Application - Feature Manifest
 
 ## 🔐 Authentication & User Management
@@ -38,12 +39,8 @@
   - **Description**: Defines schema for users including name, email, password, and uploaded file data.
 
 ## 🌍 Environment Variables
-- **File**: backend/.env
-- **Keys**:
-  - `MONGODB_URI`: mongodb+srv://Cluster27100:oct181998MPH@cluster27100.kty6g3j.mongodb.net/ai_accountant?retryWrites=true&w=majority&appName=Cluster27100
-  - `OPENAI_API_KEY`: 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
-  - `JWT_SECRET`: mysupersecurejwtsecret
-  - `PORT`: 3000
+- **File**: `.env` (create from `.env.example`)
+- **Keys**: populate using secure values for your environment. See `.env.example` for placeholders and flag defaults.
 
 ## 📂 Directory Structure
 - backend/
