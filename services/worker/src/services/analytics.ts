@@ -1,3 +1,4 @@
+// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 /**
  * ## Intent (Phase-1 only — additive, no breaking changes)
  *
@@ -9,6 +10,7 @@
 import type { Types } from 'mongoose';
 import pino from 'pino';
 import * as v1 from '../../../../shared/v1/index.js';
+import { featureFlags } from '../../../../shared/config/featureFlags.js';
 import {
   DocumentInsightModel,
   UserAnalyticsModel,
@@ -28,6 +30,19 @@ const STATEMENT_TYPES = new Set<DocumentInsight['catalogueKey']>([
 ]);
 
 type ValidationError = { instancePath?: string; schemaPath?: string; message?: string };
+
+function buildSchemaError(path: string, errors: ValidationError[] | null | undefined): Error {
+  const error = new Error('Schema validation failed');
+  (error as Error & { statusCode?: number; details?: unknown }).statusCode = 422;
+  (error as Error & { code?: string }).code = 'SCHEMA_VALIDATION_FAILED';
+  (error as Error & { details?: unknown }).details = {
+    code: 'SCHEMA_VALIDATION_FAILED',
+    path,
+    details: Array.isArray(errors) ? errors : [],
+    hint: 'Data shape invalid; try re-uploading the document.',
+  };
+  return error;
+}
 
 function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
   if (!errors || !errors.length) return 'unknown validation error';
@@ -88,10 +103,14 @@ function normaliseTransactionRecord(
     currency,
   };
   if (!v1.validateTransactionV1(candidate)) {
+    const errors = v1.validateTransactionV1.errors as ValidationError[] | null | undefined;
+    if (featureFlags.enableAjvStrict) {
+      throw buildSchemaError('shared/schemas/transactionV1.json', errors);
+    }
     logger.warn(
       {
         id: candidate.id,
-        errors: formatAjvErrors(v1.validateTransactionV1.errors as ValidationError[] | null | undefined),
+        errors: formatAjvErrors(errors),
       },
       'Transaction normalisation failed v1 validation'
     );
@@ -209,10 +228,14 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
       if (v1.validatePayslipMetricsV1(existing)) {
         metricsV1 = { ...existing };
       } else {
+        const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
+        }
         logger.warn(
           {
             fileId: insight.fileId,
-            errors: formatAjvErrors(v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined),
+            errors: formatAjvErrors(errors),
           },
           'Ignoring invalid payslip metricsV1; falling back to legacy mapping'
         );
@@ -239,10 +262,14 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
         taxCode: typeof legacyMetrics.taxCode === 'string' ? legacyMetrics.taxCode : null,
       } satisfies v1.PayslipMetricsV1;
       if (!v1.validatePayslipMetricsV1(metricsV1)) {
+        const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
+        }
         logger.warn(
           {
             fileId: insight.fileId,
-          errors: formatAjvErrors(v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined),
+            errors: formatAjvErrors(errors),
           },
           'Legacy payslip mapping failed validation; continuing with best-effort values'
         );
@@ -285,10 +312,14 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
       if (v1.validateStatementMetricsV1(existing)) {
         metricsV1 = { ...existing };
       } else {
+        const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
+        }
         logger.warn(
           {
             fileId: insight.fileId,
-          errors: formatAjvErrors(v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined),
+            errors: formatAjvErrors(errors),
           },
           'Ignoring invalid statement metricsV1; computing from transactions'
         );
@@ -313,10 +344,14 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
         netMinor: inflowsMinor - outflowsMinor,
       } satisfies v1.StatementMetricsV1;
       if (!v1.validateStatementMetricsV1(metricsV1)) {
+        const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
+        }
         logger.warn(
           {
             fileId: insight.fileId,
-          errors: formatAjvErrors(v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined),
+            errors: formatAjvErrors(errors),
           },
           'Legacy statement mapping failed validation; continuing with best-effort values'
         );

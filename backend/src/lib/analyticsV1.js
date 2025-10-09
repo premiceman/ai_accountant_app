@@ -1,3 +1,4 @@
+// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 // NOTE: Phase-2 — backfill v1 & add /api/analytics/v1/* endpoints. Legacy endpoints unchanged.
 'use strict';
 
@@ -12,6 +13,7 @@ const {
   validateStatementMetricsV1,
   validateTransactionV1,
 } = require('../../../shared/v1/index.js');
+const { featureFlags } = require('./featureFlags.js');
 const dateRange = require('./dateRange.js');
 
 const logger = pino({ name: 'analytics-v1', level: process.env.LOG_LEVEL ?? 'info' });
@@ -23,6 +25,20 @@ const STATEMENT_TYPES = new Set([
   'investment_statement',
   'pension_statement',
 ]);
+
+function buildSchemaError(path, errors, hint) {
+  const payload = {
+    code: 'SCHEMA_VALIDATION_FAILED',
+    path,
+    details: Array.isArray(errors) ? errors : [],
+  };
+  if (hint) payload.hint = hint;
+  const error = new Error('Schema validation failed');
+  error.statusCode = 422;
+  error.expose = true;
+  error.details = payload;
+  return error;
+}
 
 function normaliseTransactionRecord(source, fallbackDate, currency, prefix, index, metadata, base) {
   const rawId = source.id ?? source.transactionId ?? base?.id ?? `${prefix}-${index}`;
@@ -65,13 +81,14 @@ function normaliseTransactionRecord(source, fallbackDate, currency, prefix, inde
     currency,
   };
   if (!validateTransactionV1(candidate)) {
-    logger.warn(
-      {
-        id: candidate.id,
-        errors: validateTransactionV1.errors,
-      },
-      'Transaction normalisation failed v1 validation'
-    );
+    const context = {
+      id: candidate.id,
+      errors: validateTransactionV1.errors,
+    };
+    if (featureFlags.enableAjvStrict) {
+      throw buildSchemaError('shared/schemas/transactionV1.json', validateTransactionV1.errors, 'Data shape invalid; try re-uploading the document.');
+    }
+    logger.warn(context, 'Transaction normalisation failed v1 validation');
     return base ?? null;
   }
   return candidate;
@@ -124,7 +141,11 @@ function preferV1(insight) {
         taxCode: typeof legacyMetrics.taxCode === 'string' ? legacyMetrics.taxCode : null,
       };
       if (!validatePayslipMetricsV1(metricsV1)) {
-        logger.warn({ fileId: insight.fileId, errors: validatePayslipMetricsV1.errors }, 'Legacy payslip mapping failed validation');
+        const details = validatePayslipMetricsV1.errors;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', details, 'Data shape invalid; try re-uploading the document.');
+        }
+        logger.warn({ fileId: insight.fileId, errors: details }, 'Legacy payslip mapping failed validation');
       }
     }
   } else if (STATEMENT_TYPES.has(insight.catalogueKey)) {
@@ -161,7 +182,11 @@ function preferV1(insight) {
         netMinor: inflowsMinor - outflowsMinor,
       };
       if (!validateStatementMetricsV1(metricsV1)) {
-        logger.warn({ fileId: insight.fileId, errors: validateStatementMetricsV1.errors }, 'Legacy statement mapping failed validation');
+        const details = validateStatementMetricsV1.errors;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/statementMetricsV1.json', details, 'Data shape invalid; try re-uploading the document.');
+        }
+        logger.warn({ fileId: insight.fileId, errors: details }, 'Legacy statement mapping failed validation');
       }
     }
   }

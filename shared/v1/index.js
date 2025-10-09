@@ -1,3 +1,4 @@
+// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 /**
  * ## Intent (Phase-1 only — additive, no breaking changes)
  *
@@ -14,12 +15,20 @@ try {
   AjvCtor = require('../internal/miniAjv.js');
 }
 
+const { featureFlags } = require('../config/featureFlags.js');
+
 const canonicalCategories = Object.freeze(require('../canonicalCategories.json'));
 const payslipMetricsSchema = require('../schemas/payslipMetricsV1.json');
 const transactionSchema = require('../schemas/transactionV1.json');
 const statementMetricsSchema = require('../schemas/statementMetricsV1.json');
 
-const ajv = new AjvCtor({ allErrors: true, strict: false, messages: true, allowUnionTypes: true });
+const ajv = new AjvCtor({
+  allErrors: true,
+  strict: featureFlags.enableAjvStrict,
+  messages: true,
+  allowUnionTypes: true,
+  removeAdditional: featureFlags.enableAjvStrict ? false : undefined,
+});
 
 const validatePayslipMetricsV1 = ajv.compile(payslipMetricsSchema);
 const validateTransactionV1 = ajv.compile(transactionSchema);

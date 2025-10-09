@@ -1,3 +1,4 @@
+// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 /**
  * ## Intent (Phase-1 only — additive, no breaking changes)
  *
@@ -11,6 +12,7 @@ import { Readable } from 'node:stream';
 import type { HydratedDocument, Types } from 'mongoose';
 import pino from 'pino';
 import * as v1 from '../../../shared/v1/index.js';
+import { featureFlags } from '../../../shared/config/featureFlags.js';
 
 import { fileIdToKey, getObject } from './lib/r2.js';
 import { isPdf } from './lib/pdf.js';
@@ -427,6 +429,19 @@ function monthEnd(date: Date): Date {
 
 type ValidationError = { instancePath?: string; schemaPath?: string; message?: string };
 
+function buildSchemaError(path: string, errors: ValidationError[] | null | undefined): Error {
+  const error = new Error('Schema validation failed');
+  (error as Error & { statusCode?: number; details?: unknown }).statusCode = 422;
+  (error as Error & { code?: string }).code = 'SCHEMA_VALIDATION_FAILED';
+  (error as Error & { details?: unknown }).details = {
+    code: 'SCHEMA_VALIDATION_FAILED',
+    path,
+    details: Array.isArray(errors) ? errors : [],
+    hint: 'Data shape invalid; try re-uploading the document.',
+  };
+  return error;
+}
+
 function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
   if (!errors || !errors.length) return 'unknown validation error';
   return errors
@@ -485,11 +500,15 @@ export function enrichPayloadWithV1(
     } satisfies v1.PayslipMetricsV1;
 
     if (!v1.validatePayslipMetricsV1(normalizedMetrics)) {
+      const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
+      if (featureFlags.enableAjvStrict) {
+        throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
+      }
       logger.warn(
         {
           fileId: payload.fileId,
           type: classification.type,
-          errors: formatAjvErrors(v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined),
+          errors: formatAjvErrors(errors),
         },
         'Payslip v1 metrics failed validation'
       );
@@ -544,11 +563,15 @@ export function enrichPayloadWithV1(
     };
 
     if (!v1.validateTransactionV1(candidate)) {
+      const errors = v1.validateTransactionV1.errors as ValidationError[] | null | undefined;
+      if (featureFlags.enableAjvStrict) {
+        throw buildSchemaError('shared/schemas/transactionV1.json', errors);
+      }
       logger.warn(
         {
           fileId: payload.fileId,
           index,
-          errors: formatAjvErrors(v1.validateTransactionV1.errors as ValidationError[] | null | undefined),
+          errors: formatAjvErrors(errors),
         },
         'Statement transaction failed v1 validation'
       );
@@ -586,11 +609,15 @@ export function enrichPayloadWithV1(
     } satisfies v1.StatementMetricsV1;
 
     if (!v1.validateStatementMetricsV1(metricsV1)) {
+      const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
+      if (featureFlags.enableAjvStrict) {
+        throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
+      }
       logger.warn(
         {
           fileId: payload.fileId,
           type: classification.type,
-          errors: formatAjvErrors(v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined),
+          errors: formatAjvErrors(errors),
         },
         'Statement v1 metrics failed validation'
       );

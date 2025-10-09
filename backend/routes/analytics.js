@@ -1,3 +1,4 @@
+// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 // NOTE: Phase-2 — backfill v1 & add /api/analytics/v1/* endpoints. Legacy endpoints unchanged.
 // backend/routes/analytics.js
 const express = require('express');
@@ -5,6 +6,7 @@ const dayjs = require('dayjs');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const { paths, readJsonSafe } = require('../src/store/jsondb');
+const { featureFlags } = require('../src/lib/featureFlags');
 
 const router = express.Router();
 try {
@@ -17,8 +19,17 @@ try {
   console.warn('⚠️  analytics v1 routes unavailable', error?.message || error);
 }
 
+if (!featureFlags.enableAnalyticsLegacy) {
+  router.use((req, res, next) => {
+    if (req.path.startsWith('/v1')) return next();
+    return res.status(404).json({ error: 'Legacy analytics disabled' });
+  });
+}
+
 // TODO(analytics-cache): Swap range parsing + payload assembly to read from AnalyticsCache
 // and trigger background recompute via /_internal/analytics/recompute (see docs/compatibility-map.md).
+
+/** @deprecated Legacy analytics dashboard endpoints retained for rollback. */
 
 const REQUIRED_DOC_TYPES = [
   { type: 'p60', label: 'P60' },
