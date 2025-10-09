@@ -1,3 +1,4 @@
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // frontend/js/dashboard.js
 (function () {
   const RANGE_KEY = 'dashboardRangeV2';
@@ -120,21 +121,36 @@
     // surface a "refreshing" indicator while background recompute runs.
     setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
     const preset = loadRange();
-    const params = new URLSearchParams();
-    params.set('preset', preset || defaultRange());
-    params.set('t', Date.now());
+    const params = {
+      preset: preset || defaultRange(),
+      t: Date.now(),
+      granularity: 'month',
+    };
 
-    let data = null;
+    let flags = null;
     try {
-      const res = await Auth.fetch(`/api/analytics/dashboard?${params.toString()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Analytics ${res.status}`);
-      data = await res.json();
+      flags = await AnalyticsClient.getFlags();
+    } catch (err) {
+      console.warn('Failed to load feature flags, using defaults', err);
+      flags = { ENABLE_STAGED_LOADER_ANALYTICS: true };
+    }
+
+    const overlay = byId('accounting-loading');
+
+    try {
+      await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, async (stage) => {
+        const data = await AnalyticsClient.loadDashboard(params);
+        stage.finalising();
+        renderDashboardPayload(data);
+      });
     } catch (err) {
       console.error('Analytics load error', err);
       softError('Unable to load analytics data.');
-      return;
     }
+  }
 
+  function renderDashboardPayload(data) {
+    if (!data) return;
     toggleDashboardEmpty(data.hasData);
     updateRangeLabel(data.range);
     renderSuggestions(data);
@@ -446,10 +462,24 @@
     const overlay = byId('accounting-loading');
     if (!section || !overlay) return;
     const active = Boolean(processing?.active);
+    const stageState = overlay.dataset.stagedLoader;
+    if (stageState === 'active') {
+      overlay.dataset.pendingProcessing = JSON.stringify({
+        active,
+        message: processing?.message || 'Updating…',
+      });
+      return;
+    }
+    if (stageState === 'error') return;
     section.classList.toggle('is-loading', active);
     overlay.classList.toggle('d-none', !active);
     const msgEl = overlay.querySelector('[data-loading-message]');
     if (msgEl) msgEl.textContent = processing?.message || 'Updating…';
+    const reasonEl = overlay.querySelector('[data-loading-reason]');
+    if (!active && reasonEl) {
+      reasonEl.textContent = '';
+      reasonEl.classList.add('d-none');
+    }
   }
 
   function renderDuplicates(duplicates) {

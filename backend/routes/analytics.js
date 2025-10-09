@@ -1,4 +1,4 @@
-// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // NOTE: Phase-2 — backfill v1 & add /api/analytics/v1/* endpoints. Legacy endpoints unchanged.
 // backend/routes/analytics.js
 const express = require('express');
@@ -7,6 +7,7 @@ const auth = require('../middleware/auth');
 const User = require('../models/User');
 const { paths, readJsonSafe } = require('../src/store/jsondb');
 const { featureFlags } = require('../src/lib/featureFlags');
+const { preferV1 } = require('../src/lib/analyticsV1');
 
 const router = express.Router();
 try {
@@ -41,6 +42,132 @@ const REQUIRED_DOC_TYPES = [
 
 const money = (n) => Number(n || 0);
 
+const preferredCache = new WeakMap();
+
+function getPreferredInsight(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  if (preferredCache.has(entry)) return preferredCache.get(entry);
+  const preferred = preferV1(entry);
+  preferredCache.set(entry, preferred);
+  return preferred;
+}
+
+function toMajor(minor) {
+  if (minor == null) return null;
+  const value = Number(minor);
+  if (!Number.isFinite(value)) return null;
+  return Math.round(value) / 100;
+}
+
+function mergePayslipMetrics(legacyMetrics = {}, preferredMetrics = null) {
+  if (!preferredMetrics) return { ...(legacyMetrics || {}) };
+  const merged = { ...(legacyMetrics || {}) };
+  if (preferredMetrics.payDate) merged.payDate = preferredMetrics.payDate;
+  if (preferredMetrics.period?.start) merged.periodStart = preferredMetrics.period.start;
+  if (preferredMetrics.period?.end) merged.periodEnd = preferredMetrics.period.end;
+  if (preferredMetrics.period?.month) merged.periodMonth = preferredMetrics.period.month;
+  if (preferredMetrics.employer && !merged.employer) merged.employer = preferredMetrics.employer;
+  if (preferredMetrics.taxCode) merged.taxCode = preferredMetrics.taxCode;
+  const gross = toMajor(preferredMetrics.grossMinor);
+  if (gross != null) merged.gross = gross;
+  const net = toMajor(preferredMetrics.netMinor);
+  if (net != null) merged.net = net;
+  const tax = toMajor(preferredMetrics.taxMinor);
+  if (tax != null) merged.tax = tax;
+  const ni = toMajor(preferredMetrics.nationalInsuranceMinor);
+  if (ni != null) {
+    merged.ni = ni;
+    merged.nationalInsurance = ni;
+  }
+  const pension = toMajor(preferredMetrics.pensionMinor);
+  if (pension != null) merged.pension = pension;
+  const studentLoan = toMajor(preferredMetrics.studentLoanMinor);
+  if (studentLoan != null) merged.studentLoan = studentLoan;
+  return merged;
+}
+
+function mergeStatementMetrics(legacyMetrics = {}, preferredMetrics = null) {
+  if (!preferredMetrics) return legacyMetrics ? { ...legacyMetrics } : {};
+  const merged = { ...(legacyMetrics || {}) };
+  if (preferredMetrics.period?.start) merged.periodStart = preferredMetrics.period.start;
+  if (preferredMetrics.period?.end) merged.periodEnd = preferredMetrics.period.end;
+  if (preferredMetrics.period?.month) merged.periodMonth = preferredMetrics.period.month;
+  const inflows = toMajor(preferredMetrics.inflowsMinor);
+  const outflows = toMajor(preferredMetrics.outflowsMinor);
+  const net = toMajor(preferredMetrics.netMinor);
+  if (!merged.totals) merged.totals = {};
+  if (inflows != null) {
+    merged.income = inflows;
+    merged.totals.income = inflows;
+  }
+  if (outflows != null) {
+    merged.spend = outflows;
+    merged.totals.spend = outflows;
+  }
+  if (net != null) merged.net = net;
+  return merged;
+}
+
+function convertPreferredTransactions(transactions = [], baseKey = 'statement') {
+  return transactions.map((tx, index) => {
+    const amountMinor = Number(tx?.amountMinor ?? 0);
+    const absMajor = Math.round(Math.abs(amountMinor)) / 100;
+    const direction = tx?.direction === 'outflow' ? 'outflow' : 'inflow';
+    const signed = direction === 'outflow' ? -absMajor : absMajor;
+    const category = tx?.category || 'Other';
+    const accountId = tx?.accountId || tx?.account || null;
+    return {
+      amount: signed,
+      direction,
+      description: tx?.description || tx?.originalDescription || 'Transaction',
+      category,
+      date: tx?.date || null,
+      transfer: Boolean(tx?.transfer || category === 'Transfers'),
+      accountId,
+      accountName: tx?.accountName || tx?.account || null,
+      __id: tx?.id || `${baseKey}:${index}`,
+    };
+  });
+}
+
+function enrichInsight(entry, key) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const preferred = getPreferredInsight(entry);
+  const clone = { ...entry, __preferred: preferred };
+  if (entry.metadata) clone.metadata = { ...entry.metadata };
+  if (preferred?.documentDate) {
+    clone.metadata = clone.metadata || {};
+    clone.metadata.documentDate = preferred.documentDate;
+  }
+  if (preferred?.documentMonth) {
+    clone.metadata = clone.metadata || {};
+    clone.metadata.documentMonth = preferred.documentMonth;
+  }
+  if (preferred?.currency) clone.currency = preferred.currency;
+  if (entry.catalogueKey === 'payslip') {
+    clone.metrics = mergePayslipMetrics(entry.metrics, preferred?.metricsV1);
+  } else if (preferred?.metricsV1 && preferred.transactionsV1?.length) {
+    clone.metrics = mergeStatementMetrics(entry.metrics, preferred.metricsV1);
+  } else if (entry.metrics) {
+    clone.metrics = { ...entry.metrics };
+  }
+  if (preferred?.transactionsV1?.length) {
+    clone.transactions = convertPreferredTransactions(preferred.transactionsV1, key || entry.key || entry.baseKey || 'entry');
+  } else if (Array.isArray(entry.transactions)) {
+    clone.transactions = entry.transactions.map((tx) => ({ ...tx }));
+  }
+  return clone;
+}
+
+function normaliseSourcesWithPreferred(sources = {}) {
+  const result = {};
+  for (const [key, value] of Object.entries(sources)) {
+    if (!value) continue;
+    result[key] = enrichInsight(value, key);
+  }
+  return result;
+}
+
 function latestDocumentMonthKey(docSources = {}) {
   let latest = null;
   const consider = (value) => {
@@ -50,12 +177,19 @@ function latestDocumentMonthKey(docSources = {}) {
   };
   for (const entry of Object.values(docSources)) {
     if (!entry) continue;
+    const preferred = entry.__preferred || getPreferredInsight(entry);
     const meta = entry.metadata || {};
     const metrics = entry.metrics || {};
     consider(meta.documentDate);
     if (meta.documentMonth) consider(`${meta.documentMonth}-01`);
     consider(meta.payDate);
     consider(metrics.payDate);
+    if (preferred?.documentDate) consider(preferred.documentDate);
+    if (preferred?.documentMonth) consider(`${preferred.documentMonth}-01`);
+    if (preferred?.metricsV1?.period) {
+      consider(preferred.metricsV1.period.start);
+      consider(preferred.metricsV1.period.end);
+    }
     if (meta.period) {
       consider(meta.period.start);
       consider(meta.period.end);
@@ -563,11 +697,14 @@ function buildRangeView(docSources = {}, range) {
 
 // GET /api/analytics/dashboard
 router.get('/dashboard', auth, async (req, res) => {
+  if (!featureFlags.enableAnalyticsLegacy) {
+    return res.status(404).json({ error: 'Legacy analytics disabled' });
+  }
   const user = await User.findById(req.user.id).lean();
   if (!user) return res.status(404).json({ error: 'User not found' });
 
   const docInsights = user.documentInsights || {};
-  const docSources = docInsights.sources || {};
+  const docSources = normaliseSourcesWithPreferred(docInsights.sources || {});
   const docAggregates = docInsights.aggregates || {};
   const docProcessing = docInsights.processing || {};
   const range = parseRange(req.query, { docSources });
@@ -852,5 +989,7 @@ router.get('/dashboard', auth, async (req, res) => {
 
   res.json(payload);
 });
+
+router.__test = { normaliseSourcesWithPreferred };
 
 module.exports = router;

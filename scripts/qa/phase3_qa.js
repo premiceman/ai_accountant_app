@@ -1,3 +1,4 @@
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // NOTE: QA Harness for Phase-3 — validates /api/analytics/v1, flags, caching, staged loader "failed". Non-breaking.
 'use strict';
 
@@ -300,6 +301,16 @@ async function main() {
   flags.forEach(([name, value]) => {
     console.log(`  ${name} = ${value.raw} (${value.enabled ? 'enabled' : 'disabled'})`);
   });
+
+  const clientFlags = await fetchJson(options.base, '/api/flags', { token: options.token });
+  if (clientFlags.ok) {
+    console.log('\nBrowser-visible Flags:');
+    Object.entries(clientFlags.data || {}).forEach(([key, value]) => {
+      console.log(`  ${key} = ${value ? 'enabled' : 'disabled'}`);
+    });
+  } else {
+    console.log('\nBrowser-visible Flags: unavailable');
+  }
 
   const summaryRows = [];
   let hasFailure = false;

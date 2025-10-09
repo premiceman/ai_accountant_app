@@ -357,10 +357,19 @@ Reads prefer `user.documentInsights` (v1 envelope), else monthly/quarterly mater
 
 ---
 
+## Secrets & Flags
+
+- **Environment template**: copy `.env.example` to `.env` and replace placeholders with environment-specific values. Never commit live secrets.
+- **Frontend flip**: keep `ENABLE_FRONTEND_ANALYTICS_V1=true` and `ENABLE_STAGED_LOADER_ANALYTICS=true` so dashboards default to v1 data and staged messaging.
+- **Legacy safety**: retain `ENABLE_ANALYTICS_LEGACY=true` during rollout; set to `false` only after verifying the v1 dashboard.
+- **Ajv strictness**: default `ENABLE_AJV_STRICT=false` (warn-only). Once the frontend flip is validated, set it to `true` to enforce schema errors server-side.
+
+---
+
 ## Phase-3 QA Harness
 
 - **Run**: `npm run qa:phase3` (defaults to `http://localhost:3000` with the current year range). Override the base URL or window with `--base`, `--start`, `--end`, `--granularity`, and `--token` CLI flags.
-- **Required dev flags**: set `ENABLE_FRONTEND_ANALYTICS_V1=true`, `ENABLE_AJV_STRICT=true`, `ENABLE_STAGED_LOADER_ANALYTICS=true`, and `ENABLE_QA_DEV_ENDPOINTS=true` before starting the backend. Keep `ENABLE_ANALYTICS_LEGACY=false` for v1-only dashboards.
+- **Recommended dev flags**: set `ENABLE_FRONTEND_ANALYTICS_V1=true` and `ENABLE_STAGED_LOADER_ANALYTICS=true` before starting the backend. Keep `ENABLE_AJV_STRICT=false` until the frontend flip is verified, then enable strict mode and optionally set `ENABLE_ANALYTICS_LEGACY=false` for v1-only dashboards.
 - **Expected output**:
   - Each `/api/analytics/v1/*` call returns `200`, validates against the v1 schemas, and reports ISO dates, integer minor units, and canonical categories.
   - The repeated summary call prints cache behaviour ("cache: likely" when a hit header or ≥30% latency improvement is observed).

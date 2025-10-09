@@ -1,3 +1,4 @@
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
 /**
  * ## Intent (Phase-1 only — additive, no breaking changes)
@@ -10,7 +11,7 @@
 import type { Types } from 'mongoose';
 import pino from 'pino';
 import * as v1 from '../../../../shared/v1/index.js';
-import { featureFlags } from '../../../../shared/config/featureFlags.js';
+import { featureFlags } from '../config/featureFlags.js';
 import {
   DocumentInsightModel,
   UserAnalyticsModel,

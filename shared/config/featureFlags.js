@@ -1,4 +1,4 @@
-// NOTE: Phase-3 — Frontend uses /api/analytics/v1, staged loader on dashboards, Ajv strict. Rollback via flags.
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 'use strict';
 
 const DEFAULTS = Object.freeze({
@@ -6,8 +6,8 @@ const DEFAULTS = Object.freeze({
   ENABLE_RECONCILIATION: 'false',
   ANALYTICS_V1_CACHE_TTL_SECONDS: '600',
   ENABLE_FRONTEND_ANALYTICS_V1: 'true',
-  ENABLE_AJV_STRICT: 'true',
-  ENABLE_ANALYTICS_LEGACY: 'false',
+  ENABLE_AJV_STRICT: 'false',
+  ENABLE_ANALYTICS_LEGACY: 'true',
   ENABLE_STAGED_LOADER_ANALYTICS: 'true',
   ENABLE_QA_DEV_ENDPOINTS: 'false',
 });
@@ -49,10 +49,35 @@ const featureFlags = buildFeatureFlags();
 
 function serialiseFlagsForClient() {
   return {
-    enableFrontendAnalyticsV1: featureFlags.enableFrontendAnalyticsV1,
-    enableAnalyticsLegacy: featureFlags.enableAnalyticsLegacy,
-    enableStagedLoaderAnalytics: featureFlags.enableStagedLoaderAnalytics,
+    ENABLE_FRONTEND_ANALYTICS_V1: featureFlags.enableFrontendAnalyticsV1,
+    ENABLE_ANALYTICS_LEGACY: featureFlags.enableAnalyticsLegacy,
+    ENABLE_STAGED_LOADER_ANALYTICS: featureFlags.enableStagedLoaderAnalytics,
   };
+}
+
+const FLAG_NAME_MAP = Object.freeze({
+  ENABLE_ANALYTICS_V1: 'enableAnalyticsV1',
+  ENABLE_RECONCILIATION: 'enableReconciliation',
+  ENABLE_FRONTEND_ANALYTICS_V1: 'enableFrontendAnalyticsV1',
+  ENABLE_AJV_STRICT: 'enableAjvStrict',
+  ENABLE_ANALYTICS_LEGACY: 'enableAnalyticsLegacy',
+  ENABLE_STAGED_LOADER_ANALYTICS: 'enableStagedLoaderAnalytics',
+  ENABLE_QA_DEV_ENDPOINTS: 'enableQaDevEndpoints',
+});
+
+function getFlag(name) {
+  const key = FLAG_NAME_MAP[name];
+  if (key && Object.prototype.hasOwnProperty.call(featureFlags, key)) {
+    return Boolean(featureFlags[key]);
+  }
+  return toBoolean(readFlag(name));
+}
+
+function getAllFlags() {
+  return Object.keys(FLAG_NAME_MAP).reduce((acc, name) => {
+    acc[name] = getFlag(name);
+    return acc;
+  }, {});
 }
 
 module.exports = {
@@ -60,6 +85,15 @@ module.exports = {
   featureFlags,
   buildFeatureFlags,
   serialiseFlagsForClient,
+  getFlag,
+  getAllFlags,
+  ENABLE_ANALYTICS_V1: featureFlags.enableAnalyticsV1,
+  ENABLE_RECONCILIATION: featureFlags.enableReconciliation,
+  ENABLE_FRONTEND_ANALYTICS_V1: featureFlags.enableFrontendAnalyticsV1,
+  ENABLE_AJV_STRICT: featureFlags.enableAjvStrict,
+  ENABLE_ANALYTICS_LEGACY: featureFlags.enableAnalyticsLegacy,
+  ENABLE_STAGED_LOADER_ANALYTICS: featureFlags.enableStagedLoaderAnalytics,
+  ENABLE_QA_DEV_ENDPOINTS: featureFlags.enableQaDevEndpoints,
   toBoolean,
   toNumber,
   readFlag,
