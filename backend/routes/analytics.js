@@ -534,11 +534,13 @@ function summariseStatementRange(entries = [], range) {
       if (!withinRange(txDate, range)) return;
       const amount = Number(tx.amount);
       if (!Number.isFinite(amount)) return;
+      const direction = String(tx.direction || (amount >= 0 ? 'inflow' : 'outflow')).toLowerCase();
+      const signedAmount = direction === 'outflow' ? -Math.abs(amount) : Math.abs(amount);
       const id = `${entry.key}:${idx}`;
       transactions.push({
         __id: id,
-        amount,
-        direction: tx.direction || (amount >= 0 ? 'inflow' : 'outflow'),
+        amount: signedAmount,
+        direction,
         description: tx.description || 'Transaction',
         category: tx.category || 'Other',
         date: tx.date || null,
