@@ -326,10 +326,16 @@ router.get('/statements/institutions/:institutionId/files', async (req, res) => 
   const userObjectId = new mongoose.Types.ObjectId(req.user.id);
   const accounts = await Account.find({ userId: userObjectId, institutionName }).sort({ displayName: 1 });
   const accountIds = accounts.map((account) => account._id);
+  const maskedByAccount = new Map(accounts.map((account) => [account.accountNumberMasked, account._id.toString()]));
+  const maskedNumbers = accounts.map((account) => account.accountNumberMasked).filter(Boolean);
+
   const documents = await DocumentInsight.find({
     userId: userObjectId,
-    'metadata.accountId': { $in: accountIds },
     catalogueKey: { $in: ['current_account_statement', 'savings_account_statement', 'isa_statement'] },
+    $or: [
+      { 'metadata.accountId': { $in: accountIds } },
+      maskedNumbers.length ? { 'metadata.accountNumberMasked': { $in: maskedNumbers } } : null,
+    ].filter(Boolean),
   }).sort({ documentMonth: -1 });
 
   const jobs = await UserDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
@@ -339,7 +345,11 @@ router.get('/statements/institutions/:institutionId/files', async (req, res) => 
 
   const docsByAccount = new Map();
   for (const doc of documents) {
-    const accountId = doc.metadata?.accountId ? doc.metadata.accountId.toString() : null;
+    const meta = doc.metadata || {};
+    let accountId = meta.accountId ? meta.accountId.toString() : null;
+    if (!accountId && meta.accountNumberMasked && maskedByAccount.has(meta.accountNumberMasked)) {
+      accountId = maskedByAccount.get(meta.accountNumberMasked) || null;
+    }
     if (!accountId) continue;
     const list = docsByAccount.get(accountId) || [];
     list.push({
@@ -351,20 +361,38 @@ router.get('/statements/institutions/:institutionId/files', async (req, res) => 
 
   res.json({
     institution: { name: institutionName, accountCount: accounts.length },
-    accounts: accounts.map((account) => ({
-      accountId: account._id.toString(),
-      displayName: account.displayName,
-      accountType: account.accountType,
-      accountNumberMasked: account.accountNumberMasked,
-    files: (docsByAccount.get(account._id.toString()) || []).map((entry) => {
-      const payload = mapDocumentForResponse(entry.doc, entry.job);
-      if (payload && !payload.accountNumberMasked && entry.doc?.metadata?.accountNumberMasked) {
-        payload.accountNumberMasked = entry.doc.metadata.accountNumberMasked;
-      }
-      return payload;
+    accounts: accounts.map((account) => {
+      const accountId = account._id.toString();
+      const files = (docsByAccount.get(accountId) || []).map((entry) => {
+        const payload = mapDocumentForResponse(entry.doc, entry.job);
+        if (!payload) return null;
+        payload.accountId = accountId;
+        if (!payload.accountNumberMasked) {
+          payload.accountNumberMasked = entry.doc?.metadata?.accountNumberMasked || account.accountNumberMasked || null;
+        }
+        if (!payload.metadata) payload.metadata = {};
+        if (payload.metadata && typeof payload.metadata === 'object') {
+          payload.metadata.accountId = accountId;
+          if (!payload.metadata.accountNumberMasked) {
+            payload.metadata.accountNumberMasked = payload.accountNumberMasked;
+          }
+          if (!payload.metadata.accountType && account.accountType) {
+            payload.metadata.accountType = account.accountType;
+          }
+        }
+        payload.accountType = account.accountType || payload.metadata?.accountType || null;
+        return payload;
+      }).filter(Boolean);
+
+      return {
+        accountId,
+        displayName: account.displayName,
+        accountType: account.accountType,
+        accountNumberMasked: account.accountNumberMasked,
+        files,
+      };
     }),
-  })),
-});
+  });
 });
 
 router.get('/statements/accounts/:accountId/files', async (req, res) => {
@@ -650,6 +678,11 @@ function mapDocumentForResponse(doc, job = null) {
   const metricsRaw = doc.metrics || {};
   const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
   const metrics = typeof metricsRaw?.toObject === 'function' ? metricsRaw.toObject() : metricsRaw;
+  if (metadata && typeof metadata === 'object' && metadata.accountId && typeof metadata.accountId === 'object') {
+    if (typeof metadata.accountId.toString === 'function') {
+      metadata.accountId = metadata.accountId.toString();
+    }
+  }
   const uploadState = job?.uploadState || 'succeeded';
   const processState = job?.processState || 'succeeded';
   const uploadedAt = metadata.uploadedAt || doc.updatedAt || doc.createdAt || null;
@@ -677,6 +710,7 @@ function mapDocumentForResponse(doc, job = null) {
     metrics,
     metadata,
     accountNumberMasked: metadata.accountNumberMasked || null,
+    accountId: typeof metadata.accountId === 'string' ? metadata.accountId : null,
     employerName: metadata.employerName || null,
     viewUrl: `/api/vault/files/${encodeURIComponent(doc.fileId)}/view`,
     downloadUrl: `/api/vault/files/${encodeURIComponent(doc.fileId)}/download`,

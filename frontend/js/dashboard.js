@@ -17,6 +17,7 @@
     applyTierLocks(me);
     wireRangePicker();
     wireDeltaButtons(me);
+    wireRefreshButton();
     await reloadDashboard();
   }
 
@@ -116,7 +117,16 @@
     });
   }
 
-  async function reloadDashboard() {
+  async function getAnalyticsFlags() {
+    try {
+      return await AnalyticsClient.getFlags();
+    } catch (err) {
+      console.warn('Failed to load feature flags, using defaults', err);
+      return { ENABLE_STAGED_LOADER_ANALYTICS: true };
+    }
+  }
+
+  async function reloadDashboard(options = {}) {
     // TODO(analytics-cache): Once worker-backed cache is live, detect stale payloads and
     // surface a "refreshing" indicator while background recompute runs.
     setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
@@ -127,25 +137,75 @@
       granularity: 'month',
     };
 
-    let flags = null;
-    try {
-      flags = await AnalyticsClient.getFlags();
-    } catch (err) {
-      console.warn('Failed to load feature flags, using defaults', err);
-      flags = { ENABLE_STAGED_LOADER_ANALYTICS: true };
-    }
+    const overlay = options.overlay ?? byId('accounting-loading');
+    const showLoader = options.showLoader !== false;
+    const flags = options.flags || (showLoader ? await getAnalyticsFlags() : null);
 
-    const overlay = byId('accounting-loading');
+    const execute = async (stage) => {
+      const data = await AnalyticsClient.loadDashboard(params);
+      if (stage && typeof stage.finalising === 'function') stage.finalising();
+      renderDashboardPayload(data);
+    };
 
     try {
-      await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, async (stage) => {
-        const data = await AnalyticsClient.loadDashboard(params);
-        stage.finalising();
-        renderDashboardPayload(data);
-      });
+      if (showLoader) {
+        await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, execute);
+      } else {
+        await execute();
+      }
     } catch (err) {
       console.error('Analytics load error', err);
       softError('Unable to load analytics data.');
+    }
+  }
+
+  function wireRefreshButton() {
+    const btn = byId('dashboard-refresh');
+    if (!btn) return;
+    const overlay = byId('accounting-loading');
+    const spinner = btn.querySelector('[data-refresh-spinner]');
+    const label = btn.querySelector('[data-refresh-label]');
+
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner?.classList.remove('d-none');
+      label?.classList.add('d-none');
+      try {
+        const flags = await getAnalyticsFlags();
+        await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, async (stage) => {
+          await triggerReprocess();
+          stage.finalising();
+          await reloadDashboard({ overlay, showLoader: false, flags });
+        });
+      } catch (error) {
+        console.error('Dashboard refresh failed', error);
+        softError(error?.reason || error?.message || 'Failed to refresh analytics. Please try again.');
+      } finally {
+        spinner?.classList.add('d-none');
+        label?.classList.remove('d-none');
+        btn.disabled = false;
+      }
+    });
+  }
+
+  async function triggerReprocess() {
+    const response = await Auth.fetch('/api/analytics/reprocess', { method: 'POST' });
+    if (!response.ok) {
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (err) {
+        payload = null;
+      }
+      const error = new Error(payload?.error || 'Failed to refresh analytics');
+      error.reason = payload?.error;
+      throw error;
+    }
+    try {
+      return await response.json();
+    } catch (err) {
+      return {};
     }
   }
 

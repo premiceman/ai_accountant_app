@@ -20,9 +20,15 @@
         <h1 class="page-title" data-page-title>Intelligence Dashboard</h1>
         <div class="text-muted small">Welcome, <strong id="greeting-name">—</strong></div>
       </div>
-      <div class="d-flex flex-column text-end small text-muted">
-        <span id="dash-year">Tax year —</span>
-        <span id="range-current" class="fw-semibold">—</span>
+      <div class="d-flex flex-column align-items-end gap-2">
+        <button class="btn btn-outline-primary btn-sm d-flex align-items-center gap-2" id="dashboard-refresh" type="button">
+          <span data-refresh-label>Refresh data</span>
+          <span class="spinner-border spinner-border-sm d-none" data-refresh-spinner role="status" aria-hidden="true"></span>
+        </button>
+        <div class="d-flex flex-column text-end small text-muted">
+          <span id="dash-year">Tax year —</span>
+          <span id="range-current" class="fw-semibold">—</span>
+        </div>
       </div>
     </header>
 
