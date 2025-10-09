@@ -1,23 +1,5 @@
 const mongoose = require('mongoose');
 
-const METADATA_SCHEMA = new mongoose.Schema(
-  {
-    employerName: { type: String, default: null },
-    institutionName: { type: String, default: null },
-    rawInstitutionName: { type: String, default: null },
-    accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
-    accountType: { type: String, default: null },
-    accountNumberMasked: { type: String, default: null },
-    accountHolder: { type: String, default: null },
-    nameMatchesUser: { type: Boolean, default: null },
-    period: {
-      start: { type: String, default: null },
-      end: { type: String, default: null },
-    },
-  },
-  { _id: false }
-);
-
 const DocumentInsightSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, required: true },
@@ -44,18 +26,23 @@ const DocumentInsightSchema = new mongoose.Schema(
     extractionSource: { type: String, enum: ['openai', 'heuristic'], default: 'openai' },
     confidence: { type: Number, default: null },
     contentHash: { type: String, index: true, required: true },
-    documentDate: { type: String, default: null },
+    documentDate: { type: Date, default: null },
     documentMonth: { type: String, index: true, default: null },
+    documentLabel: { type: String, default: null },
+    documentName: { type: String, default: null },
+    nameMatchesUser: { type: Boolean, default: null },
     collectionId: { type: mongoose.Schema.Types.ObjectId, ref: 'VaultCollection', default: null },
-    metadata: { type: METADATA_SCHEMA, default: () => ({}) },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     metrics: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     transactions: { type: [mongoose.Schema.Types.Mixed], default: () => [] },
     narrative: { type: [String], default: () => [] },
+    extractedAt: { type: Date, default: null },
     createdAt: { type: Date, default: Date.now },
     updatedAt: { type: Date, default: Date.now },
   },
   {
     timestamps: true,
+    strict: true,
   }
 );
 

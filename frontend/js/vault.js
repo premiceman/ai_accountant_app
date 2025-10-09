@@ -92,6 +92,8 @@
   };
 
   let unauthorised = false;
+  let viewerPreviewUrl = null;
+  let viewerPreviewToken = 0;
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
@@ -267,9 +269,14 @@
 
   function closeViewer() {
     if (!viewerRoot) return;
+    viewerPreviewToken += 1;
     viewerRoot.setAttribute('aria-hidden', 'true');
     if (viewerFrame) {
       viewerFrame.src = 'about:blank';
+    }
+    if (viewerPreviewUrl) {
+      URL.revokeObjectURL(viewerPreviewUrl);
+      viewerPreviewUrl = null;
     }
     if (viewerEmpty) {
       viewerEmpty.style.display = '';
@@ -287,11 +294,44 @@
     });
   }
 
-  function previewViewerFile(fileId) {
+  async function previewViewerFile(fileId) {
     if (!viewerFrame || !fileId) return;
-    viewerFrame.src = `${API_BASE}/files/${encodeURIComponent(fileId)}/view`;
-    if (viewerEmpty) {
-      viewerEmpty.style.display = 'none';
+    const requestId = ++viewerPreviewToken;
+    try {
+      viewerFrame.src = 'about:blank';
+      if (viewerEmpty) {
+        viewerEmpty.style.display = 'none';
+      }
+      const response = await authFetch(`${API_BASE}/files/${encodeURIComponent(fileId)}/view`);
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to preview documents.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(text || 'Preview failed');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (requestId !== viewerPreviewToken) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      if (viewerPreviewUrl) {
+        URL.revokeObjectURL(viewerPreviewUrl);
+      }
+      viewerPreviewUrl = url;
+      viewerFrame.src = url;
+    } catch (error) {
+      console.error('Failed to preview document', error);
+      if (viewerEmpty) {
+        viewerEmpty.style.display = '';
+        viewerEmpty.textContent = 'Preview unavailable for this file.';
+      }
+      if (viewerFrame) {
+        viewerFrame.src = 'about:blank';
+      }
+      window.alert(error.message || 'Unable to preview this document right now.');
     }
   }
 
@@ -377,6 +417,7 @@
     previewButton.type = 'button';
     previewButton.textContent = 'Preview';
     previewButton.addEventListener('click', (event) => {
+      event.preventDefault();
       event.stopPropagation();
       selectViewerFile(file.fileId, { preview: true });
     });
@@ -385,9 +426,33 @@
     const downloadButton = document.createElement('button');
     downloadButton.type = 'button';
     downloadButton.textContent = 'Download';
-    downloadButton.addEventListener('click', (event) => {
+    downloadButton.addEventListener('click', async (event) => {
+      event.preventDefault();
       event.stopPropagation();
-      window.open(`${API_BASE}/files/${encodeURIComponent(file.fileId)}/download`, '_blank', 'noopener');
+      try {
+        const response = await authFetch(`${API_BASE}/files/${encodeURIComponent(file.fileId)}/download`);
+        if (response.status === 401) {
+          handleUnauthorised('Please sign in again to download documents.');
+          return;
+        }
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          throw new Error(text || 'Download failed');
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        const fallbackName = file.title || file.fileId || 'document';
+        anchor.download = `${fallbackName.replace(/[^\w. -]+/g, '_')}.pdf`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+      } catch (error) {
+        console.error('Failed to download document', error);
+        window.alert(error.message || 'Unable to download this document right now.');
+      }
     });
     actions.appendChild(downloadButton);
 

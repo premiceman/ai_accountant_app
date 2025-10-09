@@ -1,23 +1,5 @@
 import mongoose, { Schema, InferSchemaType, Model } from 'mongoose';
 
-const MetadataSchema = new Schema(
-  {
-    employerName: { type: String, default: null },
-    institutionName: { type: String, default: null },
-    rawInstitutionName: { type: String, default: null },
-    accountId: { type: Schema.Types.ObjectId, ref: 'Account', default: null },
-    accountType: { type: String, default: null },
-    accountNumberMasked: { type: String, default: null },
-    accountHolder: { type: String, default: null },
-    nameMatchesUser: { type: Boolean, default: null },
-    period: {
-      start: { type: String, default: null },
-      end: { type: String, default: null },
-    },
-  },
-  { _id: false }
-);
-
 const DocumentInsightSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', index: true, required: true },
@@ -44,17 +26,21 @@ const DocumentInsightSchema = new Schema(
     extractionSource: { type: String, enum: ['openai', 'heuristic'], default: 'openai' },
     confidence: { type: Number, default: null },
     contentHash: { type: String, index: true, required: true },
-    documentDate: { type: String, default: null },
+    documentDate: { type: Date, default: null },
     documentMonth: { type: String, index: true, default: null },
+    documentLabel: { type: String, default: null },
+    documentName: { type: String, default: null },
+    nameMatchesUser: { type: Boolean, default: null },
     collectionId: { type: Schema.Types.ObjectId, ref: 'VaultCollection', default: null },
-    metadata: { type: MetadataSchema, default: () => ({}) },
+    metadata: { type: Schema.Types.Mixed, default: () => ({}) },
     metrics: { type: Schema.Types.Mixed, default: () => ({}) },
     transactions: { type: [Schema.Types.Mixed], default: () => [] },
     narrative: { type: [String], default: () => [] },
+    extractedAt: { type: Date, default: null },
     createdAt: { type: Date, default: () => new Date() },
     updatedAt: { type: Date, default: () => new Date() },
   },
-  { timestamps: true }
+  { timestamps: true, strict: true }
 );
 
 DocumentInsightSchema.index({ userId: 1, catalogueKey: 1 });
