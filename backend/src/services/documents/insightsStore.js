@@ -136,12 +136,13 @@ function summariseStatementEntries(entries = []) {
     txList.forEach((tx, idx) => {
       const amount = Number(tx.amount);
       if (!Number.isFinite(amount)) return;
-      const direction = tx.direction || (amount >= 0 ? 'inflow' : 'outflow');
+      const direction = String(tx.direction || (amount >= 0 ? 'inflow' : 'outflow')).toLowerCase();
+      const signedAmount = direction === 'outflow' ? -Math.abs(amount) : Math.abs(amount);
       const id = `${entry.key}:${idx}`;
       transactions.push({
         ...tx,
         __id: id,
-        amount,
+        amount: signedAmount,
         direction,
         accountId: tx.accountId || accountId,
         accountName: tx.accountName || accountName,
@@ -448,21 +449,23 @@ function buildTimeline(sources = {}) {
       txList.forEach((tx) => {
         const amount = Number(tx.amount);
         if (!Number.isFinite(amount)) return;
+        const direction = String(tx.direction || (amount >= 0 ? 'inflow' : 'outflow')).toLowerCase();
+        const signedAmount = direction === 'outflow' ? -Math.abs(amount) : Math.abs(amount);
         const iso = normaliseDate(tx.date) || fallbackEnd || fallbackStart;
         const monthKey = monthKeyFromIso(iso);
         if (!monthKey) return;
         const bucket = ensureTimelineBucket(buckets, monthKey);
         bucket.sources.statements = true;
-        if (amount >= 0) bucket.statements.income += amount;
-        else bucket.statements.spend += Math.abs(amount);
+        if (signedAmount >= 0) bucket.statements.income += signedAmount;
+        else bucket.statements.spend += Math.abs(signedAmount);
         bucket.statements.transactions += 1;
         const category = tx.category || 'Other';
         const record = bucket.statements.categoryMap.get(category) || { label: category, inflow: 0, outflow: 0, amount: 0 };
-        if (amount >= 0) {
-          record.inflow += amount;
-          record.amount += amount;
+        if (signedAmount >= 0) {
+          record.inflow += signedAmount;
+          record.amount += signedAmount;
         } else {
-          const abs = Math.abs(amount);
+          const abs = Math.abs(signedAmount);
           record.outflow += abs;
           record.amount += abs;
         }
