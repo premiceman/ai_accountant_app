@@ -4,11 +4,11 @@
 
 const express = require('express');
 const mongoose = require('mongoose');
-const pino = require('pino');
 const auth = require('../../middleware/auth');
 const DocumentInsight = require('../../models/DocumentInsight');
 const { featureFlags } = require('../lib/featureFlags');
 const { SimpleCache } = require('../lib/simpleCache');
+const { createLogger } = require('../lib/logger');
 const {
   aggregateSummary,
   aggregateCategories,
@@ -19,7 +19,7 @@ const {
 const { normaliseRange, buildPeriod } = require('../lib/dateRange');
 
 const cache = new SimpleCache({ ttlSeconds: featureFlags.analyticsCacheTtlSeconds });
-const logger = pino({ name: 'analytics-v1-http', level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({ name: 'analytics-v1-http', level: process.env.LOG_LEVEL ?? 'info' });
 
 const router = express.Router();
 

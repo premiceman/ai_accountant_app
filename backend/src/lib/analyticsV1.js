@@ -2,7 +2,7 @@
 // NOTE: Phase-2 — backfill v1 & add /api/analytics/v1/* endpoints. Legacy endpoints unchanged.
 'use strict';
 
-const pino = require('pino');
+const { createLogger } = require('./logger');
 const {
   ensureIsoDate,
   ensureIsoMonth,
@@ -16,7 +16,7 @@ const {
 const { featureFlags } = require('./featureFlags.js');
 const dateRange = require('./dateRange.js');
 
-const logger = pino({ name: 'analytics-v1', level: process.env.LOG_LEVEL ?? 'info' });
+const logger = createLogger({ name: 'analytics-v1', level: process.env.LOG_LEVEL ?? 'info' });
 
 const STATEMENT_TYPES = new Set([
   'current_account_statement',
