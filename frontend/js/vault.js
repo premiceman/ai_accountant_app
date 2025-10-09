@@ -643,6 +643,30 @@
     return response;
   }
 
+  function animateOnce(element, className, { duration = 420 } = {}) {
+    return new Promise((resolve) => {
+      if (!element) return resolve();
+
+      const cleanup = () => {
+        element.removeEventListener('animationend', onEnd);
+        element.removeEventListener('transitionend', onEnd);
+        element.classList.remove(className);
+        clearTimeout(timer);
+        resolve();
+      };
+
+      const onEnd = (event) => {
+        if (event.target !== element) return;
+        cleanup();
+      };
+
+      const timer = setTimeout(cleanup, duration);
+      element.addEventListener('animationend', onEnd);
+      element.addEventListener('transitionend', onEnd);
+      element.classList.add(className);
+    });
+  }
+
   function renderSessionPanel() {
     if (!(sessionRows && sessionEmpty)) return;
     sessionRows.innerHTML = '';
@@ -915,39 +939,138 @@
 
   function renderTiles(data) {
     const tiles = [];
-    if (data?.tiles) {
-      tiles.push({ label: 'Payslips', count: data.tiles.payslips?.count || 0, updated: data.tiles.payslips?.lastUpdated });
-      const statementCount = (data.tiles.statements?.count || 0) + (data.tiles.savings?.count || 0);
-      tiles.push({ label: 'Statements', count: statementCount, updated: data.tiles.statements?.lastUpdated });
-      const savingsCount = (data.tiles.savings?.count || 0) + (data.tiles.isa?.count || 0);
-      tiles.push({ label: 'Savings & ISA', count: savingsCount, updated: data.tiles.isa?.lastUpdated || data.tiles.savings?.lastUpdated });
-      tiles.push({ label: 'Investments', count: data.tiles.investments?.count || 0, updated: data.tiles.investments?.lastUpdated });
-      tiles.push({ label: 'Pensions', count: data.tiles.pension?.count || 0, updated: data.tiles.pension?.lastUpdated });
-      tiles.push({ label: 'HMRC', count: data.tiles.hmrc?.count || 0, updated: data.tiles.hmrc?.lastUpdated });
-    }
+    const raw = data?.tiles || {};
+    tiles.push({
+      id: 'payslips',
+      label: 'Payslips',
+      count: raw.payslips?.count || 0,
+      updated: raw.payslips?.lastUpdated || null,
+    });
+    tiles.push({
+      id: 'statements',
+      label: 'Statements',
+      count: (raw.statements?.count || 0) + (raw.savings?.count || 0),
+      updated: raw.statements?.lastUpdated || raw.savings?.lastUpdated || null,
+    });
+    tiles.push({
+      id: 'savings-isa',
+      label: 'Savings & ISA',
+      count: (raw.savings?.count || 0) + (raw.isa?.count || 0),
+      updated: raw.isa?.lastUpdated || raw.savings?.lastUpdated || null,
+    });
+    tiles.push({
+      id: 'investments',
+      label: 'Investments',
+      count: raw.investments?.count || 0,
+      updated: raw.investments?.lastUpdated || null,
+    });
+    tiles.push({
+      id: 'pensions',
+      label: 'Pensions',
+      count: raw.pension?.count || 0,
+      updated: raw.pension?.lastUpdated || null,
+    });
+    tiles.push({
+      id: 'hmrc',
+      label: 'HMRC',
+      count: raw.hmrc?.count || 0,
+      updated: raw.hmrc?.lastUpdated || null,
+    });
+
     tilesGrid.innerHTML = '';
+
     tiles.forEach((tile) => {
       const card = document.createElement('article');
       card.className = 'tile';
+      card.dataset.tileId = tile.id;
+
+      const header = document.createElement('div');
+      header.className = 'tile-header';
+
+      const labelGroup = document.createElement('div');
+      labelGroup.className = 'tile-label';
+
       const label = document.createElement('span');
       label.className = 'label';
       label.textContent = tile.label;
+
       const count = document.createElement('strong');
       count.textContent = tile.count.toLocaleString();
-      card.append(label, count);
+      labelGroup.append(label, count);
+
+      const actions = document.createElement('div');
+      actions.className = 'tile-actions';
+
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'tile-delete-btn btn-icon';
+      deleteButton.innerHTML = '<i class="bi bi-trash"></i>';
+      deleteButton.setAttribute('aria-label', `Delete all ${tile.label} documents`);
+      deleteButton.title = tile.count
+        ? `Delete all ${tile.label} documents`
+        : `No ${tile.label.toLowerCase()} documents to delete`;
+      deleteButton.disabled = tile.count === 0;
+      deleteButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        handleTileDelete(tile, card, deleteButton);
+      });
+      actions.appendChild(deleteButton);
+
+      header.append(labelGroup, actions);
+      card.appendChild(header);
+
       if (tile.updated) {
         const updated = document.createElement('span');
-        updated.className = 'muted';
+        updated.className = 'muted tile-updated';
         updated.textContent = `Updated ${new Date(tile.updated).toLocaleString()}`;
         card.appendChild(updated);
       }
+
       tilesGrid.appendChild(card);
     });
+
     if ((data?.processing || 0) > 0) {
       const pill = document.createElement('div');
       pill.className = 'processing-pill';
       pill.textContent = `${data.processing} processing…`;
       tilesGrid.prepend(pill);
+    }
+  }
+
+  async function handleTileDelete(tile, card, button) {
+    if (!tile || !card || !button || button.disabled) return;
+    if (tile.count === 0) return;
+
+    const countLabel = tile.count === 1 ? '1 document' : `${tile.count.toLocaleString()} documents`;
+    const confirmed = window.confirm(
+      `Delete ${countLabel} from ${tile.label}? This will permanently remove the files from your vault and Cloudflare R2.`
+    );
+    if (!confirmed) return;
+
+    const originalContent = button.innerHTML;
+    button.disabled = true;
+    button.classList.add('is-loading');
+    button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+    card.classList.add('tile-is-busy');
+
+    try {
+      const response = await apiFetch(`/tiles/${encodeURIComponent(tile.id)}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const payload = await safeJson(response);
+        throw new Error(payload?.error || 'Failed to delete documents');
+      }
+      await animateOnce(card, 'tile--cleared', { duration: 520 });
+      await Promise.all([fetchTiles(), fetchPayslips(), fetchStatements(), fetchCollections()]);
+    } catch (error) {
+      console.error('Tile delete failed', error);
+      alert(error.message || 'Failed to delete documents');
+    } finally {
+      if (button.isConnected) {
+        button.classList.remove('is-loading');
+        button.innerHTML = originalContent;
+        button.disabled = false;
+      }
+      card.classList.remove('tile-is-busy');
     }
   }
 

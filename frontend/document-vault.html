@@ -281,6 +281,85 @@
       font-weight: 700;
     }
 
+    .tile-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .tile-label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .tile-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .tile-delete-btn {
+      border-radius: 999px;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      background: rgba(239, 68, 68, 0.1);
+      color: var(--light-red);
+      width: 36px;
+      height: 36px;
+      transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease, opacity 0.18s ease;
+    }
+
+    .tile-delete-btn:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .tile-delete-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+    }
+
+    .tile-delete-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .tile-delete-btn.is-loading {
+      pointer-events: none;
+    }
+
+    .tile-delete-btn .spinner-border {
+      width: 1rem;
+      height: 1rem;
+      border-width: 0.15rem;
+    }
+
+    .tile-is-busy {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .tile-updated {
+      margin-top: 4px;
+      font-size: 0.85rem;
+    }
+
+    @keyframes tile-cleared {
+      0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.35);
+        background: rgba(16, 185, 129, 0.12);
+      }
+      100% {
+        box-shadow: var(--vault-shadow-soft);
+        background: var(--vault-card-bg);
+      }
+    }
+
+    .tile.tile--cleared {
+      animation: tile-cleared 0.48s ease forwards;
+    }
+
     .processing-pill {
       align-self: flex-start;
       background: rgba(16, 185, 129, 0.12);
@@ -309,6 +388,83 @@
       margin: 0;
       font-size: 1.2rem;
       font-weight: 600;
+    }
+
+    .doc-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: var(--vault-card-bg);
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+      margin-bottom: 12px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .doc-row:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+    }
+
+    .doc-main {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .doc-main i {
+      font-size: 1.3rem;
+    }
+
+    .doc-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .doc-sub {
+      font-size: 0.82rem;
+      color: var(--vault-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .doc-actions {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .doc-row.is-deleting {
+      pointer-events: none;
+      animation: doc-row-dismiss 0.32s ease forwards;
+    }
+
+    @keyframes doc-row-dismiss {
+      0% {
+        opacity: 1;
+        transform: translateY(0);
+        max-height: 200px;
+        margin-bottom: 12px;
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(-10px);
+        max-height: 0;
+        margin-bottom: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+      }
     }
 
     .grid {
