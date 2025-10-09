@@ -36,13 +36,20 @@
       justify-content: space-between;
     }
     .onboarding-logo {
-      font-size: 1.2rem;
-      letter-spacing: 0.2rem;
-      text-transform: uppercase;
-      font-weight: 600;
       display: flex;
       align-items: center;
-      gap: 0.6rem;
+      gap: 0.85rem;
+    }
+    .onboarding-logo .brand-mark {
+      padding: 0.75rem 1.1rem;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.14);
+      box-shadow: 0 16px 34px rgba(8, 24, 64, 0.32);
+      color: #f8fbff;
+    }
+    .onboarding-logo .brand-dot {
+      --brand-dot-size: 16px;
+      box-shadow: 0 0 28px rgba(109, 231, 255, 0.45);
     }
     .onboarding-logo span.badge {
       background: rgba(255,255,255,0.18);
@@ -428,8 +435,10 @@
     <aside class="onboarding-sidebar">
       <div>
         <div class="onboarding-logo">
-          <img src="/img/logo.svg" alt="Phloat" onerror="this.style.display='none'" width="28" height="28">
-          <span>Phloat</span>
+          <span class="brand-mark brand-mark--lg">
+            <span class="brand-dot" aria-hidden="true"></span>
+            <span>Phloat-AI Accounant</span>
+          </span>
           <span class="badge">Private beta</span>
         </div>
         <div class="onboarding-progress">
