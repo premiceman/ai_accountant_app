@@ -22,8 +22,8 @@
 
     .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter: saturate(1.2) blur(8px)}
     .landing-nav .btn{ padding:.55rem 1rem }
-    .brand-mark{ display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.2px; text-decoration:none; color:var(--fg)}
-    .brand-dot{ width:12px; height:12px; border-radius:50%; background: radial-gradient(circle at 30% 30%, var(--brand), var(--brand-hover)); box-shadow: 0 0 24px color-mix(in oklab, var(--brand) 45%, transparent)}
+    .brand-mark{ display:inline-flex; align-items:center; gap:.75rem; text-decoration:none; color:var(--fg) }
+    .brand-logo{ height:44px; width:auto; display:block; border-radius:16px; background:rgba(255,255,255,0.72); padding:5px 6px; box-shadow:0 12px 28px rgba(12,21,32,0.14); }
 
     .hero{ min-height: var(--hero-h); position: relative; display:grid; place-items:center; overflow:hidden }
     .hero-inner{ position:relative; z-index:2; max-width:1100px; padding:6rem 1.25rem 4rem }
@@ -134,6 +134,7 @@
       .chip{ font-size:.85rem; }
       .logos{ gap: clamp(1rem, 4vw, 2rem); }
       .landing-menu{ display:flex; }
+      .brand-logo{ height:40px; padding:4px 5px; }
     }
 
     @media (max-width: 767.98px){
@@ -144,6 +145,7 @@
       .feature:hover{ transform:none; }
       .feature, .feature.wide{ grid-column: span 1; }
       .hero p.lede{ max-width: 100%; }
+      .brand-logo{ height:36px; padding:3px 4px; border-radius:14px; }
     }
 
     @media (max-width: 575.98px){
@@ -178,7 +180,9 @@
           <span></span><span></span><span></span>
         </span>
       </button>
-      <a class="brand-mark" href="/"><span class="brand-dot"></span><span>AI Accountant</span></a>
+      <a class="brand-mark" href="/">
+        <img src="/assets/phloat-logo.svg" class="brand-logo" alt="Phloat AI Accountant" width="320" height="320">
+      </a>
       <div class="landing-nav-actions">
         <a class="btn btn-outline" href="#features">Features</a>
         <a class="btn btn-outline" href="#advisor">AI Advisor</a>
