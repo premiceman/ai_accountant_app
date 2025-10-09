@@ -12,7 +12,12 @@ try {
   // eslint-disable-next-line global-require
   AjvCtor = require('ajv');
 } catch (error) {
-  AjvCtor = require('../internal/miniAjv.js');
+  try {
+    // eslint-disable-next-line global-require
+    AjvCtor = require('../../backend/node_modules/ajv');
+  } catch (innerError) {
+    AjvCtor = require('../internal/miniAjv.js');
+  }
 }
 
 const { featureFlags } = require('../config/featureFlags.js');
@@ -21,6 +26,7 @@ const canonicalCategories = Object.freeze(require('../canonicalCategories.json')
 const payslipMetricsSchema = require('../schemas/payslipMetricsV1.json');
 const transactionSchema = require('../schemas/transactionV1.json');
 const statementMetricsSchema = require('../schemas/statementMetricsV1.json');
+const analyticsResponseSchemas = require('../schemas/analyticsV1Responses.js');
 
 const ajv = new AjvCtor({
   allErrors: true,
@@ -33,6 +39,11 @@ const ajv = new AjvCtor({
 const validatePayslipMetricsV1 = ajv.compile(payslipMetricsSchema);
 const validateTransactionV1 = ajv.compile(transactionSchema);
 const validateStatementMetricsV1 = ajv.compile(statementMetricsSchema);
+const validateDashboardSummaryV1 = ajv.compile(analyticsResponseSchemas.dashboardSummaryV1);
+const validateAnalyticsCategoriesV1 = ajv.compile(analyticsResponseSchemas.categoriesV1);
+const validateAnalyticsLargestExpensesV1 = ajv.compile(analyticsResponseSchemas.largestExpensesV1);
+const validateAnalyticsAccountsV1 = ajv.compile(analyticsResponseSchemas.accountsV1);
+const validateAnalyticsTimeseriesV1 = ajv.compile(analyticsResponseSchemas.timeseriesV1);
 
 const canonicalCategoryMap = new Map(
   canonicalCategories.map((category) => [simplifyCategory(category), category])
@@ -147,6 +158,7 @@ function normaliseCurrency(value) {
 
 module.exports = {
   canonicalCategories,
+  analyticsResponseSchemas,
   normaliseCategory,
   ensureIsoDate,
   ensureIsoMonth,
@@ -156,4 +168,9 @@ module.exports = {
   validatePayslipMetricsV1,
   validateTransactionV1,
   validateStatementMetricsV1,
+  validateDashboardSummaryV1,
+  validateAnalyticsCategoriesV1,
+  validateAnalyticsLargestExpensesV1,
+  validateAnalyticsAccountsV1,
+  validateAnalyticsTimeseriesV1,
 };

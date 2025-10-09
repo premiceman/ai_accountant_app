@@ -30,6 +30,7 @@ const integrationsRouter = safeRequire('./routes/integrations')     || safeRequi
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
 const truelayerRouter  = null;
+const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -88,6 +89,9 @@ mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
 mount('/api/analytics', analyticsRouter, 'analytics');
 mount('/api/tax', taxRouter, 'tax');
+if (qaDevRouter) {
+  mount('/__qa__', qaDevRouter, 'qa-dev');
+}
 
 
 
