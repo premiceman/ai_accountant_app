@@ -1,6 +1,12 @@
 const dayjs = require('dayjs');
 const User = require('../../../models/User');
 const DocumentInsight = require('../../../models/DocumentInsight');
+const { sha256 } = require('../../lib/hash');
+
+const LEGACY_SCHEMA_VERSION = 'legacy-v1';
+const LEGACY_PARSER_VERSION = 'legacy-parser-v1';
+const LEGACY_PROMPT_VERSION = 'legacy-prompt-v1';
+const LEGACY_MODEL = 'legacy-ingest';
 
 function mergeFileReference(existing = [], fileInfo) {
   const filtered = existing.filter((item) => item.id !== fileInfo.id);
@@ -575,14 +581,30 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
 
   if (fileInfo?.id) {
     try {
+      const now = new Date();
+      const extractionSource =
+        insights.metadata?.extractionSource || insights.metrics?.extractionSource || 'heuristic';
+      const currency = insights.metadata?.currency || 'GBP';
+      const documentIso = documentContext.documentIso || null;
+      const documentDate = documentIso ? new Date(documentIso) : null;
+      const documentDateV1 = documentIso ? documentIso.slice(0, 10) : null;
+      const contentHash = sha256(
+        [
+          fileInfo.id,
+          documentIso || '',
+          JSON.stringify(insights.metrics || {}),
+          JSON.stringify(insights.transactions || []),
+        ].join('|')
+      );
+
       await DocumentInsight.findOneAndUpdate(
-        { userId, fileId: fileInfo.id },
+        { userId, fileId: fileInfo.id, schemaVersion: LEGACY_SCHEMA_VERSION },
         {
           $set: {
             catalogueKey: key,
             baseKey,
             documentMonth: documentContext.monthKey || null,
-            documentDate: documentContext.documentIso ? new Date(documentContext.documentIso) : null,
+            documentDate,
             documentLabel: documentContext.label || null,
             documentName: documentContext.documentName || null,
             nameMatchesUser: documentContext.nameMatchesUser,
@@ -591,11 +613,24 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
               ...(insights.metadata || {}),
               documentMonth: documentContext.monthKey || null,
               documentLabel: documentContext.label || null,
-              documentDate: documentContext.documentIso || null,
+              documentDate: documentIso || null,
             },
             transactions: Array.isArray(insights.transactions) ? insights.transactions : [],
             narrative: Array.isArray(insights.narrative) ? insights.narrative : [],
-            extractedAt: new Date(),
+            extractedAt: now,
+            updatedAt: now,
+            schemaVersion: LEGACY_SCHEMA_VERSION,
+            parserVersion: LEGACY_PARSER_VERSION,
+            promptVersion: LEGACY_PROMPT_VERSION,
+            model: extractionSource === 'openai' ? 'openai-legacy' : LEGACY_MODEL,
+            extractionSource,
+            contentHash,
+            version: 'legacy-sync',
+            currency,
+            documentDateV1,
+          },
+          $setOnInsert: {
+            createdAt: now,
           },
         },
         { upsert: true, setDefaultsOnInsert: true }
