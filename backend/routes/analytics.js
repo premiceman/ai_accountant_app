@@ -3,8 +3,12 @@
 // backend/routes/analytics.js
 const express = require('express');
 const dayjs = require('dayjs');
+const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const DocumentInsight = require('../models/DocumentInsight');
+const { applyDocumentInsights, setInsightsProcessing } = require('../src/services/documents/insightsStore');
+const { rebuildMonthlyAnalytics } = require('../src/services/vault/analytics');
 const { paths, readJsonSafe } = require('../src/store/jsondb');
 const { featureFlags } = require('../src/lib/featureFlags');
 const { preferV1 } = require('../src/lib/analyticsV1');
@@ -990,6 +994,90 @@ router.get('/dashboard', auth, async (req, res) => {
   }
 
   res.json(payload);
+});
+
+router.post('/reprocess', auth, async (req, res) => {
+  const userId = req.user.id;
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const overlayKey = 'reprocess';
+  try {
+    const startedAt = new Date();
+    const processingState = { active: true, message: 'Reprocessing documents…', updatedAt: startedAt };
+    await setInsightsProcessing(userId, overlayKey, processingState);
+
+    const documents = await DocumentInsight.find({ userId: userObjectId }).sort({ updatedAt: 1 }).lean();
+
+    await User.findByIdAndUpdate(userId, {
+      $set: {
+        documentInsights: {
+          sources: {},
+          aggregates: {},
+          timeline: [],
+          processing: { [overlayKey]: processingState },
+          updatedAt: startedAt,
+        },
+      },
+    }).exec();
+
+    let applied = 0;
+    for (const doc of documents) {
+      if (!doc?.catalogueKey) continue;
+      const metadata = { ...(doc.metadata || {}) };
+      if (doc.documentMonth && !metadata.documentMonth) metadata.documentMonth = doc.documentMonth;
+      if (doc.documentLabel && !metadata.documentLabel) metadata.documentLabel = doc.documentLabel;
+      if (doc.documentName && !metadata.documentName) metadata.documentName = doc.documentName;
+      if (!metadata.documentDate) {
+        if (doc.documentDate instanceof Date && !Number.isNaN(doc.documentDate.valueOf())) {
+          metadata.documentDate = doc.documentDate.toISOString();
+        } else if (typeof doc.documentDate === 'string' && doc.documentDate) {
+          metadata.documentDate = doc.documentDate;
+        } else if (doc.documentDateV1) {
+          metadata.documentDate = doc.documentDateV1;
+        }
+      }
+      if (metadata.accountId && typeof metadata.accountId === 'object' && typeof metadata.accountId.toString === 'function') {
+        metadata.accountId = metadata.accountId.toString();
+      }
+
+      const insights = {
+        storeKey: doc.catalogueKey,
+        baseKey: doc.baseKey || doc.catalogueKey,
+        metrics: doc.metrics || {},
+        metadata,
+        transactions: Array.isArray(doc.transactions) ? doc.transactions : [],
+        narrative: Array.isArray(doc.narrative) ? doc.narrative : [],
+      };
+
+      const uploadedAt = doc.updatedAt || doc.createdAt || null;
+      const fileInfo = {
+        id: doc.fileId,
+        name: doc.documentName || metadata.documentName || doc.documentLabel || doc.fileId,
+        uploadedAt: uploadedAt instanceof Date ? uploadedAt.toISOString() : uploadedAt || null,
+      };
+
+      await applyDocumentInsights(userId, doc.catalogueKey, insights, fileInfo);
+      applied += 1;
+    }
+
+    const months = Array.from(new Set(documents.map((doc) => doc.documentMonth).filter(Boolean)));
+    for (const month of months) {
+      await rebuildMonthlyAnalytics({ userId: userObjectId, month });
+    }
+
+    await setInsightsProcessing(userId, overlayKey, {
+      active: false,
+      message: applied ? 'Document analytics refreshed' : 'No documents to refresh',
+    });
+
+    res.json({ refreshed: applied, months });
+  } catch (error) {
+    await setInsightsProcessing(userId, overlayKey, {
+      active: false,
+      message: 'Document refresh failed',
+    });
+    console.error('POST /analytics/reprocess error:', error);
+    res.status(500).json({ error: 'Failed to refresh analytics' });
+  }
 });
 
 router.__test = { normaliseSourcesWithPreferred };
