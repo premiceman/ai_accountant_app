@@ -94,6 +94,14 @@
   let unauthorised = false;
   let viewerPreviewUrl = null;
   let viewerPreviewToken = 0;
+  let jsonTestEnabled = false;
+  let jsonModal = null;
+  let jsonModalTitle = null;
+  let jsonModalMeta = null;
+  let jsonModalContent = null;
+  let jsonModalClose = null;
+  let jsonModalReturnFocus = null;
+  let jsonModalStylesInjected = false;
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
@@ -343,6 +351,164 @@
     }
   }
 
+  function injectJsonModalStyles() {
+    if (jsonModalStylesInjected) return;
+    jsonModalStylesInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .vault-json-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.55); padding: 24px; z-index: 1300; }
+      .vault-json-modal.is-visible { display: flex; }
+      .vault-json-modal__dialog { position: relative; width: min(760px, 100%); max-height: min(85vh, 700px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); box-shadow: var(--vault-shadow, 0 16px 48px rgba(15, 23, 42, 0.12)); border: 1px solid var(--vault-border, rgba(15, 23, 42, 0.08)); display: flex; flex-direction: column; overflow: hidden; }
+      .vault-json-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      .vault-json-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
+      .vault-json-modal__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px; }
+      .vault-json-modal__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
+      .vault-json-modal__meta { padding: 12px 20px 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); display: flex; flex-wrap: wrap; gap: 8px 12px; }
+      .vault-json-modal__content { flex: 1; margin: 0; padding: 16px 20px 20px; background: rgba(15, 23, 42, 0.03); font-family: 'SFMono-Regular', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.85rem; line-height: 1.45; overflow: auto; white-space: pre-wrap; word-break: break-word; color: inherit; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureJsonModal() {
+    if (jsonModal) return jsonModal;
+    injectJsonModalStyles();
+
+    const modal = document.createElement('div');
+    modal.className = 'vault-json-modal';
+    modal.setAttribute('aria-hidden', 'true');
+
+    const dialog = document.createElement('div');
+    dialog.className = 'vault-json-modal__dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'vault-json-modal-title');
+
+    const header = document.createElement('header');
+    header.className = 'vault-json-modal__header';
+
+    const title = document.createElement('h4');
+    title.className = 'vault-json-modal__title';
+    title.id = 'vault-json-modal-title';
+    title.textContent = 'Processed JSON';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'vault-json-modal__close';
+    closeBtn.setAttribute('aria-label', 'Close JSON view');
+    closeBtn.textContent = '×';
+
+    const meta = document.createElement('div');
+    meta.className = 'vault-json-modal__meta';
+    meta.hidden = true;
+
+    const content = document.createElement('pre');
+    content.className = 'vault-json-modal__content';
+
+    header.append(title, closeBtn);
+    dialog.append(header, meta, content);
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        hideJsonModal();
+      }
+    });
+
+    closeBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      hideJsonModal();
+    });
+
+    jsonModal = modal;
+    jsonModalTitle = title;
+    jsonModalMeta = meta;
+    jsonModalContent = content;
+    jsonModalClose = closeBtn;
+    return modal;
+  }
+
+  function hideJsonModal() {
+    if (!jsonModal) return;
+    jsonModal.classList.remove('is-visible');
+    jsonModal.setAttribute('aria-hidden', 'true');
+    if (jsonModalContent) {
+      jsonModalContent.textContent = '';
+      jsonModalContent.scrollTop = 0;
+    }
+    if (jsonModalMeta) {
+      jsonModalMeta.textContent = '';
+      jsonModalMeta.hidden = true;
+    }
+    const returnTarget = jsonModalReturnFocus;
+    jsonModalReturnFocus = null;
+    if (returnTarget && typeof returnTarget.focus === 'function') {
+      requestAnimationFrame(() => {
+        try { returnTarget.focus(); } catch (error) { console.warn('Failed to restore focus after closing JSON modal', error); }
+      });
+    }
+  }
+
+  function buildJsonPayload(file) {
+    if (!file) return null;
+    if (file.raw && typeof file.raw === 'object') {
+      return file.raw;
+    }
+    const payload = {};
+    if (file.fileId || file.id) payload.fileId = file.fileId || file.id;
+    if (file.title) payload.title = file.title;
+    if (file.subtitle) payload.subtitle = file.subtitle;
+    if (file.metrics) payload.metrics = file.metrics;
+    if (file.metadata) payload.metadata = file.metadata;
+    if (Array.isArray(file.summary)) payload.summary = file.summary;
+    if (Array.isArray(file.details)) payload.details = file.details;
+    return Object.keys(payload).length ? payload : null;
+  }
+
+  function showJsonForFile(file, trigger) {
+    if (!jsonTestEnabled) return;
+    const payload = buildJsonPayload(file);
+    if (!payload) {
+      window.alert('Processed JSON is unavailable for this document.');
+      return;
+    }
+
+    const modal = ensureJsonModal();
+    if (!modal || !jsonModalContent) {
+      window.alert('Unable to display JSON right now.');
+      return;
+    }
+
+    let text = '';
+    try {
+      text = JSON.stringify(payload, null, 2);
+    } catch (error) {
+      console.error('Failed to serialise document JSON', error);
+      text = 'Unable to serialise this document\'s JSON payload.';
+    }
+
+    if (jsonModalTitle) {
+      jsonModalTitle.textContent = file?.title ? `${file.title} — JSON` : 'Processed JSON';
+    }
+    if (jsonModalMeta) {
+      const parts = [];
+      if (file?.subtitle) parts.push(file.subtitle);
+      if (file?.fileId) parts.push(`ID: ${file.fileId}`);
+      if (file?.raw?.catalogueKey) parts.push(file.raw.catalogueKey);
+      jsonModalMeta.textContent = parts.join(' • ');
+      jsonModalMeta.hidden = parts.length === 0;
+    }
+    jsonModalContent.textContent = text;
+    jsonModalContent.scrollTop = 0;
+
+    jsonModalReturnFocus = trigger || null;
+    modal.classList.add('is-visible');
+    modal.setAttribute('aria-hidden', 'false');
+    if (jsonModalClose) {
+      jsonModalClose.focus();
+    }
+  }
+
   async function deleteViewerFile(fileId) {
     if (!fileId) return;
     const confirmed = window.confirm('Are you sure you want to delete this document? This action cannot be undone.');
@@ -455,6 +621,19 @@
       }
     });
     actions.appendChild(downloadButton);
+
+    let jsonButton = null;
+    if (jsonTestEnabled) {
+      jsonButton = document.createElement('button');
+      jsonButton.type = 'button';
+      jsonButton.textContent = 'JSON';
+      jsonButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showJsonForFile(file, jsonButton);
+      });
+      actions.appendChild(jsonButton);
+    }
 
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
@@ -924,6 +1103,21 @@
         pollFileStatus(fileId);
       }
     }, POLL_INTERVAL_UPLOAD);
+  }
+
+  async function fetchFeatureFlags() {
+    try {
+      const response = await authFetch('/api/flags', { cache: 'no-store' });
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to continue.');
+        return;
+      }
+      if (!response.ok) return;
+      const flags = await response.json().catch(() => null);
+      jsonTestEnabled = Boolean(flags?.JSON_TEST_ENABLED);
+    } catch (error) {
+      console.warn('Failed to load feature flags', error);
+    }
   }
 
   async function fetchTiles() {
@@ -1545,6 +1739,7 @@
     }
 
     setupDropzone();
+    await fetchFeatureFlags();
     restoreSessionsFromStorage();
     queueRefresh();
     fetchTiles();
@@ -1565,7 +1760,12 @@
   }
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && viewerRoot && viewerRoot.getAttribute('aria-hidden') === 'false') {
+    if (event.key !== 'Escape') return;
+    if (jsonModal && jsonModal.classList.contains('is-visible')) {
+      hideJsonModal();
+      return;
+    }
+    if (viewerRoot && viewerRoot.getAttribute('aria-hidden') === 'false') {
       closeViewer();
     }
   });
