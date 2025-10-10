@@ -68,345 +68,515 @@
       </div>
     </section>
 
-    <section class="mb-4 position-relative" id="accounting-section">
-      <div class="dashboard-loading-overlay d-none" id="accounting-loading">
-        <div class="dashboard-loading-overlay__content">
-          <div class="spinner-border text-light" role="status" aria-hidden="true"></div>
-          <div class="mt-2" data-loading-message>Updating…</div>
+<section class="dashboard-section" id="accounting-section">
+      <div class="card shadow-sm border-0">
+        <div class="card-header d-flex align-items-start justify-content-between gap-3">
+          <div>
+            <h2 class="h4 mb-1">Accounting &amp; Tax</h2>
+            <p class="section-subtitle mb-0">Consolidated payroll analytics, tax positioning and HMRC readiness grounded in your uploaded documents.</p>
+          </div>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge text-bg-light" id="comparison-label">Comparing to previous period</span>
+            <button class="btn btn-icon btn-sm section-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#accounting-section-body" aria-expanded="true" aria-controls="accounting-section-body">
+              <i class="bi bi-chevron-up"></i>
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
-        <div>
-          <h2 class="h4 mb-0">Accounting intelligence</h2>
-          <p class="text-muted small mb-0">Advanced HMRC tracking, allowance utilisation and income analytics for the selected window.</p>
-        </div>
-        <span class="badge text-bg-light" id="comparison-label">Comparing to previous period</span>
-      </div>
+        <div id="accounting-section-body" class="collapse show">
+          <div class="card-body position-relative">
+            <div class="dashboard-loading-overlay d-none" id="accounting-loading">
+              <div class="dashboard-loading-overlay__content">
+                <div class="spinner-border text-light" role="status" aria-hidden="true"></div>
+                <div class="mt-2" data-loading-message>Updating…</div>
+              </div>
+            </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm" data-metric-card>
-            <div class="card-body">
-              <div class="text-muted small">Savings capacity</div>
-              <div class="h4 m-0" id="kpi-savings">£—</div>
-              <div class="small text-muted" id="kpi-savings-sub"></div>
-              <div class="small text-muted" id="kpi-savings-delta"></div>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-md-6 col-xl-3">
+                <div class="card h-100 shadow-sm" data-metric-card>
+                  <div class="card-body">
+                    <div class="text-muted small">Savings capacity</div>
+                    <div class="h4 m-0" id="kpi-savings">£—</div>
+                    <div class="small text-muted" id="kpi-savings-sub"></div>
+                    <div class="small text-muted" id="kpi-savings-delta"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-3">
+                <div class="card h-100 shadow-sm" data-metric-card>
+                  <div class="card-body">
+                    <div class="text-muted small">HMRC balance</div>
+                    <div class="h4 m-0" id="kpi-hmrc">—</div>
+                    <div class="text-muted small" id="kpi-hmrc-sub">—</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-3">
+                <div class="card h-100 shadow-sm" data-metric-card>
+                  <div class="card-body">
+                    <div class="text-muted small">Gross income</div>
+                    <div class="h4 m-0" id="kpi-income">£—</div>
+                    <div class="small text-muted" id="kpi-income-delta"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-md-6 col-xl-3">
+                <div class="card h-100 shadow-sm" data-metric-card>
+                  <div class="card-body">
+                    <div class="text-muted small">Total spend</div>
+                    <div class="h4 m-0" id="kpi-spend">£—</div>
+                    <div class="small text-muted" id="kpi-spend-delta"></div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm" data-metric-card>
-            <div class="card-body">
-              <div class="text-muted small">HMRC balance</div>
-              <div class="h4 m-0" id="kpi-hmrc">—</div>
-              <div class="text-muted small" id="kpi-hmrc-sub">—</div>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm" data-metric-card>
-            <div class="card-body">
-              <div class="text-muted small">Gross income</div>
-              <div class="h4 m-0" id="kpi-income">£—</div>
-              <div class="small text-muted" id="kpi-income-delta"></div>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-md-6 col-xl-3">
-          <div class="card h-100 shadow-sm" data-metric-card>
-            <div class="card-body">
-              <div class="text-muted small">Total spend</div>
-              <div class="h4 m-0" id="kpi-spend">£—</div>
-              <div class="small text-muted" id="kpi-spend-delta"></div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-xl-6">
-          <div class="card shadow-sm h-100" id="payslip-card">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="card-title m-0">Payslip analytics</h5>
-                <span class="badge text-bg-light" id="payslip-frequency">—</span>
-              </div>
-              <div class="row g-3 mb-3">
-                <div class="col-6">
-                  <div class="text-muted small">Gross pay</div>
-                  <div class="h5 mb-0" id="payslip-gross">£—</div>
-                  <div class="text-muted small" id="payslip-gross-ytd"></div>
-                </div>
-                <div class="col-6">
-                  <div class="text-muted small">Net pay</div>
-                  <div class="h5 mb-0" id="payslip-net">£—</div>
-                  <div class="text-muted small" id="payslip-net-ytd"></div>
-                </div>
-                <div class="col-6">
-                  <div class="text-muted small">Total deductions</div>
-                  <div class="h5 mb-0" id="payslip-deductions">£—</div>
-                  <div class="text-muted small" id="payslip-tax-code"></div>
-                </div>
-                <div class="col-6">
-                  <div class="text-muted small">Effective marginal rate</div>
-                  <div class="h5 mb-0" id="payslip-emtr">—%</div>
-                  <div class="text-muted small" id="payslip-emtr-compare"></div>
-                </div>
-              </div>
-              <div class="table-responsive mb-3">
-                <h6 class="text-uppercase small text-muted mb-1">Earnings mix</h6>
-                <table class="table table-sm align-middle mb-2" id="payslip-earnings-table">
-                  <thead class="table-light"><tr><th>Source</th><th class="text-end">Amount</th></tr></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-              <div class="table-responsive mb-3">
-                <h6 class="text-uppercase small text-muted mb-1">Deductions</h6>
-                <table class="table table-sm align-middle mb-0" id="payslip-deductions-table">
-                  <thead class="table-light"><tr><th>Type</th><th class="text-end">Amount</th></tr></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-              <div class="text-muted small" id="payslip-notes"></div>
-              <div class="text-muted small d-none" id="payslip-empty">Upload a current payslip to unlock granular analytics.</div>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-xl-6">
-          <div class="card shadow-sm h-100" id="statement-card">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title">Statement highlights</h5>
-              <div class="row g-3 mb-3">
-                <div class="col-6">
-                  <div class="text-muted small">Income this range</div>
-                  <div class="h5 mb-0" id="statement-income">£—</div>
-                </div>
-                <div class="col-6">
-                  <div class="text-muted small">Spend this range</div>
-                  <div class="h5 mb-0" id="statement-spend">£—</div>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xxl-7">
+                <div class="card shadow-sm h-100" id="payslip-card">
+                  <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                      <div>
+                        <h5 class="card-title m-0">Payslip analytics</h5>
+                        <p class="text-muted small mb-0">Summed pay and deductions across the selected range.</p>
+                      </div>
+                      <span class="badge text-bg-light" id="payslip-frequency">—</span>
+                    </div>
+                    <div class="row g-3 mb-3">
+                      <div class="col-6">
+                        <div class="text-muted small">Gross pay</div>
+                        <div class="h5 mb-0" id="payslip-gross">£—</div>
+                        <div class="text-muted small" id="payslip-gross-ytd"></div>
+                      </div>
+                      <div class="col-6">
+                        <div class="text-muted small">Net pay</div>
+                        <div class="h5 mb-0" id="payslip-net">£—</div>
+                        <div class="text-muted small" id="payslip-net-ytd"></div>
+                      </div>
+                      <div class="col-6">
+                        <div class="text-muted small">Total deductions</div>
+                        <div class="h5 mb-0" id="payslip-deductions">£—</div>
+                        <div class="text-muted small" id="payslip-tax-code"></div>
+                      </div>
+                      <div class="col-6">
+                        <div class="text-muted small">Effective marginal rate</div>
+                        <div class="h5 mb-0" id="payslip-emtr">—%</div>
+                        <div class="text-muted small" id="payslip-emtr-compare"></div>
+                      </div>
+                    </div>
+                    <div class="table-responsive mb-3">
+                      <h6 class="text-uppercase small text-muted mb-1">Earnings line items</h6>
+                      <table class="table table-sm align-middle mb-2" id="payslip-earnings-table">
+                        <thead class="table-light"><tr><th>Source</th><th class="text-end">Amount</th></tr></thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                    <div class="table-responsive mb-3">
+                      <h6 class="text-uppercase small text-muted mb-1">Deductions</h6>
+                      <table class="table table-sm align-middle mb-0" id="payslip-deductions-table">
+                        <thead class="table-light"><tr><th>Type</th><th class="text-end">Amount</th></tr></thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                    <div class="text-muted small" id="payslip-notes"></div>
+                    <div class="text-muted small d-none" id="payslip-empty">Upload a current payslip to unlock granular analytics.</div>
+                  </div>
                 </div>
               </div>
-              <div class="row g-3 flex-grow-1">
-                <div class="col-12 col-lg-6">
-                  <h6 class="text-uppercase small text-muted">Top categories</h6>
-                  <ul class="list-unstyled mb-0" id="statement-top-categories"></ul>
-                  <div class="text-muted small d-none" id="statement-top-empty">No spending categories identified.</div>
+              <div class="col-12 col-xxl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Pay line insights</h5>
+                    <p class="text-muted small">Visualise earnings and deductions contributions summed across the active range.</p>
+                    <div class="row g-3 flex-grow-1">
+                      <div class="col-12 col-lg-6">
+                        <h6 class="text-uppercase small text-muted">Earnings mix</h6>
+                        <div class="chart-wrapper">
+                          <canvas id="chart-payslip-earnings" height="170"></canvas>
+                        </div>
+                      </div>
+                      <div class="col-12 col-lg-6">
+                        <h6 class="text-uppercase small text-muted">Deductions mix</h6>
+                        <div class="chart-wrapper">
+                          <canvas id="chart-payslip-deductions" height="170"></canvas>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="text-muted small mt-3" id="payslip-breakdown-note">Aggregated from payslip documents in range.</div>
+                  </div>
                 </div>
-                <div class="col-12 col-lg-6">
-                  <h6 class="text-uppercase small text-muted">Largest outgoings</h6>
-                  <ul class="list-unstyled mb-0" id="statement-largest-expenses"></ul>
-                  <div class="text-muted small d-none" id="statement-expense-empty">No major outgoings detected.</div>
-                </div>
-              </div>
-              <div class="mt-3">
-                <h6 class="text-uppercase small text-muted">Accounts summarised</h6>
-                <ul class="list-unstyled mb-1" id="statement-account-summary"></ul>
-                <div class="text-muted small d-none" id="statement-account-empty">No accounts captured in this range.</div>
-                <div class="text-muted small d-none" id="statement-transfer-note"></div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-xl-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title m-0">Spend by category</h5>
-                <span class="badge text-bg-light" id="spend-category-total">£—</span>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xxl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                      <h5 class="card-title m-0">Tax posture &amp; EMTR curve</h5>
+                      <span class="badge text-bg-light" id="tax-curve-income">—</span>
+                    </div>
+                    <p class="text-muted small">Overlay the UK effective marginal tax curve with your realised rates.</p>
+                    <div class="chart-wrapper">
+                      <canvas id="chart-tax-emtr" height="220"></canvas>
+                    </div>
+                    <div class="row g-3 mt-3">
+                      <div class="col-6 col-lg-3">
+                        <div class="stat-tile">
+                          <div class="text-muted small">Income tax</div>
+                          <div class="fw-semibold" id="payslip-tax-total">£—</div>
+                        </div>
+                      </div>
+                      <div class="col-6 col-lg-3">
+                        <div class="stat-tile">
+                          <div class="text-muted small">National insurance</div>
+                          <div class="fw-semibold" id="payslip-ni-total">£—</div>
+                        </div>
+                      </div>
+                      <div class="col-6 col-lg-3">
+                        <div class="stat-tile">
+                          <div class="text-muted small">Pension</div>
+                          <div class="fw-semibold" id="payslip-pension-total">£—</div>
+                        </div>
+                      </div>
+                      <div class="col-6 col-lg-3">
+                        <div class="stat-tile">
+                          <div class="text-muted small">Student loan</div>
+                          <div class="fw-semibold" id="payslip-student-total">£—</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="text-muted small mt-2" id="tax-curve-note">Based on annualised earnings and recent deductions.</div>
+                  </div>
+                </div>
               </div>
-              <canvas id="chart-spend-category" height="160"></canvas>
-              <div class="table-responsive mt-3">
-                <table class="table table-sm align-middle mb-0">
-                  <thead class="table-light"><tr><th>Category</th><th class="text-end">Amount</th><th class="text-end">Share</th></tr></thead>
-                  <tbody id="spend-category-table"></tbody>
-                </table>
+              <div class="col-12 col-xxl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body">
+                    <h5 class="card-title">Allowance utilisation</h5>
+                    <div id="gauges" class="row g-3"></div>
+                  </div>
+                </div>
               </div>
-              <div class="text-muted small mt-2" id="spend-category-empty">No spending captured for this range.</div>
             </div>
-          </div>
-        </div>
-        <div class="col-12 col-xl-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title">Inflation-adjusted spend trend</h5>
-              <canvas id="chart-inflation-trend" height="160"></canvas>
-              <div class="text-muted small mt-2">Nominal vs real spending over the last 6 months.</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title">Largest expenditures</h5>
-              <div class="table-responsive flex-grow-1">
-                <table class="table table-sm align-middle mb-0" id="largest-expense-table">
-                  <thead class="table-light"><tr><th>Description</th><th>Date</th><th class="text-end">Amount</th><th class="text-end">Category</th></tr></thead>
-                  <tbody></tbody>
-                </table>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xxl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <h5 class="card-title m-0">HMRC obligations</h5>
+                      <span class="badge text-bg-warning" id="hmrc-balance">£—</span>
+                    </div>
+                    <div class="table-responsive flex-grow-1">
+                      <table class="table table-sm align-middle mb-0" id="obligations-table">
+                        <thead class="table-light"><tr><th>Due</th><th>Obligation</th><th class="text-end">Amount</th></tr></thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                    <div class="text-muted small mt-2" id="obligations-empty">No obligations in this window.</div>
+                  </div>
+                </div>
               </div>
-              <div class="text-muted small mt-2 d-none" id="largest-expense-empty">No significant spending detected.</div>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title">Potential duplicate transactions</h5>
-              <div class="table-responsive flex-grow-1">
-                <table class="table table-sm align-middle mb-0" id="duplicates-table">
-                  <thead class="table-light"><tr><th>Date</th><th>Merchant</th><th class="text-end">Amount</th><th class="text-end">Count</th></tr></thead>
-                  <tbody></tbody>
-                </table>
+              <div class="col-12 col-xxl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body">
+                    <h5 class="card-title">Alerts</h5>
+                    <div id="alert-queue" class="d-flex flex-column gap-2"></div>
+                    <div class="text-muted small" id="alerts-empty">No alerts raised.</div>
+                  </div>
+                </div>
               </div>
-              <div class="text-muted small mt-2" id="duplicates-empty">No duplicates detected.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <h5 class="card-title">Allowance utilisation</h5>
-              <div id="gauges" class="row g-3"></div>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body d-flex flex-column">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title m-0">HMRC obligations</h5>
-                <span class="badge text-bg-warning" id="hmrc-balance">£—</span>
-              </div>
-              <div class="table-responsive flex-grow-1">
-                <table class="table table-sm align-middle mb-0" id="obligations-table">
-                  <thead class="table-light"><tr><th>Due</th><th>Obligation</th><th class="text-end">Amount</th></tr></thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-              <div class="text-muted small mt-2" id="obligations-empty">No obligations in this window.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="row g-3">
-        <div class="col-12">
-          <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <h5 class="card-title">Alerts</h5>
-              <div id="alert-queue" class="d-flex flex-column gap-2"></div>
-              <div class="text-muted small" id="alerts-empty">No alerts raised.</div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="mb-4">
-      <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
-        <div>
-          <h2 class="h4 mb-0">Financial posture</h2>
-          <p class="text-muted small mb-0">Visualise your assets, liabilities and cashflow to understand true financial strength.</p>
+    <section class="dashboard-section" id="personal-intelligence">
+      <div class="card shadow-sm border-0">
+        <div class="card-header d-flex align-items-start justify-content-between gap-3">
+          <div>
+            <h2 class="h4 mb-1">Personal Financial Intelligence</h2>
+            <p class="section-subtitle mb-0">Track wealth, liquidity and affordability trends compiled from your statements and asset reports.</p>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-outline-primary" id="open-wealth-lab">Launch wealth lab</button>
+            <button class="btn btn-icon btn-sm section-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#personal-intelligence-body" aria-expanded="true" aria-controls="personal-intelligence-body">
+              <i class="bi bi-chevron-up"></i>
+            </button>
+          </div>
         </div>
-        <button class="btn btn-sm btn-outline-primary" id="open-wealth-lab">Launch wealth lab</button>
-      </div>
+        <div id="personal-intelligence-body" class="collapse show">
+          <div class="card-body">
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                      <div>
+                        <h5 class="card-title m-0">Net worth trajectory</h5>
+                        <div class="text-muted small" id="fp-networth-date">—</div>
+                      </div>
+                      <span class="badge text-bg-light" id="fp-networth-delta">—</span>
+                    </div>
+                    <div class="display-5 fw-semibold mb-2" id="fp-networth-total">£—</div>
+                    <p class="text-muted small">Assets minus liabilities across all captured documents.</p>
+                    <div class="chart-wrapper mb-3">
+                      <canvas id="networth-trend-chart" height="210"></canvas>
+                    </div>
+                    <div class="row g-3 align-items-center">
+                      <div class="col-12 col-lg-6">
+                        <ul class="list-unstyled mb-0" id="fp-networth-breakdown"></ul>
+                      </div>
+                      <div class="col-12 col-lg-6">
+                        <canvas id="fp-networth-chart" height="180"></canvas>
+                      </div>
+                    </div>
+                    <div class="alert alert-light border mt-3 d-none" id="fp-networth-empty">No data — upload recent documents to get started.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-xl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Net cashflow trend</h5>
+                    <div class="chart-wrapper flex-grow-1">
+                      <canvas id="chart-net-cashflow" height="200"></canvas>
+                    </div>
+                    <div class="text-muted small mt-3" id="net-cashflow-summary">Net cashflow change for the selected range.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-start mb-2">
-                <h5 class="card-title m-0">Net worth snapshot</h5>
-                <span class="badge text-bg-light" id="fp-networth-date">—</span>
-              </div>
-              <div class="row g-3">
-                <div class="col-7">
-                  <div class="display-6 fw-semibold" id="fp-networth-total">£—</div>
-                  <div class="text-muted small mb-2">Assets minus liabilities</div>
-                  <ul class="list-unstyled mb-0" id="fp-networth-breakdown"></ul>
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Affordability snapshot</h5>
+                    <div class="display-6 fw-semibold" id="savings-monthly">£—</div>
+                    <div class="text-muted small" id="savings-note">Monitor your surplus after essentials and commitments.</div>
+                    <div class="row g-2 mt-3">
+                      <div class="col-6">
+                        <div class="border rounded p-2 h-100 bg-light-subtle">
+                          <div class="text-muted small">Essentials</div>
+                          <div class="fw-semibold" id="savings-essentials">£—</div>
+                        </div>
+                      </div>
+                      <div class="col-6">
+                        <div class="border rounded p-2 h-100 bg-light-subtle">
+                          <div class="text-muted small">Discretionary</div>
+                          <div class="fw-semibold" id="savings-discretionary">£—</div>
+                        </div>
+                      </div>
+                      <div class="col-6">
+                        <div class="border rounded p-2 h-100">
+                          <div class="text-muted small">Monthly contributions</div>
+                          <div class="fw-semibold" id="savings-contributions">£—</div>
+                        </div>
+                      </div>
+                      <div class="col-6">
+                        <div class="border rounded p-2 h-100">
+                          <div class="text-muted small">Savings rate</div>
+                          <div class="fw-semibold" id="savings-rate">—%</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="alert alert-light border mt-3 d-none" id="savings-empty">Connect accounts to track affordability.</div>
+                  </div>
                 </div>
-                <div class="col-5 d-flex align-items-center">
-                  <canvas id="fp-networth-chart" height="160"></canvas>
+              </div>
+              <div class="col-12 col-xl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Asset distribution</h5>
+                    <div class="chart-wrapper">
+                      <canvas id="asset-distribution-chart" height="200"></canvas>
+                    </div>
+                    <div class="text-muted small mt-2" id="asset-distribution-note">Balances grouped across current, savings and investment accounts.</div>
+                    <div class="text-muted small d-none" id="asset-distribution-empty">Upload current accounts, savings and investment statements to populate this view.</div>
+                  </div>
                 </div>
               </div>
-              <div class="alert alert-light border mt-3 d-none" id="fp-networth-empty">No data — upload recent documents to get started.</div>
             </div>
-          </div>
-        </div>
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title">Affordability snapshot</h5>
-              <div class="display-6 fw-semibold" id="savings-monthly">£—</div>
-              <div class="text-muted small" id="savings-note">Monitor your surplus after essentials and commitments.</div>
-              <div class="row g-2 mt-3">
-                <div class="col-6">
-                  <div class="border rounded p-2 h-100 bg-light-subtle">
-                    <div class="text-muted small">Essentials</div>
-                    <div class="fw-semibold" id="savings-essentials">£—</div>
-                  </div>
-                </div>
-                <div class="col-6">
-                  <div class="border rounded p-2 h-100 bg-light-subtle">
-                    <div class="text-muted small">Discretionary</div>
-                    <div class="fw-semibold" id="savings-discretionary">£—</div>
-                  </div>
-                </div>
-                <div class="col-6">
-                  <div class="border rounded p-2 h-100">
-                    <div class="text-muted small">Monthly contributions</div>
-                    <div class="fw-semibold" id="savings-contributions">£—</div>
-                  </div>
-                </div>
-                <div class="col-6">
-                  <div class="border rounded p-2 h-100">
-                    <div class="text-muted small">Savings rate</div>
-                    <div class="fw-semibold" id="savings-rate">—%</div>
-                  </div>
-                </div>
-              </div>
-              <div class="alert alert-light border mt-3 d-none" id="savings-empty">Connect accounts to track affordability.</div>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div class="row g-3">
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body d-flex flex-column">
-              <h5 class="card-title">Biggest costs</h5>
-              <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
-                  <thead class="table-light"><tr><th>Category</th><th class="text-end" style="width:140px;">Amount</th></tr></thead>
-                  <tbody id="fp-top-costs-body"></tbody>
-                </table>
+            <div class="row g-3">
+              <div class="col-12 col-xl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Largest cost drivers</h5>
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light"><tr><th>Category</th><th class="text-end" style="width:140px;">Amount</th><th class="text-end" style="width:120px;">Δ vs prior</th></tr></thead>
+                        <tbody id="fp-top-costs-body"></tbody>
+                      </table>
+                    </div>
+                    <div class="text-muted small mt-2">Top categories by spend momentum.</div>
+                  </div>
+                </div>
               </div>
-              <div class="text-muted small mt-2">Top 5 categories by spend.</div>
-            </div>
-          </div>
-        </div>
-        <div class="col-12 col-lg-6">
-          <div class="card shadow-sm h-100">
-            <div class="card-body">
-              <h5 class="card-title">Asset mix</h5>
-              <canvas id="fp-allocation-chart" height="170"></canvas>
-              <div class="text-muted small text-center mt-2" id="liquidity-note">—</div>
+              <div class="col-12 col-xl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body">
+                    <h5 class="card-title">Liquidity coverage</h5>
+                    <canvas id="fp-allocation-chart" height="190"></canvas>
+                    <div class="text-muted small text-center mt-2" id="liquidity-note">—</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
+    <section class="dashboard-section" id="spending-analysis">
+      <div class="card shadow-sm border-0">
+        <div class="card-header d-flex align-items-start justify-content-between gap-3">
+          <div>
+            <h2 class="h4 mb-1">Spending Analysis</h2>
+            <p class="section-subtitle mb-0">Understand inflows, outflows and category behaviour across the selected time range.</p>
+          </div>
+          <button class="btn btn-icon btn-sm section-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#spending-analysis-body" aria-expanded="true" aria-controls="spending-analysis-body">
+            <i class="bi bi-chevron-up"></i>
+          </button>
+        </div>
+        <div id="spending-analysis-body" class="collapse show">
+          <div class="card-body">
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xxl-5">
+                <div class="card shadow-sm h-100" id="statement-card">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Statement highlights</h5>
+                    <div class="row g-3 mb-3">
+                      <div class="col-6">
+                        <div class="text-muted small">Income this range</div>
+                        <div class="h5 mb-0" id="statement-income">£—</div>
+                      </div>
+                      <div class="col-6">
+                        <div class="text-muted small">Spend this range</div>
+                        <div class="h5 mb-0" id="statement-spend">£—</div>
+                      </div>
+                    </div>
+                    <div class="row g-3 flex-grow-1">
+                      <div class="col-12 col-lg-6">
+                        <h6 class="text-uppercase small text-muted">Top categories</h6>
+                        <ul class="list-unstyled mb-0" id="statement-top-categories"></ul>
+                        <div class="text-muted small d-none" id="statement-top-empty">No spending categories identified.</div>
+                      </div>
+                      <div class="col-12 col-lg-6">
+                        <h6 class="text-uppercase small text-muted">Largest outgoings</h6>
+                        <ul class="list-unstyled mb-0" id="statement-largest-expenses"></ul>
+                        <div class="text-muted small d-none" id="statement-expense-empty">No major outgoings detected.</div>
+                      </div>
+                    </div>
+                    <div class="mt-3">
+                      <h6 class="text-uppercase small text-muted">Accounts summarised</h6>
+                      <ul class="list-unstyled mb-1" id="statement-account-summary"></ul>
+                      <div class="text-muted small d-none" id="statement-account-empty">No accounts captured in this range.</div>
+                      <div class="text-muted small d-none" id="statement-transfer-note"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-xxl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                      <h5 class="card-title m-0">Spend by category</h5>
+                      <span class="badge text-bg-light" id="spend-category-total">£—</span>
+                    </div>
+                    <div class="row g-3 align-items-center">
+                      <div class="col-12 col-lg-6">
+                        <div class="chart-wrapper">
+                          <canvas id="chart-spend-category" height="180"></canvas>
+                        </div>
+                      </div>
+                      <div class="col-12 col-lg-6">
+                        <div class="table-responsive">
+                          <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light"><tr><th>Category</th><th class="text-end">Amount</th><th class="text-end">Share</th></tr></thead>
+                            <tbody id="spend-category-table"></tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="text-muted small mt-2" id="spend-category-empty">No spending captured for this range.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-xl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Inflation-adjusted spend trend</h5>
+                    <div class="chart-wrapper flex-grow-1">
+                      <canvas id="chart-inflation-trend" height="200"></canvas>
+                    </div>
+                    <div class="text-muted small mt-2">Nominal vs real spending with inflation overlay.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-xl-5">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Largest expenditures</h5>
+                    <div class="table-responsive flex-grow-1">
+                      <table class="table table-sm align-middle mb-0" id="largest-expense-table">
+                        <thead class="table-light"><tr><th>Description</th><th>Date</th><th class="text-end">Amount</th><th class="text-end">Category</th></tr></thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                    <div class="text-muted small mt-2 d-none" id="largest-expense-empty">No significant spending detected.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3">
+              <div class="col-12 col-xl-7">
+                <div class="card shadow-sm h-100">
+                  <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">Potential duplicate transactions</h5>
+                    <div class="table-responsive flex-grow-1">
+                      <table class="table table-sm align-middle mb-0" id="duplicates-table">
+                        <thead class="table-light"><tr><th>Date</th><th>Merchant</th><th class="text-end">Amount</th><th class="text-end">Count</th></tr></thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                    <div class="text-muted small mt-2" id="duplicates-empty">No duplicates detected.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12 col-xl-5">
+                <div class="card shadow-sm border-0 h-100 gradient-card gradient-card--wealth">
+                  <div class="card-body d-flex flex-column">
+                    <div class="d-flex align-items-center gap-3 mb-3">
+                      <div class="badge rounded-pill text-bg-success"><i class="bi bi-gem"></i></div>
+                      <div>
+                        <h3 class="h5 mb-0">Scenario planning</h3>
+                        <p class="text-muted small mb-0">Model spend stress tests and counterfactuals inside Scenario Lab.</p>
+                      </div>
+                    </div>
+                    <ul class="list-unstyled small text-muted flex-grow-1">
+                      <li class="mb-1"><i class="bi bi-check-circle text-success me-2"></i>Budget shock simulations</li>
+                      <li class="mb-1"><i class="bi bi-check-circle text-success me-2"></i>Automated mitigation playbooks</li>
+                      <li><i class="bi bi-check-circle text-success me-2"></i>Ready-to-share briefings</li>
+                    </ul>
+                    <a class="btn btn-success w-100 mt-3" href="/scenario-lab.html">Open scenario lab</a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-5">
     <section class="mb-5">
       <div class="row g-3">
         <div class="col-12 col-lg-6">
