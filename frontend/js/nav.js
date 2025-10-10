@@ -8,7 +8,6 @@
         const brandLabel = document.querySelector('#topbar-container .topbar-logo span:last-child')?.textContent?.trim() || null;
         console.info?.('[instrumentation] nav:topbar:injected', { brandLabel, timestamp: new Date().toISOString() });
       } catch { /* no-op */ }
-      wireCountryToggle();
       hydrateTopbarMeta();
     }
     const side = await fetch('/components/sidebar.html', { cache: 'no-store' });
@@ -49,57 +48,41 @@ async function hydrateTopbarMeta() {
     const meta = document.getElementById('topbar-user-meta');
     if (meta) {
       const tier = (me.licenseTier || '').replace(/\b\w/g, (c) => c.toUpperCase());
-      const verified = me.emailVerified ? '<span class="badge text-bg-success ms-2">Verified</span>' : '<span class="badge text-bg-warning text-dark ms-2">Verify email</span>';
-      meta.innerHTML = `${tier || 'Free'} plan${verified}`;
+      const planLabel = `${tier || 'Free'} plan`;
+      const verifiedLabel = me.emailVerified ? 'Verified' : 'Verify email';
+      const verifiedClass = me.emailVerified ? 'text-bg-success' : 'text-bg-warning text-dark';
+      const nameParts = [me.firstName, me.lastName].filter(Boolean);
+      const primaryName = nameParts.join(' ').trim() || me.companyName || (me.email || '').split('@')[0] || 'Your workspace';
+      const initials = getInitials(primaryName || me.email || '');
+      meta.innerHTML = `
+        <div class="topbar-user-chip" role="presentation">
+          <div class="topbar-avatar" aria-hidden="true">${escapeHtml(initials)}</div>
+          <div class="topbar-user-details">
+            <span class="topbar-user-name">${escapeHtml(primaryName)}</span>
+            <span class="topbar-user-plan">${escapeHtml(planLabel)}<span class="badge rounded-pill topbar-user-badge ${verifiedClass}">${escapeHtml(verifiedLabel)}</span></span>
+          </div>
+        </div>
+      `;
     }
-    const activeCountryBtn = document.querySelector(`#country-toggle [data-country="${me.country || 'uk'}"]`);
-    setCountryActive(activeCountryBtn);
   } catch (err) {
     console.warn('hydrateTopbarMeta failed', err);
   }
 }
 
-function wireCountryToggle() {
-  const group = document.getElementById('country-toggle');
-  if (!group) return;
-
-  group.addEventListener('click', async (ev) => {
-    const btn = ev.target.closest('button[data-country]');
-    if (!btn || btn.classList.contains('disabled')) return;
-    setCountryActive(btn);
-    try {
-      if (window.Auth && typeof Auth.fetch === 'function') {
-        await Auth.fetch('/api/user/me', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            country: btn.dataset.country,
-            firstName: Auth.me?.firstName || '',
-            lastName: Auth.me?.lastName || '',
-            email: Auth.me?.email || ''
-          })
-        });
-        if (Auth.me) {
-          Auth.me.country = btn.dataset.country;
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to persist country preference', err);
-    }
-  });
+function getInitials(value) {
+  const letters = (value || '').match(/\p{L}/gu) || [];
+  if (!letters.length) return 'U';
+  const initials = letters.slice(0, 2).join('');
+  return initials.toUpperCase();
 }
 
-function setCountryActive(btn) {
-  if (!btn) return;
-  const group = btn.closest('#country-toggle');
-  if (!group) return;
-  group.querySelectorAll('button[data-country]').forEach((el) => {
-    el.classList.remove('active');
-    el.classList.toggle('btn-outline-primary', false);
-    el.classList.toggle('btn-outline-secondary', el.dataset.country === 'us');
-  });
-  btn.classList.add('active');
-  btn.classList.toggle('btn-outline-primary', true);
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Global sign-out handler (works for dynamically inserted navs)
