@@ -1,24 +1,22 @@
-<nav class="navbar navbar-light bg-light border-bottom py-2">
+<nav class="navbar topbar-glass py-2">
   <div class="container-fluid justify-content-between align-items-center">
-    <a class="navbar-brand topbar-logo brand-mark" href="/home.html">
-      <span class="brand-dot" aria-hidden="true"></span>
-      <span>Phloat - The AI Accountant</span>
-    </a>
     <div class="d-flex align-items-center gap-3">
-      <div class="d-flex align-items-center gap-2 country-toggle" id="country-toggle" role="group" aria-label="Country selector">
-        <button class="btn btn-sm btn-outline-primary active" data-country="uk" type="button">
-          <span class="me-1">🇬🇧</span>
-          <span>United Kingdom</span>
-        </button>
-        <button class="btn btn-sm btn-outline-secondary disabled" type="button" data-country="us" aria-disabled="true">
-          <span class="me-1">🇺🇸</span>
-          <span>United States</span>
-          <span class="badge text-bg-secondary ms-2">Coming soon</span>
-        </button>
+      <a class="navbar-brand topbar-logo brand-mark" href="/home.html">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span>Phloat - The AI Accountant</span>
+      </a>
+      <div class="topbar-tagline d-none d-md-flex align-items-center text-muted">
+        <svg class="flex-shrink-0" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4"/><path d="m16.2 7.8 2.8-2.8"/><path d="M18 12h4"/><path d="m16.2 16.2 2.8 2.8"/><path d="M12 18v4"/><path d="m5 5 2.8 2.8"/><path d="M2 12h4"/><path d="m5 19 2.8-2.8"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Financial copilots for modern teams</span>
       </div>
-      <div class="text-muted small" id="topbar-user-meta"></div>
+    </div>
+    <div class="d-flex align-items-center gap-3 topbar-actions">
+      <div class="topbar-status badge rounded-pill text-uppercase fw-semibold">
+        <span class="pulse-dot" aria-hidden="true"></span>
+        Operational
+      </div>
+      <a class="btn btn-sm btn-outline-primary d-none d-sm-inline-flex" href="/roadmap.txt" target="_blank" rel="noopener">What's new</a>
+      <div id="topbar-user-meta" class="topbar-user-meta" aria-live="polite"></div>
     </div>
   </div>
 </nav>
-
-  
