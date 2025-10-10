@@ -13,14 +13,33 @@
     }
     const side = await fetch('/components/sidebar.html', { cache: 'no-store' });
     if (side.ok) {
-      document.getElementById('sidebar-container')?.insertAdjacentHTML('beforeend', await side.text());
+      const host = document.getElementById('sidebar-container');
+      const html = await side.text();
+      host?.insertAdjacentHTML('beforeend', html);
       try {
         const navItemCount = document.querySelectorAll('#sidebar-container .app-nav-item').length;
         console.info?.('[instrumentation] nav:sidebar:injected', { navItemCount, timestamp: new Date().toISOString() });
       } catch { /* no-op */ }
+      await applySidebarFeatureFlags(host);
     }
   } catch (e) { console.warn('nav inject failed', e); }
 })();
+
+async function applySidebarFeatureFlags(host) {
+  if (!host || !window.Auth || typeof Auth.fetch !== 'function') return;
+  try {
+    const res = await Auth.fetch('/api/flags', { cache: 'no-store' });
+    if (!res.ok) return;
+    const flags = await res.json();
+    if (flags.JSON_TEST_ENABLED) {
+      host.querySelectorAll('[data-nav-feature="json-test"]').forEach((link) => {
+        link.classList.remove('d-none');
+      });
+    }
+  } catch (err) {
+    console.warn('Failed to apply sidebar feature flags', err);
+  }
+}
 
 async function hydrateTopbarMeta() {
   try {

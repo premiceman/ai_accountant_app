@@ -14,6 +14,7 @@ router.get('/', (_req, res) => {
   res.json({
     ENABLE_FRONTEND_ANALYTICS_V1: Boolean(flags.ENABLE_FRONTEND_ANALYTICS_V1),
     ENABLE_STAGED_LOADER_ANALYTICS: Boolean(flags.ENABLE_STAGED_LOADER_ANALYTICS),
+    JSON_TEST_ENABLED: Boolean(flags.JSON_TEST_ENABLED),
   });
 });
 

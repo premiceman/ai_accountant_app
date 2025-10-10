@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>JSON Test — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="/css/styles.css" fetchpriority="high">
+  <script>window.__API_BASE = window.__API_BASE || '';</script>
+  <script src="/js/head-include.js"></script>
+  <script src="/js/auth.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.Auth && typeof Auth.enforce === 'function') {
+        Auth.enforce({ validateWithServer: true }).catch(() => {});
+      }
+    });
+  </script>
+  <style>
+    body {
+      background: var(--bg-body);
+      color: var(--fg);
+      min-height: 100vh;
+    }
+
+    main {
+      padding: clamp(20px, 3vw, 32px);
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .test-card {
+      background: var(--bg-surface);
+      border-radius: 20px;
+      border: 1px solid var(--bd-hairline);
+      box-shadow: var(--shadow);
+      padding: clamp(20px, 3vw, 28px);
+    }
+
+    .upload-dropzone {
+      border: 2px dashed color-mix(in srgb, var(--brand) 60%, transparent);
+      border-radius: 18px;
+      padding: clamp(32px, 6vw, 48px);
+      text-align: center;
+      background: color-mix(in srgb, var(--brand) 6%, transparent);
+      cursor: pointer;
+      transition: border-color .2s ease, background .2s ease;
+      position: relative;
+    }
+
+    .upload-dropzone.dragover {
+      border-color: color-mix(in srgb, var(--brand) 85%, white 15%);
+      background: color-mix(in srgb, var(--brand) 12%, transparent);
+    }
+
+    .upload-dropzone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .json-output {
+      background: var(--bg-surface-2);
+      border-radius: 16px;
+      border: 1px solid var(--bd-hairline);
+      padding: clamp(16px, 3vw, 24px);
+      font-family: 'SFMono-Regular', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.9rem;
+      max-height: 520px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
+      background: color-mix(in srgb, var(--brand) 12%, transparent);
+      color: var(--brand);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar-container"></div>
+  <div id="sidebar-container" data-role="sidebar"></div>
+
+  <main>
+    <header class="mb-4">
+      <p class="text-uppercase text-muted fw-semibold mb-1">Diagnostics</p>
+      <h1 class="mb-2">JSON processing test bench</h1>
+      <p class="text-muted mb-0">Upload a PDF to verify classification, parsing and analytics JSON output. Files are stored in the dedicated Cloudflare R2 folder for JSON TEST uploads.</p>
+    </header>
+
+    <section class="test-card mb-4">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Upload PDF</h2>
+          <p class="text-muted mb-0">We will classify the document, extract insights and render the processed JSON.</p>
+        </div>
+        <div id="json-test-status" class="status-pill d-none">
+          <i class="bi bi-cpu"></i>
+          <span>Ready</span>
+        </div>
+      </div>
+      <div class="upload-dropzone" id="json-test-dropzone">
+        <input type="file" accept="application/pdf" />
+        <i class="bi bi-cloud-arrow-up display-5"></i>
+        <p class="lead mb-1">Drop a PDF here or click to browse</p>
+        <p class="text-muted mb-0">Supported documents: payslips, bank statements, pensions, HMRC and supporting receipts.</p>
+      </div>
+      <div id="json-test-error" class="alert alert-danger mt-3 d-none" role="alert"></div>
+    </section>
+
+    <section class="test-card">
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <h2 class="h5 mb-0">Processed JSON</h2>
+        <span class="badge bg-secondary" id="json-test-label" hidden></span>
+      </div>
+      <pre class="json-output" id="json-test-output">Upload a document to view the parsed JSON payload.</pre>
+    </section>
+  </main>
+
+  <script src="/js/nav.js" defer></script>
+  <script src="/js/mobile-sidebar.js" defer></script>
+  <script src="/js/json-test.js" defer></script>
+</body>
+</html>
