@@ -7,8 +7,8 @@
 // - NEW: delete collection (and all files)
 // - NEW: download collection as ZIP
 //
-// Collections control doc: <accountSlug>/_collections.json (accountSlug = firstname-lastname-uid)
-// Files:                   <accountSlug>/<collectionId>/<YYYYMMDD>-<uuid>-<safeName>.pdf
+// Collections control doc: <accountSlug>/documents/_collections.json
+// Files:                   <accountSlug>/documents/<collectionId>/<MMYYYY>/<YYYYMMDD>-<uuid>-<safeName>.pdf
 //
 const express = require('express');
 const multer = require('multer');
@@ -59,32 +59,31 @@ function stripDiacritics(value) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function slugifyNamePart(part) {
-  return stripDiacritics(part)
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
+function formatNamePart(part) {
+  const cleaned = stripDiacritics(part)
+    .replace(/[^a-zA-Z0-9]+/g, '');
+  if (!cleaned) return '';
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
 function sanitizeUniquePart(part, fallback) {
   const raw = stripDiacritics(part || fallback || '');
-  const cleaned = raw.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  const cleaned = raw.replace(/[^a-zA-Z0-9]+/g, '');
   return cleaned || fallback || '';
 }
 
 function fallbackUniqueFromId(userId) {
   const id = String(userId || '').replace(/[^a-f0-9]/gi, '');
-  if (!id) return `user-${String(userId || 'unknown')}`;
-  return `user-${id.slice(-8)}`;
+  if (!id) return `User${String(userId || 'Unknown')}`;
+  return `User${id.slice(-8)}`;
 }
 
 function buildAccountStorageSlug(userDoc, userId) {
   if (!userDoc) return fallbackUniqueFromId(userId);
-  const parts = [slugifyNamePart(userDoc.firstName), slugifyNamePart(userDoc.lastName)];
+  const first = formatNamePart(userDoc.firstName);
+  const last = formatNamePart(userDoc.lastName);
   const unique = sanitizeUniquePart(userDoc.uid, fallbackUniqueFromId(userId));
-  const filtered = parts.filter(Boolean);
-  filtered.push(unique || fallbackUniqueFromId(userId));
-  const slug = filtered.filter(Boolean).join('-').replace(/-+/g, '-');
+  const slug = `${first}${last}${unique}`.trim();
   return slug || fallbackUniqueFromId(userId);
 }
 
@@ -92,6 +91,14 @@ function sanitizeCollectionSegment(raw) {
   return String(raw || '')
     .trim()
     .replace(/[^a-zA-Z0-9._-]+/g, '-');
+}
+
+function sanitizeMonthSegment(raw) {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/[^0-9]/g, '');
+  if (/^[0-9]{6}$/.test(cleaned)) return cleaned;
+  return dayjs().format('MMYYYY');
 }
 
 async function getStorageContext(userId) {
@@ -106,9 +113,13 @@ async function getStorageContext(userId) {
     userId: key,
     accountSlug: slug,
     rootPrefix: `${slug}/`,
-    collectionsKey: `${slug}/_collections.json`,
-    collectionPrefix: (collectionId) => `${slug}/${sanitizeCollectionSegment(collectionId)}/`,
-    objectKey: (collectionId, fileName) => `${slug}/${sanitizeCollectionSegment(collectionId)}/${fileName}`,
+    documentsPrefix: `${slug}/documents/`,
+    collectionsKey: `${slug}/documents/_collections.json`,
+    collectionPrefix: (collectionId) => `${slug}/documents/${sanitizeCollectionSegment(collectionId)}/`,
+    monthPrefix: (collectionId, monthSegment) =>
+      `${slug}/documents/${sanitizeCollectionSegment(collectionId)}/${sanitizeMonthSegment(monthSegment)}/`,
+    objectKey: (collectionId, monthSegment, fileName) =>
+      `${slug}/documents/${sanitizeCollectionSegment(collectionId)}/${sanitizeMonthSegment(monthSegment)}/${fileName}`,
   };
   storageContextCache.set(key, { value: context, expires: now + STORAGE_CONTEXT_TTL_MS });
   return context;
@@ -236,6 +247,7 @@ async function loadCollectionsDoc(userId, storageContext = null) {
 async function saveCollectionsDoc(userId, arr, storageContext = null) {
   const storage = storageContext || (await getStorageContext(userId));
   const payload = Buffer.from(JSON.stringify({ collections: arr }, null, 2));
+  await putObject(storage.documentsPrefix, Buffer.alloc(0), 'application/x-directory').catch(() => {});
   await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: storage.collectionsKey, Body: payload, ContentType: 'application/json' }));
 }
 async function computeCollectionMetrics(userId, cols, storageContext = null) {
@@ -714,9 +726,11 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       }
 
       const date = dayjs().format('YYYYMMDD');
+      const monthSegment = dayjs().format('MMYYYY');
       const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
       const key = storage.objectKey(
         storageCollectionId,
+        monthSegment,
         `${date}-${randomUUID()}-${safeBase}`
       );
       await putObject(key, f.buffer, 'application/pdf');
@@ -813,13 +827,30 @@ router.patch('/files/:id', express.json(), async (req, res) => {
 
   const parts = oldKey.split('/');
   const accountSegment = parts[0];
-  const colId = parts[1];
-  const tail = parts.slice(2).join('/');
+  let documentsSegment = parts[1] || 'documents';
+  let collectionSegment = parts[2];
+  let monthSegmentRaw = parts[3];
+  let tail = parts.slice(4).join('/');
+
+  if (documentsSegment !== 'documents') {
+    collectionSegment = documentsSegment;
+    monthSegmentRaw = parts[2];
+    tail = parts.slice(3).join('/');
+    documentsSegment = 'documents';
+  }
+  if (!collectionSegment) return res.status(400).json({ error: 'Invalid file path' });
   const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/);
   const date = m ? m[1] : dayjs().format('YYYYMMDD');
   const uuid = m ? m[2] : randomUUID();
+  const monthSegment = sanitizeMonthSegment(monthSegmentRaw);
 
-  const newKey = `${accountSegment}/${colId}/${date}-${uuid}-${safeBase}`;
+  const newKey = [
+    accountSegment,
+    documentsSegment,
+    collectionSegment,
+    monthSegment,
+    `${date}-${uuid}-${safeBase}`,
+  ].filter(Boolean).join('/');
   if (newKey === oldKey) {
     const id = keyToFileId(oldKey);
     await recordCatalogueRename(u.id, oldId, safeBase);
