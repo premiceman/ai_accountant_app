@@ -995,6 +995,39 @@ body{ padding-top: var(--topbar-h); padding-left: var(--sidebar-collapsed); }
   line-height: 1;
 }
 
+/* ---------------- Dashboard v2 layout ---------------- */
+.dashboard-section{ margin-bottom: 2rem; }
+.dashboard-section .card{ border-radius: 1.25rem; }
+.dashboard-section .card-header{
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--bd-hairline);
+}
+.dashboard-section .card-header .section-subtitle{
+  color: var(--fg-2);
+  font-size: .9rem;
+}
+.section-toggle{ transition: transform .2s ease; }
+.section-toggle .bi{ transition: transform .2s ease; }
+.section-toggle[aria-expanded="false"] .bi,
+.section-toggle.collapsed .bi{ transform: rotate(180deg); }
+.chart-wrapper{ position: relative; min-height: 180px; display:flex; align-items:center; justify-content:center; }
+.chart-wrapper canvas{ width:100% !important; height:100% !important; }
+.stat-tile{
+  border:1px solid var(--bd-hairline);
+  border-radius:1rem;
+  padding:.75rem 1rem;
+  background:var(--bg-surface-2);
+  height:100%;
+}
+.stat-tile .fw-semibold{ font-size:1rem; }
+.dashboard-section .table thead{ font-size:.85rem; }
+.dashboard-section .table tbody td{ vertical-align:middle; }
+.section-subtitle{ color:var(--fg-2); }
+.section-subtitle small{ color:inherit; }
+.dashboard-section .badge{text-transform:none; }
+.dashboard-section .card-title{ font-weight:600; }
+.dashboard-section .card-body p.text-muted{ color:var(--fg-3)!important; }
+
 /* ===================== Billing Cycle Toggle (smaller) ===================== */
 :root {
   --toggle-accent: var(--brand, var(--bs-success, #198754));
