@@ -1,0 +1,41 @@
+{
+  "name": "statement_extraction_v2",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "bank_name": { "type": ["string","null"] },
+      "account_number": { "type": ["string","null"] },
+      "account_type": { "type": ["string","null"] },
+      "account_holder": { "type": ["string","null"] },
+      "statement_period": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "start_date": { "type": ["string","null"] },
+          "end_date": { "type": ["string","null"] }
+        },
+        "required": ["start_date","end_date"]
+      },
+      "opening_balance": { "type": ["number","string","null"] },
+      "closing_balance": { "type": ["number","string","null"] },
+      "transactions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "date": { "type": ["string","null"] },
+            "description": { "type": ["string","null"] },
+            "amount": { "type": ["number","string"] },
+            "direction": { "type": ["string","null"] },
+            "category": { "type": ["string","null"] }
+          },
+          "required": ["date","description","amount"]
+        }
+      }
+    },
+    "required": ["statement_period","transactions"]
+  },
+  "strict": true
+}

@@ -12,10 +12,41 @@ type ExtractionOptions = {
   maxTokens?: number;
 };
 
+type JsonRequest = {
+  system: string;
+  user: string;
+  schema?: ExtractionSchema | null;
+  maxTokens?: number;
+};
+
+async function postChatCompletion(body: Record<string, unknown>) {
+  const fetch = fetchImpl;
+  if (!fetch || !OPENAI_API_KEY) return null;
+  const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.warn('[shared:openaiClient] request failed', res.status, text);
+    return null;
+  }
+  try {
+    return await res.json();
+  } catch (err) {
+    console.warn('[shared:openaiClient] failed to parse response body', err);
+    return null;
+  }
+}
+
 export async function callStructuredExtraction<T = unknown>(
   prompt: string,
   schema?: ExtractionSchema | null,
-  options: ExtractionOptions = {}
+  options: ExtractionOptions = {},
 ): Promise<T | null> {
   const fetch = fetchImpl;
   if (!fetch || !OPENAI_API_KEY) return null;
@@ -37,22 +68,8 @@ export async function callStructuredExtraction<T = unknown>(
 
     if (options.maxTokens) body.max_tokens = options.maxTokens;
 
-    const res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      console.warn('[shared:openaiClient] request failed', res.status, text);
-      return null;
-    }
-
-    const data = await res.json();
+    const data = await postChatCompletion(body);
+    if (!data) return null;
     const content = data?.choices?.[0]?.message?.content;
     if (!content) return null;
     try {
@@ -63,6 +80,32 @@ export async function callStructuredExtraction<T = unknown>(
     }
   } catch (err) {
     console.warn('[shared:openaiClient] extraction call failed', err);
+    return null;
+  }
+}
+
+export async function callOpenAIJson<T = unknown>({ system, user, schema, maxTokens }: JsonRequest): Promise<T | null> {
+  const responseFormat = schema
+    ? { type: 'json_schema', json_schema: { ...schema, strict: true } }
+    : { type: 'json_object' };
+  const body: Record<string, unknown> = {
+    model: OPENAI_EXTRACTION_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    temperature: 0,
+    response_format: responseFormat,
+  };
+  if (maxTokens) body.max_tokens = maxTokens;
+  const data = await postChatCompletion(body);
+  if (!data) return null;
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) return null;
+  try {
+    return JSON.parse(content) as T;
+  } catch (err) {
+    console.warn('[shared:openaiClient] failed to parse JSON response', err);
     return null;
   }
 }
