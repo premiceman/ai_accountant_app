@@ -543,16 +543,17 @@ export function enrichPayloadWithV1(
   options?: { jobId?: string }
 ): InsightUpsertPayload {
   const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
-  const fallbackIso =
-    v1.ensureIsoDate(
-      metadata.documentDate ?? payload.documentDate ?? new Date()
-    ) ?? new Date().toISOString().slice(0, 10);
-  const inferredMonth = v1.ensureIsoMonth(metadata.documentMonth ?? payload.documentMonth ?? fallbackIso);
+  const fallbackIso = v1.ensureIsoDate(metadata.documentDate ?? payload.documentDate ?? payload.documentDateV1 ?? null);
+  const inferredMonth = v1.ensureIsoMonth(
+    metadata.documentMonth ?? payload.documentMonth ?? fallbackIso ?? undefined
+  );
 
   payload.version = 'v1';
   payload.currency = v1.normaliseCurrency((metadata.currency as string | undefined) ?? 'GBP');
-  payload.documentDateV1 = fallbackIso;
-  payload.documentMonth = inferredMonth ?? payload.documentMonth;
+  payload.documentDateV1 = fallbackIso ?? payload.documentDateV1 ?? null;
+  if (inferredMonth) {
+    payload.documentMonth = inferredMonth;
+  }
 
   const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
   const triageJobId = options?.jobId ?? null;
@@ -562,46 +563,61 @@ export function enrichPayloadWithV1(
     const employerName = typeof metadata.employerName === 'string' ? metadata.employerName : null;
     const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
     const periodMetric = (metrics.period ?? {}) as Record<string, unknown>;
-    const periodStart =
-      v1.ensureIsoDate(periodMetric.start ?? periodMeta.start) ?? fallbackIso;
-    const periodEnd = v1.ensureIsoDate(periodMetric.end ?? periodMeta.end) ?? fallbackIso;
+    const periodStart = v1.ensureIsoDate(periodMetric.start ?? periodMeta.start) ?? null;
+    const periodEnd = v1.ensureIsoDate(periodMetric.end ?? periodMeta.end) ?? null;
     const periodMonth =
       v1.ensureIsoMonth(periodMetric.month ?? periodMeta.month ?? inferredMonth) ??
-      (fallbackIso ? fallbackIso.slice(0, 7) : '1970-01');
-    const payDate = v1.ensureIsoDate(metrics.payDate ?? metadata.payDate ?? fallbackIso) ?? fallbackIso;
-    const normalizedMetrics = {
-      payDate,
-      period: { start: periodStart, end: periodEnd, month: periodMonth },
-      employer: employerName,
-      grossMinor: v1.toMinorUnits(metrics.gross),
-      netMinor: v1.toMinorUnits(metrics.net),
-      taxMinor: v1.toMinorUnits(metrics.tax),
-      nationalInsuranceMinor: v1.toMinorUnits(metrics.ni ?? metrics.nationalInsurance),
-      pensionMinor: v1.toMinorUnits(metrics.pension),
-      studentLoanMinor: v1.toMinorUnits(metrics.studentLoan),
-      taxCode:
-        typeof metrics.taxCode === 'string'
-          ? metrics.taxCode
-          : typeof metadata.taxCode === 'string'
-          ? metadata.taxCode
-          : null,
-    } satisfies v1.PayslipMetricsV1;
+      (fallbackIso ? fallbackIso.slice(0, 7) : null);
+    const payDate = v1.ensureIsoDate(metrics.payDate ?? metadata.payDate ?? fallbackIso) ?? null;
 
-    if (!v1.validatePayslipMetricsV1(normalizedMetrics)) {
-      const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
-      if (featureFlags.enableAjvStrict) {
-        throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
+    if (payDate && periodStart && periodEnd && periodMonth) {
+      const normalizedMetrics = {
+        payDate,
+        period: { start: periodStart, end: periodEnd, month: periodMonth },
+        employer: employerName,
+        grossMinor: v1.toMinorUnits(metrics.gross),
+        netMinor: v1.toMinorUnits(metrics.net),
+        taxMinor: v1.toMinorUnits(metrics.tax),
+        nationalInsuranceMinor: v1.toMinorUnits(metrics.ni ?? metrics.nationalInsurance),
+        pensionMinor: v1.toMinorUnits(metrics.pension),
+        studentLoanMinor: v1.toMinorUnits(metrics.studentLoan),
+        taxCode:
+          typeof metrics.taxCode === 'string'
+            ? metrics.taxCode
+            : typeof metadata.taxCode === 'string'
+            ? metadata.taxCode
+            : null,
+      } satisfies v1.PayslipMetricsV1;
+
+      if (!v1.validatePayslipMetricsV1(normalizedMetrics)) {
+        const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
+        }
+        logger.warn(
+          {
+            fileId: payload.fileId,
+            type: classification.type,
+            errors: formatAjvErrors(errors),
+          },
+          'Payslip v1 metrics failed validation'
+        );
+      } else {
+        payload.metricsV1 = normalizedMetrics;
       }
+    } else if (featureFlags.enableTriageLogs) {
       logger.warn(
         {
           fileId: payload.fileId,
           type: classification.type,
-          errors: formatAjvErrors(errors),
+          reason: 'missing_period_fields',
+          payDate,
+          periodStart,
+          periodEnd,
+          periodMonth,
         },
-        'Payslip v1 metrics failed validation'
+        'Payslip v1 metrics skipped'
       );
-    } else {
-      payload.metricsV1 = normalizedMetrics;
     }
   }
 
@@ -735,39 +751,53 @@ export function enrichPayloadWithV1(
     classification.type === 'pension_statement'
   ) {
     const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
-    const periodStart = v1.ensureIsoDate(periodMeta.start) ?? fallbackIso;
-    const periodEnd = v1.ensureIsoDate(periodMeta.end) ?? fallbackIso;
+    const periodStart = v1.ensureIsoDate(periodMeta.start ?? fallbackIso) ?? null;
+    const periodEnd = v1.ensureIsoDate(periodMeta.end ?? fallbackIso) ?? null;
     const periodMonth =
       v1.ensureIsoMonth(periodMeta.month ?? inferredMonth) ??
-      (fallbackIso ? fallbackIso.slice(0, 7) : '1970-01');
-    const inflowsMinor = normalizedTransactions
-      .filter((tx) => tx.direction === 'inflow')
-      .reduce((acc, tx) => acc + tx.amountMinor, 0);
-    const outflowsMinor = normalizedTransactions
-      .filter((tx) => tx.direction === 'outflow')
-      .reduce((acc, tx) => acc + Math.abs(tx.amountMinor), 0);
-    const metricsV1 = {
-      period: { start: periodStart, end: periodEnd, month: periodMonth },
-      inflowsMinor,
-      outflowsMinor,
-      netMinor: inflowsMinor - outflowsMinor,
-    } satisfies v1.StatementMetricsV1;
+      (fallbackIso ? fallbackIso.slice(0, 7) : null);
+    if (periodStart && periodEnd && periodMonth) {
+      const inflowsMinor = normalizedTransactions
+        .filter((tx) => tx.direction === 'inflow')
+        .reduce((acc, tx) => acc + tx.amountMinor, 0);
+      const outflowsMinor = normalizedTransactions
+        .filter((tx) => tx.direction === 'outflow')
+        .reduce((acc, tx) => acc + Math.abs(tx.amountMinor), 0);
+      const metricsV1 = {
+        period: { start: periodStart, end: periodEnd, month: periodMonth },
+        inflowsMinor,
+        outflowsMinor,
+        netMinor: inflowsMinor - outflowsMinor,
+      } satisfies v1.StatementMetricsV1;
 
-    if (!v1.validateStatementMetricsV1(metricsV1)) {
-      const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
-      if (featureFlags.enableAjvStrict) {
-        throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
+      if (!v1.validateStatementMetricsV1(metricsV1)) {
+        const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
+        if (featureFlags.enableAjvStrict) {
+          throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
+        }
+        logger.warn(
+          {
+            fileId: payload.fileId,
+            type: classification.type,
+            errors: formatAjvErrors(errors),
+          },
+          'Statement v1 metrics failed validation'
+        );
+      } else {
+        payload.metricsV1 = metricsV1;
       }
+    } else if (featureFlags.enableTriageLogs) {
       logger.warn(
         {
           fileId: payload.fileId,
           type: classification.type,
-          errors: formatAjvErrors(errors),
+          reason: 'missing_statement_period',
+          periodStart,
+          periodEnd,
+          periodMonth,
         },
-        'Statement v1 metrics failed validation'
+        'Statement v1 metrics skipped'
       );
-    } else {
-      payload.metricsV1 = metricsV1;
     }
   }
 
@@ -779,15 +809,13 @@ function buildInsightPayload(
   classification: SupportedClassification,
   buffer: Buffer
 ): InsightUpsertPayload {
-  const today = new Date();
-  const documentDate = today;
-  const documentMonth = formatMonth(today);
   const metadata: Record<string, unknown> = {
     period: {
-      start: formatDate(monthStart(today)),
-      end: formatDate(monthEnd(today)),
+      start: null,
+      end: null,
+      month: null,
     },
-    documentDate: formatDate(today),
+    documentDate: null,
   };
   if (classification.employerName) {
     metadata.employerName = canonicaliseEmployer(classification.employerName);
@@ -810,8 +838,8 @@ function buildInsightPayload(
     extractionSource: 'heuristic',
     confidence: classification.confidence,
     contentHash: sha256(buffer),
-    documentDate,
-    documentMonth,
+    documentDate: null as unknown as DocumentInsight['documentDate'],
+    documentMonth: null as unknown as DocumentInsight['documentMonth'],
     documentLabel: null as unknown as DocumentInsight['documentLabel'],
     documentName: null as unknown as DocumentInsight['documentName'],
     nameMatchesUser: null as unknown as DocumentInsight['nameMatchesUser'],
@@ -821,7 +849,7 @@ function buildInsightPayload(
     transactions: [],
     version: 'v1',
     currency: 'GBP',
-    documentDateV1: formatDate(today),
+    documentDateV1: null as unknown as DocumentInsight['documentDateV1'],
     metricsV1: null,
     transactionsV1: [],
     narrative: [`classification=${classification.type}`, `confidence=${classification.confidence}`],
@@ -963,32 +991,52 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
       const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
       payload.metrics = {
         ...metrics,
-        gross: extraction.gross ?? 0,
-        net: extraction.net ?? 0,
-        tax: extraction.tax ?? 0,
-        ni: extraction.ni ?? 0,
-        pension: extraction.pension ?? 0,
-        studentLoan: extraction.studentLoan ?? 0,
-        payFrequency: extraction.payFrequency ?? 'Monthly',
+        gross: extraction.gross ?? null,
+        net: extraction.net ?? null,
+        tax: extraction.tax ?? null,
+        ni: extraction.ni ?? null,
+        pensionEmployee: extraction.pensionEmployee ?? null,
+        pensionEmployer: extraction.pensionEmployer ?? null,
+        pension: extraction.pensionEmployee ?? extraction.pensionEmployer ?? null,
+        studentLoan: extraction.studentLoan ?? null,
+        payFrequency: extraction.payFrequency ?? null,
+        payDate: extraction.payDate ?? null,
+        taxCode: extraction.taxCode ?? null,
+        niLetter: extraction.niLetter ?? null,
+        period: extraction.period ?? null,
+        ytd: extraction.ytd ?? null,
       };
       const existingMetadata = (payload.metadata ?? {}) as Record<string, unknown>;
       const period = extraction.period ?? {};
       payload.metadata = {
         ...existingMetadata,
         employerName: extraction.employer ?? (existingMetadata.employerName as string | null) ?? null,
+        payDate: extraction.payDate ?? (existingMetadata.payDate as string | null) ?? null,
+        taxCode: extraction.taxCode ?? (existingMetadata.taxCode as string | null) ?? null,
+        niLetter: extraction.niLetter ?? (existingMetadata.niLetter as string | null) ?? null,
         period: {
-          start: period.start ?? extraction.payDate ?? null,
-          end: period.end ?? extraction.payDate ?? null,
-          month: period.month ?? (extraction.payDate ? extraction.payDate.slice(0, 7) : null),
+          start: period.start ?? null,
+          end: period.end ?? null,
+          month: period.month ?? null,
+        },
+        provenance: {
+          ...(existingMetadata.provenance as Record<string, unknown> | undefined),
+          ...(extraction.provenance ?? {}),
         },
       } as typeof payload.metadata;
-      const payDate = extraction.payDate ? new Date(extraction.payDate) : null;
-      if (payDate && !Number.isNaN(payDate.getTime())) {
-        payload.documentDate = payDate;
-        payload.documentMonth = extraction.payDate!.slice(0, 7);
-      } else {
-        payload.documentMonth = extraction.period?.month ?? payload.documentMonth;
+      if (extraction.ytd) {
+        (payload.metadata as Record<string, unknown>).ytd = extraction.ytd;
       }
+      const payDate = extraction.payDate ? new Date(extraction.payDate) : null;
+      if (payDate && !Number.isNaN(payDate.getTime()) && extraction.payDate) {
+        const payDateIso = extraction.payDate as string;
+        payload.documentDate = payDate;
+        payload.documentMonth = payDateIso.slice(0, 7);
+        payload.documentDateV1 = payDateIso;
+      } else if (period.month) {
+        payload.documentMonth = period.month;
+      }
+      if (!payload.metadata) payload.metadata = {} as typeof payload.metadata;
       payload.parserVersion = process.env.PARSER_VERSIONS_PAYSLIP || 'payslip@1.3.0';
     } catch (err) {
       logger.warn({ jobId: job.jobId, err }, 'Payslip extraction failed; using defaults');
@@ -1006,26 +1054,37 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
         outflows: extraction.outflows ?? 0,
       };
       const existingMetadata = (payload.metadata ?? {}) as Record<string, unknown>;
+      const periodStart = extraction.period?.start ?? null;
+      const periodEnd = extraction.period?.end ?? null;
+      const derivedMonth = periodEnd?.slice(0, 7) ?? periodStart?.slice(0, 7) ?? null;
       payload.metadata = {
         ...existingMetadata,
         bankName: extraction.bankName ?? null,
         accountNumberMasked: extraction.accountNumberMasked ?? null,
         accountType: extraction.accountType ?? (existingMetadata.accountType as string | null) ?? null,
+        accountHolder: extraction.accountHolder ?? (existingMetadata.accountHolder as string | null) ?? null,
         period: {
-          ...extraction.period,
-          month:
-            extraction.period?.end
-              ? extraction.period.end.slice(0, 7)
-              : ((existingMetadata.period as { month?: string } | undefined)?.month ?? undefined),
+          start: periodStart,
+          end: periodEnd,
+          month: derivedMonth ?? ((existingMetadata.period as { month?: string } | undefined)?.month ?? null),
+        },
+        provenance: {
+          ...(existingMetadata.provenance as Record<string, unknown> | undefined),
+          ...(extraction.provenance ?? {}),
         },
       } as typeof payload.metadata;
-      if (extraction.period?.end) {
-        const endDate = new Date(extraction.period.end);
-        if (!Number.isNaN(endDate.getTime())) {
-          payload.documentDate = endDate;
-          payload.documentMonth = extraction.period.end.slice(0, 7);
+      const selectedDate = periodEnd || periodStart || null;
+      if (selectedDate) {
+        const isoDate = new Date(selectedDate);
+        if (!Number.isNaN(isoDate.getTime())) {
+          payload.documentDate = isoDate;
+          payload.documentMonth = selectedDate.slice(0, 7);
+          payload.documentDateV1 = selectedDate;
         }
+      } else if (derivedMonth) {
+        payload.documentMonth = derivedMonth;
       }
+      if (!payload.metadata) payload.metadata = {} as typeof payload.metadata;
       payload.parserVersion = process.env.PARSER_VERSIONS_STATEMENT || 'statement@1.0.0';
     } catch (err) {
       logger.warn({ jobId: job.jobId, err }, 'Statement extraction failed; using defaults');

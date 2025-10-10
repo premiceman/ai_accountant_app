@@ -4,22 +4,30 @@
 // Do not change public function signatures.
 
 type PayslipExtractionResult = {
-  payDate: string;
-  period?: { start?: string | null; end?: string | null; month?: string | null };
+  payDate: string | null;
+  period?: { start?: string | null; end?: string | null; month?: string | null } | null;
   employer?: string | null;
+  employeeName?: string | null;
   gross?: number | null;
   net?: number | null;
   tax?: number | null;
   ni?: number | null;
   pension?: number | null;
+  pensionEmployee?: number | null;
+  pensionEmployer?: number | null;
   studentLoan?: number | null;
   payFrequency?: string | null;
+  taxCode?: string | null;
+  niLetter?: string | null;
+  ytd?: Record<string, unknown> | null;
+  provenance?: Record<string, unknown> | null;
 };
 
 type StatementExtractionResult = {
   bankName?: string | null;
   accountNumberMasked?: string | null;
   accountType?: string | null;
+  accountHolder?: string | null;
   period: { start: string | null; end: string | null };
   openingBalance?: number | null;
   closingBalance?: number | null;
@@ -32,6 +40,7 @@ type StatementExtractionResult = {
     direction?: 'inflow' | 'outflow';
     category?: string | null;
   }>;
+  provenance?: Record<string, unknown> | null;
 };
 
 // Use absolute file:// URLs based on the current module’s URL.

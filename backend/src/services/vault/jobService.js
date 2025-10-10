@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const mongoose = require('mongoose');
 const UserDocumentJob = require('../../../models/UserDocumentJob');
 const UploadSession = require('../../../models/UploadSession');
+const DocumentInsight = require('../../../models/DocumentInsight');
 
 const SCHEMA_VERSION = process.env.SCHEMA_VERSION || '2.0';
 const DEFAULT_PARSER_VERSIONS = {
@@ -19,6 +20,17 @@ function resolveModel() {
 
 function resolvePromptVersion() {
   return process.env.PROMPT_VERSION || 'vault-v1';
+}
+
+function resolveParserVersionForCatalogue(catalogueKey) {
+  if (!catalogueKey) return null;
+  if (catalogueKey === 'payslip') {
+    return process.env.PARSER_VERSIONS_PAYSLIP || DEFAULT_PARSER_VERSIONS.payslip;
+  }
+  if (typeof catalogueKey === 'string' && catalogueKey.endsWith('_statement')) {
+    return process.env.PARSER_VERSIONS_STATEMENT || DEFAULT_PARSER_VERSIONS.statement;
+  }
+  return null;
 }
 
 async function upsertSession({ userId, sessionId, files }) {
@@ -105,9 +117,96 @@ async function markFileStatus({ userId, fileId, status, reason = null }) {
   await UploadSession.updateOne({ userId, 'files.fileId': fileId }, { $set: update });
 }
 
+async function queueUserFileIds(userId, fileIds) {
+  if (!userId) throw new Error('userId is required');
+  if (!Array.isArray(fileIds) || fileIds.length === 0) {
+    return { queued: 0 };
+  }
+
+  const uniqueIds = Array.from(
+    new Set(
+      fileIds
+        .map((id) => (typeof id === 'string' ? id.trim() : ''))
+        .filter((id) => id)
+    )
+  );
+  if (!uniqueIds.length) return { queued: 0 };
+
+  let userObjectId;
+  try {
+    userObjectId = new mongoose.Types.ObjectId(userId);
+  } catch (err) {
+    throw new Error('Invalid userId');
+  }
+
+  const insights = await DocumentInsight.find({ userId: userObjectId, fileId: { $in: uniqueIds } })
+    .sort({ updatedAt: -1 })
+    .lean();
+  const insightByFile = new Map();
+  insights.forEach((doc) => {
+    if (!insightByFile.has(doc.fileId)) {
+      insightByFile.set(doc.fileId, doc);
+    }
+  });
+
+  const previousJobs = await UserDocumentJob.find({ userId: userObjectId, fileId: { $in: uniqueIds } })
+    .sort({ createdAt: -1 })
+    .lean();
+  const jobByFile = new Map();
+  previousJobs.forEach((job) => {
+    if (!jobByFile.has(job.fileId)) {
+      jobByFile.set(job.fileId, job);
+    }
+  });
+
+  let queued = 0;
+  for (const fileId of uniqueIds) {
+    const insight = insightByFile.get(fileId);
+    const lastJob = jobByFile.get(fileId);
+    if (!insight && !lastJob) continue;
+
+    const schemaVersion = insight?.schemaVersion || lastJob?.schemaVersion || SCHEMA_VERSION;
+    const parserVersion =
+      resolveParserVersionForCatalogue(insight?.catalogueKey) ||
+      lastJob?.parserVersion ||
+      resolveParserVersion();
+    const contentHash = insight?.contentHash || lastJob?.contentHash;
+    if (!contentHash) continue;
+
+    if (insight?._id) {
+      await DocumentInsight.deleteOne({ _id: insight._id });
+    }
+
+    await UserDocumentJob.create({
+      jobId: randomUUID(),
+      userId: userObjectId,
+      sessionId: lastJob?.sessionId || null,
+      collectionId: lastJob?.collectionId || insight?.collectionId || null,
+      fileId,
+      originalName: lastJob?.originalName || insight?.documentName || fileId,
+      contentHash,
+      candidateType: null,
+      status: 'pending',
+      uploadState: 'succeeded',
+      processState: 'pending',
+      attempts: 0,
+      lastError: null,
+      schemaVersion,
+      parserVersion,
+      promptVersion: resolvePromptVersion(),
+      model: resolveModel(),
+    });
+
+    queued += 1;
+  }
+
+  return { queued };
+}
+
 module.exports = {
   registerUpload,
   setUploadState,
   updateJobState,
   markFileStatus,
+  queueUserFileIds,
 };
