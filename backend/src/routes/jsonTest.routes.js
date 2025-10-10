@@ -14,6 +14,9 @@ const {
 const {
   autoAnalyseDocument,
 } = require('../services/documents/ingest');
+const {
+  DocumentProcessingError,
+} = require('../services/documents/pipeline/errors');
 
 const JSON_TEST_ENABLED = toBoolean(process.env.JSON_TEST);
 
@@ -61,7 +64,20 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
 
     const userDoc = await User.findById(userId, 'firstName lastName username').lean();
     const context = { user: buildUserContext(userDoc) };
-    const analysis = await autoAnalyseDocument(file.buffer, file.originalname || 'document.pdf', context);
+    let analysis;
+    try {
+      analysis = await autoAnalyseDocument(file.buffer, file.originalname || 'document.pdf', context);
+    } catch (err) {
+      if (err instanceof DocumentProcessingError) {
+        console.warn('[json-test] document analysis failed', err);
+        return res.status(200).json({
+          ok: false,
+          error: err.message,
+          code: err.code,
+        });
+      }
+      throw err;
+    }
 
     const key = buildObjectKey({
       userId,
@@ -75,6 +91,7 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
     const fileId = keyToFileId(key);
 
     res.json({
+      ok: true,
       classification: analysis.classification,
       insights: analysis.insights,
       text: analysis.text,

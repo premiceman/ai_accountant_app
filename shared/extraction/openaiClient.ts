@@ -53,22 +53,26 @@ export async function callStructuredExtraction<T = unknown>(
   try {
     const systemPrompt =
       options.systemPrompt || 'You are a meticulous financial analyst that extracts structured payroll data.';
-    const responseFormat = schema
-      ? { type: 'json_schema', json_schema: { ...schema, strict: true } }
-      : { type: 'json_object' };
-    const body: Record<string, unknown> = {
+    const makeBody = (format: Record<string, unknown>) => ({
       model: OPENAI_EXTRACTION_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt },
       ],
       temperature: 0,
-      response_format: responseFormat,
-    };
+      response_format: format,
+      ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    });
 
-    if (options.maxTokens) body.max_tokens = options.maxTokens;
+    const schemaFormat = schema
+      ? { type: 'json_schema', json_schema: { ...schema, strict: true } }
+      : { type: 'json_object' };
 
-    const data = await postChatCompletion(body);
+    let data = await postChatCompletion(makeBody(schemaFormat));
+    if (!data && schema) {
+      console.warn('[shared:openaiClient] json_schema request failed, retrying with json_object');
+      data = await postChatCompletion(makeBody({ type: 'json_object' }));
+    }
     if (!data) return null;
     const content = data?.choices?.[0]?.message?.content;
     if (!content) return null;
@@ -85,20 +89,26 @@ export async function callStructuredExtraction<T = unknown>(
 }
 
 export async function callOpenAIJson<T = unknown>({ system, user, schema, maxTokens }: JsonRequest): Promise<T | null> {
-  const responseFormat = schema
-    ? { type: 'json_schema', json_schema: { ...schema, strict: true } }
-    : { type: 'json_object' };
-  const body: Record<string, unknown> = {
+  const makeBody = (format: Record<string, unknown>) => ({
     model: OPENAI_EXTRACTION_MODEL,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
     temperature: 0,
-    response_format: responseFormat,
-  };
-  if (maxTokens) body.max_tokens = maxTokens;
-  const data = await postChatCompletion(body);
+    response_format: format,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
+  });
+
+  const schemaFormat = schema
+    ? { type: 'json_schema', json_schema: { ...schema, strict: true } }
+    : { type: 'json_object' };
+
+  let data = await postChatCompletion(makeBody(schemaFormat));
+  if (!data && schema) {
+    console.warn('[shared:openaiClient] json_schema request failed, retrying with json_object');
+    data = await postChatCompletion(makeBody({ type: 'json_object' }));
+  }
   if (!data) return null;
   const content = data?.choices?.[0]?.message?.content;
   if (!content) return null;

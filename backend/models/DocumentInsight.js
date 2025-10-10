@@ -27,6 +27,7 @@ const DocumentInsightSchema = new mongoose.Schema(
       required: true,
     },
     baseKey: { type: String, index: true, required: true },
+    insightType: { type: String, index: true, default: null },
     schemaVersion: { type: String, required: true },
     parserVersion: { type: String, required: true },
     promptVersion: { type: String, required: true },
@@ -64,9 +65,16 @@ DocumentInsightSchema.index({ userId: 1, 'metadata.institutionName': 1 });
 DocumentInsightSchema.index({ userId: 1, 'metadata.employerName': 1 });
 DocumentInsightSchema.index({ userId: 1, 'metadata.accountId': 1 });
 DocumentInsightSchema.index({ userId: 1, documentMonth: 1 });
-DocumentInsightSchema.index({ userId: 1, fileId: 1, schemaVersion: 1, contentHash: 1 }, { unique: true });
+DocumentInsightSchema.index({ userId: 1, fileId: 1, insightType: 1 }, { unique: true, name: 'user_file_insight_unique' });
 
-module.exports = mongoose.model('DocumentInsight', DocumentInsightSchema);
+const DocumentInsightModel = mongoose.model('DocumentInsight', DocumentInsightSchema);
+
+DocumentInsightModel.__private__ = {
+  dedupeLegacyDocumentInsights,
+};
+DocumentInsightModel.dedupeLegacyDocumentInsights = dedupeLegacyDocumentInsights;
+
+module.exports = DocumentInsightModel;
 
 /**
  * Normalise any existing records that still persist documentDate as a string.
@@ -132,3 +140,86 @@ function scheduleDocumentDateNormalization() {
 }
 
 scheduleDocumentDateNormalization();
+
+let dedupeScheduled = false;
+
+async function dedupeLegacyDocumentInsights() {
+  const connection = mongoose.connection;
+  if (!connection?.db) return;
+
+  const collection = connection.db.collection('documentinsights');
+
+  await collection
+    .updateMany(
+      { $or: [{ insightType: { $exists: false } }, { insightType: null }] },
+      [{ $set: { insightType: { $ifNull: ['$insightType', '$baseKey'] } } }],
+    )
+    .catch((err) => {
+      console.warn('Failed to backfill insightType for DocumentInsights', err);
+    });
+
+  try {
+    await collection.dropIndex('userId_1_fileId_1_schemaVersion_1_contentHash_1');
+  } catch (err) {
+    if (err?.codeName !== 'IndexNotFound' && err?.message?.includes('not found') !== true) {
+      console.warn('Failed to drop legacy DocumentInsight unique index', err);
+    }
+  }
+
+  const duplicates = await collection
+    .aggregate([
+      {
+        $project: {
+          _id: 1,
+          userId: 1,
+          fileId: 1,
+          insightType: { $ifNull: ['$insightType', '$baseKey'] },
+          updatedAt: 1,
+          createdAt: 1,
+        },
+      },
+      {
+        $group: {
+          _id: { userId: '$userId', fileId: '$fileId', insightType: '$insightType' },
+          docs: {
+            $push: { _id: '$_id', updatedAt: '$updatedAt', createdAt: '$createdAt' },
+          },
+        },
+      },
+      { $match: { 'docs.1': { $exists: true } } },
+    ])
+    .toArray();
+
+  for (const group of duplicates) {
+    const docs = [...(group.docs || [])].sort((a, b) => {
+      const aDate = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bDate = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bDate - aDate;
+    });
+    const [, ...remove] = docs;
+    if (!remove.length) continue;
+    const ids = remove.map((doc) => doc._id).filter(Boolean);
+    if (ids.length) {
+      await collection.deleteMany({ _id: { $in: ids } });
+    }
+  }
+}
+
+function scheduleDocumentInsightDeduplication() {
+  if (dedupeScheduled) return;
+  dedupeScheduled = true;
+
+  const run = () => {
+    dedupeLegacyDocumentInsights().catch((err) => {
+      console.warn('Failed to dedupe legacy DocumentInsights', err);
+    });
+  };
+
+  if (mongoose.connection.readyState >= 1) {
+    run();
+  } else {
+    mongoose.connection.once('connected', run);
+  }
+}
+
+scheduleDocumentInsightDeduplication();
