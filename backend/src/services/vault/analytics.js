@@ -2,6 +2,7 @@ const dayjs = require('dayjs');
 const DocumentInsight = require('../../../models/DocumentInsight');
 const UserAnalytics = require('../../../models/UserAnalytics');
 const UserOverride = require('../../../models/UserOverride');
+const { preferV1, STATEMENT_TYPES } = require('../../lib/analyticsV1');
 
 function groupByCategory(transactions) {
   const totals = new Map();
@@ -56,6 +57,40 @@ function applyMetricOverrides(doc, overrides) {
   return clone;
 }
 
+function fromMinor(minor) {
+  const value = Number(minor);
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value) / 100;
+}
+
+function numberOrZero(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function mapTransactionFromV1(tx, metadata, fallbackCurrency) {
+  if (!tx) return null;
+  const amountMinor = Number(tx.amountMinor);
+  const amountMajor = Number.isFinite(amountMinor) ? amountMinor / 100 : 0;
+  const direction = tx.direction === 'outflow' ? 'outflow' : 'inflow';
+  const signedAmount = direction === 'outflow' ? -Math.abs(amountMajor) : Math.abs(amountMajor);
+  return {
+    id: tx.id || null,
+    description: tx.description || 'Transaction',
+    amount: signedAmount,
+    direction,
+    category: tx.category || 'Misc',
+    date: tx.date || metadata?.period?.end || metadata?.period?.start || null,
+    accountId: tx.accountId || metadata?.accountId || null,
+    accountName: tx.accountName || metadata?.accountName || null,
+    bankName: metadata?.bankName || null,
+    accountType: metadata?.accountType || null,
+    statementPeriod: metadata?.period || null,
+    currency: fallbackCurrency,
+    transfer: (tx.category || '').toLowerCase() === 'transfers',
+  };
+}
+
 async function rebuildMonthlyAnalytics({ userId, month }) {
   const periodStart = dayjs(`${month}-01`);
   if (!periodStart.isValid()) {
@@ -90,52 +125,75 @@ async function rebuildMonthlyAnalytics({ userId, month }) {
   const pension = { balance: 0, contributions: 0 };
 
   for (const insight of insights) {
+    const preferred = preferV1(insight);
+    const metrics = insight.metrics || {};
+    const metadata = insight.metadata || {};
+    const currency = preferred?.currency || insight.currency || 'GBP';
+
     switch (insight.catalogueKey) {
       case 'payslip': {
         sources.payslips += 1;
-        const metrics = insight.metrics || {};
-        incomeGross += Number(metrics.gross || 0);
-        incomeNet += Number(metrics.net || 0);
-        hmrcWithheld += Number(metrics.tax || 0) + Number(metrics.ni || 0) + Number(metrics.studentLoan || 0);
+        const metricsV1 = preferred?.metricsV1 || {};
+        incomeGross += metricsV1.grossMinor != null ? fromMinor(metricsV1.grossMinor) : numberOrZero(metrics.gross);
+        incomeNet += metricsV1.netMinor != null ? fromMinor(metricsV1.netMinor) : numberOrZero(metrics.net);
+        hmrcWithheld +=
+          (metricsV1.taxMinor != null ? fromMinor(metricsV1.taxMinor) : numberOrZero(metrics.tax)) +
+          (metricsV1.nationalInsuranceMinor != null
+            ? fromMinor(metricsV1.nationalInsuranceMinor)
+            : numberOrZero(metrics.ni)) +
+          (metricsV1.studentLoanMinor != null ? fromMinor(metricsV1.studentLoanMinor) : numberOrZero(metrics.studentLoan));
         break;
       }
-      case 'current_account_statement':
-      case 'savings_account_statement':
-      case 'isa_statement':
-      case 'investment_statement':
-      case 'pension_statement': {
-        sources.statements += insight.catalogueKey === 'current_account_statement' ? 1 : 0;
+      case 'hmrc_correspondence': {
+        sources.hmrc += 1;
+        hmrcPaid += numberOrZero(metrics.taxPaid ?? metrics.taxDue);
+        break;
+      }
+      default: {
+        if (!STATEMENT_TYPES.has(insight.catalogueKey)) break;
+
+        if (insight.catalogueKey === 'current_account_statement') sources.statements += 1;
         if (insight.catalogueKey === 'savings_account_statement') sources.savings += 1;
         if (insight.catalogueKey === 'isa_statement') sources.isa += 1;
         if (insight.catalogueKey === 'investment_statement') sources.investments += 1;
         if (insight.catalogueKey === 'pension_statement') sources.pension += 1;
-        const txs = applyTransactionOverrides(insight.transactions || [], overrides);
+
+        const transactionsV1 = Array.isArray(preferred?.transactionsV1) ? preferred.transactionsV1 : null;
+        const normalised = transactionsV1 && transactionsV1.length
+          ? transactionsV1
+              .map((tx) => mapTransactionFromV1(tx, metadata, currency))
+              .filter(Boolean)
+          : Array.isArray(insight.transactions)
+          ? insight.transactions.map((tx) => ({
+              ...tx,
+              amount: numberOrZero(tx.amount),
+              direction: tx.direction || (numberOrZero(tx.amount) >= 0 ? 'inflow' : 'outflow'),
+              transfer:
+                tx.transfer != null
+                  ? Boolean(tx.transfer)
+                  : (tx.category || '').toLowerCase() === 'transfers',
+            }))
+          : [];
+        const txs = applyTransactionOverrides(normalised, overrides);
         statementTransactions.push(...txs);
-        const metrics = insight.metrics || {};
+
         if (insight.catalogueKey === 'savings_account_statement') {
-          savings.balance = Number(metrics.closingBalance || savings.balance);
-          savings.interest += Number(metrics.interestOrDividends || 0);
+          savings.balance = numberOrZero(metrics.closingBalance ?? metrics.balance ?? savings.balance);
+          savings.interest += numberOrZero(metrics.interestOrDividends ?? metrics.interest);
         }
         if (insight.catalogueKey === 'isa_statement' || insight.catalogueKey === 'investment_statement') {
-          investments.balance = Number(metrics.closingBalance || investments.balance);
-          investments.contributions += Number(metrics.contributions || 0);
+          investments.balance = numberOrZero(metrics.closingBalance ?? metrics.balance ?? investments.balance);
+          investments.contributions += numberOrZero(metrics.contributions ?? metrics.netContributions);
           if (metrics.estReturn != null) {
-            investments.estReturn += Number(metrics.estReturn);
+            investments.estReturn += numberOrZero(metrics.estReturn);
           }
         }
         if (insight.catalogueKey === 'pension_statement') {
-          pension.balance = Number(metrics.closingBalance || pension.balance);
-          pension.contributions += Number(metrics.contributions || 0);
+          pension.balance = numberOrZero(metrics.closingBalance ?? metrics.balance ?? pension.balance);
+          pension.contributions += numberOrZero(metrics.contributions ?? metrics.employeeContributions);
         }
         break;
       }
-      case 'hmrc_correspondence':
-        sources.hmrc += 1;
-        const metrics = insight.metrics || {};
-        hmrcPaid += Number(metrics.taxPaid || 0);
-        break;
-      default:
-        break;
     }
   }
 
