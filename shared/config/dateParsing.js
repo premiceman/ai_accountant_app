@@ -1,0 +1,120 @@
+'use strict';
+
+const pathPreference = () => {
+  const raw = process.env.DATE_PARSE_PREFERENCE || process.env.DATE_PARSE_ORDER || 'DMY';
+  const upper = String(raw).trim().toUpperCase();
+  return upper === 'MDY' ? 'MDY' : 'DMY';
+};
+
+function getDateParsePreference() {
+  return pathPreference();
+}
+
+const MONTHS = new Map([
+  ['JAN', '01'], ['FEB', '02'], ['MAR', '03'], ['APR', '04'], ['MAY', '05'], ['JUN', '06'],
+  ['JUL', '07'], ['AUG', '08'], ['SEP', '09'], ['SEPT', '09'], ['OCT', '10'], ['NOV', '11'], ['DEC', '12'],
+]);
+
+function normaliseYear(token) {
+  if (!token) return null;
+  const trimmed = String(token).trim();
+  if (!trimmed) return null;
+  if (/^\d{4}$/.test(trimmed)) return trimmed;
+  if (!/^\d{2}$/.test(trimmed)) return null;
+  const year = Number.parseInt(trimmed, 10);
+  if (Number.isNaN(year)) return null;
+  // Assume 2000-2099 for 00-49, 1900-1999 for 50-99 to avoid future centuries.
+  return year >= 50 ? `19${trimmed}` : `20${trimmed.padStart(2, '0')}`;
+}
+
+function isValidDay(day) {
+  const num = Number.parseInt(day, 10);
+  return Number.isInteger(num) && num >= 1 && num <= 31;
+}
+
+function isValidMonth(month) {
+  const num = Number.parseInt(month, 10);
+  return Number.isInteger(num) && num >= 1 && num <= 12;
+}
+
+function buildIso(year, month, day) {
+  if (!year || !month || !day) return null;
+  if (!isValidMonth(month) || !isValidDay(day)) return null;
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  return iso;
+}
+
+function parseNumericDate(tokens, preference) {
+  if (tokens.length !== 3) return null;
+  const [aRaw, bRaw, cRaw] = tokens;
+  // If first token has 4 digits treat as year-first ISO style.
+  if (/^\d{4}$/.test(aRaw)) {
+    return buildIso(aRaw, bRaw, cRaw);
+  }
+  // If last token has 4 digits treat as year-last.
+  const year = normaliseYear(cRaw);
+  if (!year) return null;
+  let first = Number.parseInt(aRaw, 10);
+  let second = Number.parseInt(bRaw, 10);
+  if (!Number.isInteger(first) || !Number.isInteger(second)) return null;
+  let day;
+  let month;
+  if (first > 12 && second <= 12) {
+    day = first;
+    month = second;
+  } else if (second > 12 && first <= 12) {
+    day = second;
+    month = first;
+  } else if (preference === 'MDY') {
+    month = first;
+    day = second;
+  } else {
+    day = first;
+    month = second;
+  }
+  return buildIso(year, month, day);
+}
+
+function parseTextualDate(parts) {
+  const cleaned = parts.map((token) => token.replace(/(st|nd|rd|th)$/i, ''));
+  if (cleaned.length < 2 || cleaned.length > 3) return null;
+  const upperParts = cleaned.map((token) => token.toUpperCase());
+  let monthIndex = upperParts.findIndex((token) => MONTHS.has(token));
+  if (monthIndex === -1) return null;
+  const month = MONTHS.get(upperParts[monthIndex]);
+  const remaining = cleaned.filter((_, idx) => idx !== monthIndex);
+  if (remaining.length < 1) return null;
+  const dayToken = remaining.find((token) => /\d/.test(token));
+  const yearToken = remaining.find((token) => /^\d{2,4}$/.test(token) && token !== dayToken);
+  if (!dayToken) return null;
+  const day = Number.parseInt(dayToken, 10);
+  const year = normaliseYear(yearToken || null);
+  if (!year) return null;
+  return buildIso(year, month, day);
+}
+
+function parseDateString(value, preference = getDateParsePreference()) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalised = raw.replace(/[,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const isoMatch = normalised.match(/^(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})$/);
+  if (isoMatch) {
+    return buildIso(isoMatch[1], isoMatch[2], isoMatch[3]);
+  }
+  const numericMatch = normalised.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
+  if (numericMatch) {
+    return parseNumericDate(numericMatch.slice(1), preference);
+  }
+  const tokens = normalised.split(' ');
+  const textual = parseTextualDate(tokens);
+  if (textual) return textual;
+  return null;
+}
+
+module.exports = {
+  getDateParsePreference,
+  parseDateString,
+};

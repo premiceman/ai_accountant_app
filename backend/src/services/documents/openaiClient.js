@@ -1,8 +1,26 @@
+const fs = require('fs');
+const path = require('path');
+const { pathToFileURL } = require('url');
+
 let sharedClientPromise = null;
+
+function resolveShared(relativePath) {
+  const candidates = [
+    path.resolve(__dirname, '../../../../shared', relativePath),
+    path.resolve(__dirname, '../../../../../shared', relativePath),
+    path.resolve(process.cwd(), 'shared', relativePath),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return pathToFileURL(candidate).href;
+    }
+  }
+  throw new Error(`Unable to locate shared module: ${relativePath}`);
+}
 
 function loadSharedClient() {
   if (!sharedClientPromise) {
-    sharedClientPromise = import('../../../../shared/extraction/openaiClient.js');
+    sharedClientPromise = import(resolveShared('extraction/openaiClient.js'));
   }
   return sharedClientPromise;
 }

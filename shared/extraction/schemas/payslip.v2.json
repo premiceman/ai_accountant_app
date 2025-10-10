@@ -30,6 +30,15 @@
           "pension_employer": { "type": ["number","string","null"] }
         },
         "required": []
+      },
+      "gross_pay": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "period": { "type": ["number","null"] },
+          "ytd": { "type": ["number","null"] }
+        },
+        "required": ["period"]
       }
     },
     "required": ["pay_date","gross","net"]

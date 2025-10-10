@@ -2,6 +2,9 @@
 // Purpose: robust, environment-agnostic dynamic imports for shared extractors.
 // Works in dev (ts-node-dev), local build (node dist), and Docker.
 // Do not change public function signatures.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 type PayslipExtractionResult = {
   payDate: string | null;
@@ -43,10 +46,24 @@ type StatementExtractionResult = {
   provenance?: Record<string, unknown> | null;
 };
 
-// Use absolute file:// URLs based on the current module’s URL.
-// This avoids fragile relative pathing in dev vs dist vs Docker.
-const PAYSLIP_MODULE_URL   = new URL('../../../../shared/extraction/payslip.js', import.meta.url).href;
-const STATEMENT_MODULE_URL = new URL('../../../../shared/extraction/statement.js', import.meta.url).href;
+function resolveSharedModule(relativePath: string): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(moduleDir, '../../shared', relativePath),
+    path.resolve(moduleDir, '../../../shared', relativePath),
+    path.resolve(moduleDir, '../../../../shared', relativePath),
+    path.resolve(moduleDir, '../../../../../shared', relativePath),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return pathToFileURL(candidate).href;
+    }
+  }
+  throw new Error(`Unable to resolve shared module: ${relativePath}`);
+}
+
+const PAYSLIP_MODULE_URL = resolveSharedModule('extraction/payslip.js');
+const STATEMENT_MODULE_URL = resolveSharedModule('extraction/statement.js');
 
 let payslipModulePromise: Promise<any> | null = null;
 let statementModulePromise: Promise<any> | null = null;

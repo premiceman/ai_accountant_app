@@ -5,44 +5,8 @@ exports.analyseCurrentAccountStatement = analyseCurrentAccountStatement;
 exports.normaliseCategory = normaliseCategory;
 exports.summariseStatement = summariseStatement;
 const openaiClient_js_1 = require("./openaiClient.js");
-let pdfParsePromise = null;
-async function loadPdfParse() {
-    if (!pdfParsePromise) {
-        pdfParsePromise = import('pdf-parse').then((mod) => mod.default ?? mod).catch((err) => {
-            console.warn('[shared:statement] pdf-parse unavailable', err?.message || err);
-            return null;
-        });
-    }
-    return pdfParsePromise;
-}
-async function extractPdfText(buffer) {
-    if (!buffer || buffer.length === 0)
-        return '';
-    try {
-        const pdfParse = await loadPdfParse();
-        if (pdfParse) {
-            const parsed = await pdfParse(buffer);
-            if (parsed && typeof parsed.text === 'string') {
-                return parsed.text;
-            }
-        }
-    }
-    catch (err) {
-        console.warn('[shared:statement] pdf-parse failed', err?.message || err);
-    }
-    try {
-        if (Buffer.isBuffer(buffer)) {
-            const str = buffer.toString('utf8');
-            if (str.trim().length) {
-                return str;
-            }
-        }
-    }
-    catch (err) {
-        console.warn('[shared:statement] fallback conversion failed', err?.message || err);
-    }
-    return '';
-}
+const extractPdfText_js_1 = require("./extractPdfText.js");
+const dateParsing_js_1 = require("../config/dateParsing.js");
 const CATEGORY_CANONICAL = new Map([
     ['income', 'Income'],
     ['salary', 'Income'],
@@ -139,37 +103,36 @@ function maskAccountNumber(value) {
 function parseNumber(value) {
     if (value == null || value === '')
         return null;
-    const num = Number(value);
+    if (typeof value === 'number')
+        return Number.isFinite(value) ? value : null;
+    const cleaned = String(value).replace(/[^0-9.-]/g, '');
+    if (!cleaned)
+        return null;
+    const num = Number.parseFloat(cleaned);
     return Number.isFinite(num) ? num : null;
 }
 function parseDate(value) {
-    if (!value)
-        return null;
-    const iso = new Date(value);
-    if (!Number.isNaN(iso.getTime()))
-        return iso.toISOString().slice(0, 10);
-    const match = String(value).match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
-    if (match) {
-        const d = match[1].padStart(2, '0');
-        const m = match[2].padStart(2, '0');
-        const y = match[3].length === 2 ? `20${match[3]}` : match[3];
-        return `${y}-${m}-${d}`;
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
     }
+    if (typeof value === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+            const iso = new Date(value);
+            return Number.isNaN(iso.getTime()) ? null : iso.toISOString().slice(0, 10);
+        }
+        const parsed = (0, dateParsing_js_1.parseDateString)(value);
+        if (parsed)
+            return parsed;
+    }
+    const direct = new Date(value);
+    if (!Number.isNaN(direct.getTime()))
+        return direct.toISOString().slice(0, 10);
+    if (typeof value === 'string')
+        return (0, dateParsing_js_1.parseDateString)(value);
     return null;
 }
 function normaliseIsoDate(value) {
-    if (!value)
-        return null;
-    const direct = value instanceof Date ? value : new Date(value);
-    if (!Number.isNaN(direct.getTime()))
-        return direct.toISOString();
-    const parsed = parseDate(value);
-    if (parsed) {
-        const iso = new Date(parsed);
-        if (!Number.isNaN(iso.getTime()))
-            return iso.toISOString();
-    }
-    return null;
+    return parseDate(value);
 }
 function derivePeriodFromTransactions(transactions) {
     const dates = transactions
@@ -241,6 +204,7 @@ async function llmCategoriseTransactions(transactions) {
                             index: { type: 'number' },
                             category: { type: 'string' },
                         },
+                        required: ['index'],
                     },
                 },
             },
@@ -298,6 +262,7 @@ async function llmStatementExtraction(text) {
                         start_date: { type: ['string', 'null'] },
                         end_date: { type: ['string', 'null'] },
                     },
+                    required: ['start_date', 'end_date'],
                 },
                 transactions: {
                     type: 'array',
@@ -446,6 +411,8 @@ async function analyseCurrentAccountStatement(text) {
             start: parseDate(llm?.statement_period?.start_date) || null,
             end: parseDate(llm?.statement_period?.end_date) || null,
         },
+        openingBalance: parseNumber(llm?.opening_balance),
+        closingBalance: parseNumber(llm?.closing_balance),
     };
     const accountKeyBase = [metadata.bankName, metadata.accountType, metadata.accountNumberMasked]
         .filter(Boolean)
@@ -458,14 +425,16 @@ async function analyseCurrentAccountStatement(text) {
     await llmCategoriseTransactions(mergedTransactions);
     const derivedPeriod = derivePeriodFromTransactions(mergedTransactions);
     if (!metadata.period.start && derivedPeriod.start)
-        metadata.period.start = derivedPeriod.start.slice(0, 10);
+        metadata.period.start = derivedPeriod.start;
     if (!metadata.period.end && derivedPeriod.end)
-        metadata.period.end = derivedPeriod.end.slice(0, 10);
+        metadata.period.end = derivedPeriod.end;
     const summary = summariseStatement(mergedTransactions);
-    if (!summary.totals.income && llm?.totals?.income)
-        summary.totals.income = parseNumber(llm.totals.income) || 0;
-    if (!summary.totals.spend && llm?.totals?.spend)
-        summary.totals.spend = Math.abs(parseNumber(llm.totals.spend) || 0);
+    const llmIncome = parseNumber(llm?.totals?.income);
+    if (summary.totals.income == null && llmIncome != null)
+        summary.totals.income = llmIncome;
+    const llmSpend = parseNumber(llm?.totals?.spend);
+    if (summary.totals.spend == null && llmSpend != null)
+        summary.totals.spend = Math.abs(llmSpend);
     return {
         metadata,
         transactions: mergedTransactions,
@@ -474,37 +443,35 @@ async function analyseCurrentAccountStatement(text) {
     };
 }
 async function extractStatement(buffer) {
-    const text = await extractPdfText(buffer);
-    const analysed = await analyseCurrentAccountStatement(text || '');
+    const { fullText } = await (0, extractPdfText_js_1.extractPdfText)(buffer);
+    const analysed = await analyseCurrentAccountStatement(fullText || '');
     const metadata = analysed.metadata || {};
     const transactions = Array.isArray(analysed.transactions) ? analysed.transactions : [];
     const inflows = transactions
         .filter((tx) => tx.direction === 'inflow')
-        .reduce((acc, tx) => acc + (Number(tx.amount) || 0), 0);
+        .reduce((acc, tx) => acc + (typeof tx.amount === 'number' ? tx.amount : 0), 0);
     const outflows = transactions
         .filter((tx) => tx.direction === 'outflow')
-        .reduce((acc, tx) => acc + Math.abs(Number(tx.amount) || 0), 0);
+        .reduce((acc, tx) => acc + (typeof tx.amount === 'number' ? Math.abs(tx.amount) : 0), 0);
     const derivedPeriod = derivePeriodFromTransactions(transactions);
-    const startIso = (metadata.period?.start ? new Date(metadata.period.start).toISOString().slice(0, 10) : null) ||
-        (derivedPeriod.start ? new Date(derivedPeriod.start).toISOString().slice(0, 10) : null) ||
-        new Date().toISOString().slice(0, 10);
-    const endIso = (metadata.period?.end ? new Date(metadata.period.end).toISOString().slice(0, 10) : null) ||
-        (derivedPeriod.end ? new Date(derivedPeriod.end).toISOString().slice(0, 10) : null) ||
-        startIso;
+    const startIso = metadata.period?.start || derivedPeriod.start || null;
+    const endIso = metadata.period?.end || derivedPeriod.end || startIso || null;
     const simplifiedTransactions = transactions.map((tx) => ({
-        date: (tx.date && new Date(tx.date).toISOString().slice(0, 10)) || startIso,
-        description: String(tx.description || 'Transaction'),
-        amount: Number(tx.amount) || 0,
-        direction: tx.direction || (Number(tx.amount) >= 0 ? 'inflow' : 'outflow'),
+        date: tx.date || null,
+        description: String(tx.description || 'Transaction').trim(),
+        amount: typeof tx.amount === 'number' ? tx.amount : null,
+        direction: tx.direction
+            || (typeof tx.amount === 'number' ? (tx.amount >= 0 ? 'inflow' : 'outflow') : null),
         category: tx.category || null,
     }));
     return {
         bankName: metadata.bankName || null,
         accountNumberMasked: metadata.accountNumberMasked || null,
         accountType: metadata.accountType || null,
+        accountHolder: metadata.accountHolder || null,
         period: { start: startIso, end: endIso },
-        openingBalance: analysed.summary?.totals?.opening ?? null,
-        closingBalance: analysed.summary?.totals?.closing ?? null,
+        openingBalance: parseNumber(metadata.openingBalance) || null,
+        closingBalance: parseNumber(metadata.closingBalance) || null,
         inflows,
         outflows,
         transactions: simplifiedTransactions,

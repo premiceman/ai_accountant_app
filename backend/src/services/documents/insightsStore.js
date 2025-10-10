@@ -591,6 +591,7 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
       const documentIso = documentContext.documentIso || null;
       const documentDate = documentIso ? new Date(documentIso) : null;
       const documentDateV1 = documentIso ? documentIso.slice(0, 10) : null;
+      const insightType = insights.insightType || insights.baseKey || baseKey;
       const contentHash = sha256(
         [
           fileInfo.id,
@@ -601,11 +602,12 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
       );
 
       await DocumentInsight.findOneAndUpdate(
-        { userId, fileId: fileInfo.id, schemaVersion: LEGACY_SCHEMA_VERSION },
+        { userId, fileId: fileInfo.id, insightType },
         {
           $set: {
             catalogueKey: key,
             baseKey,
+            insightType,
             documentMonth: documentContext.monthKey || null,
             documentDate,
             documentLabel: documentContext.label || null,

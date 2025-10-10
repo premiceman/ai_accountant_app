@@ -6,10 +6,12 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run copy-shared && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "npm run build && node dist/tests/rawInstitutionNames.test.js && node dist/tests/v1Dashboard.test.js"
+    "test": "npm run build && node dist/tests/rawInstitutionNames.test.js && node dist/tests/v1Dashboard.test.js",
+    "copy-shared": "node ../../scripts/copy-shared.js ./shared",
+    "postinstall": "npm run copy-shared"
   },
   "dependencies": {
     "@types/express": "^4.17.21",

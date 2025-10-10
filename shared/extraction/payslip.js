@@ -3,44 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractPayslip = extractPayslip;
 exports.analysePayslip = analysePayslip;
 const openaiClient_js_1 = require("./openaiClient.js");
-let pdfParsePromise = null;
-async function loadPdfParse() {
-    if (!pdfParsePromise) {
-        pdfParsePromise = import('pdf-parse').then((mod) => mod.default ?? mod).catch((err) => {
-            console.warn('[shared:payslip] pdf-parse unavailable', err?.message || err);
-            return null;
-        });
-    }
-    return pdfParsePromise;
-}
-async function extractPdfText(buffer) {
-    if (!buffer || buffer.length === 0)
-        return '';
-    try {
-        const pdfParse = await loadPdfParse();
-        if (pdfParse) {
-            const parsed = await pdfParse(buffer);
-            if (parsed && typeof parsed.text === 'string') {
-                return parsed.text;
-            }
-        }
-    }
-    catch (err) {
-        console.warn('[shared:payslip] pdf-parse failed', err?.message || err);
-    }
-    try {
-        if (Buffer.isBuffer(buffer)) {
-            const str = buffer.toString('utf8');
-            if (str.trim().length) {
-                return str;
-            }
-        }
-    }
-    catch (err) {
-        console.warn('[shared:payslip] fallback conversion failed', err?.message || err);
-    }
-    return '';
-}
+const extractPdfText_js_1 = require("./extractPdfText.js");
+const dateParsing_js_1 = require("../config/dateParsing.js");
 function normalise(str) {
     return String(str || '').replace(/\r\n?/g, '\n');
 }
@@ -104,7 +68,16 @@ function expectedUkMarginalRate(annualIncome) {
     return 0.47; // 45% tax + 2% NI (rounded)
 }
 function sumAmounts(list) {
-    return list.reduce((acc, item) => acc + (Number(item.amount) || 0), 0);
+    let total = 0;
+    let hasValue = false;
+    for (const item of list) {
+        const amount = Number(item?.amount);
+        if (Number.isFinite(amount)) {
+            total += amount;
+            hasValue = true;
+        }
+    }
+    return hasValue ? total : null;
 }
 function normaliseBreakdown(list) {
     if (!Array.isArray(list))
@@ -150,33 +123,7 @@ function parseTaxCode(text) {
     return match ? match[1].trim() : null;
 }
 function parseDate(value) {
-    if (!value)
-        return null;
-    const iso = new Date(value);
-    if (!Number.isNaN(iso.getTime()))
-        return iso.toISOString().slice(0, 10);
-    const dmy = String(value).match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
-    if (dmy) {
-        const day = dmy[1].padStart(2, '0');
-        const month = dmy[2].padStart(2, '0');
-        const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
-        return `${year}-${month}-${day}`;
-    }
-    const monthText = String(value).match(/([0-9]{1,2})\s+([A-Za-z]{3,9})\s*(\d{2,4})?/);
-    if (monthText) {
-        const monthNames = {
-            jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-            jul: '07', aug: '08', sep: '09', sept: '09', oct: '10', nov: '11', dec: '12',
-        };
-        const month = monthNames[monthText[2].slice(0, 3).toLowerCase()];
-        if (month) {
-            const day = monthText[1].padStart(2, '0');
-            const yearRaw = monthText[3] || `${new Date().getFullYear()}`;
-            const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw.padStart(4, '0');
-            return `${year}-${month}-${day}`;
-        }
-    }
-    return null;
+    return (0, dateParsing_js_1.parseDateString)(value);
 }
 async function llmPayslipExtraction(text) {
     const schema = {
@@ -192,6 +139,7 @@ async function llmPayslipExtraction(text) {
                         period: { type: ['number', 'null'] },
                         ytd: { type: ['number', 'null'] },
                     },
+                    required: ['period'],
                 },
                 net_pay: {
                     type: 'object',
@@ -318,38 +266,54 @@ function heuristicPayslipExtraction(text) {
         }
         if (/income\s*tax|tax\b/.test(lower)) {
             assignMetric(metrics, 'tax', line, numbers);
-            deductions.push({ label: cleanLabel(line) || 'Income tax', amount: Math.abs(firstNumber(numbers) ?? 0), category: 'tax' });
+            const amount = firstNumber(numbers);
+            if (amount != null)
+                deductions.push({ label: cleanLabel(line) || 'Income tax', amount: Math.abs(amount), category: 'tax' });
             return;
         }
         if (/national\s+insurance|\bni\b/.test(lower)) {
             assignMetric(metrics, 'ni', line, numbers);
-            deductions.push({ label: cleanLabel(line) || 'National insurance', amount: Math.abs(firstNumber(numbers) ?? 0), category: 'ni' });
+            const amount = firstNumber(numbers);
+            if (amount != null)
+                deductions.push({ label: cleanLabel(line) || 'National insurance', amount: Math.abs(amount), category: 'ni' });
             return;
         }
         if (/pension/.test(lower)) {
             assignMetric(metrics, 'pension', line, numbers);
-            deductions.push({ label: cleanLabel(line) || 'Pension', amount: Math.abs(firstNumber(numbers) ?? 0), category: 'pension' });
+            const amount = firstNumber(numbers);
+            if (amount != null)
+                deductions.push({ label: cleanLabel(line) || 'Pension', amount: Math.abs(amount), category: 'pension' });
             return;
         }
         if (/student\s+loan/.test(lower)) {
             assignMetric(metrics, 'studentLoan', line, numbers);
-            deductions.push({ label: cleanLabel(line) || 'Student loan', amount: Math.abs(firstNumber(numbers) ?? 0), category: 'student_loan' });
+            const amount = firstNumber(numbers);
+            if (amount != null)
+                deductions.push({ label: cleanLabel(line) || 'Student loan', amount: Math.abs(amount), category: 'student_loan' });
             return;
         }
         if (/allowance/.test(lower) && numbers.length) {
-            allowances.push({ label: cleanLabel(line) || 'Allowance', amount: Math.abs(firstNumber(numbers) ?? 0) });
+            const amount = firstNumber(numbers);
+            if (amount != null)
+                allowances.push({ label: cleanLabel(line) || 'Allowance', amount: Math.abs(amount) });
             return;
         }
         if ((/basic|salary|overtime|bonus|commission|shift|back\s*pay/.test(lower)) && numbers.length) {
-            earnings.push({ label: cleanLabel(line) || 'Earnings', amount: Math.abs(firstNumber(numbers) ?? 0), category: null });
+            const amount = firstNumber(numbers);
+            if (amount != null)
+                earnings.push({ label: cleanLabel(line) || 'Earnings', amount: Math.abs(amount), category: null });
         }
     });
     const payFrequency = detectPayFrequency(text);
     const annualisedGross = estimateAnnualisedGross(metrics.gross, metrics.grossYtd, payFrequency.periods);
     const totalDeductions = sumAmounts(deductions);
-    const effectiveMarginalRate = metrics.gross ? (metrics.gross === 0 ? 0 : Math.min(0.95, totalDeductions / metrics.gross)) : null;
+    const effectiveMarginalRate = metrics.gross != null && metrics.gross !== 0 && totalDeductions != null
+        ? Math.min(0.95, totalDeductions / metrics.gross)
+        : (metrics.gross === 0 && totalDeductions != null ? 0 : null);
     const expectedRate = expectedUkMarginalRate(annualisedGross);
-    const takeHomePercent = metrics.gross ? (metrics.net ?? 0) / metrics.gross : null;
+    const takeHomePercent = metrics.gross != null && metrics.gross !== 0 && metrics.net != null
+        ? metrics.net / metrics.gross
+        : (metrics.gross === 0 && metrics.net != null ? 0 : null);
     const payDateMatch = text.match(/pay\s*date[:\s]+([A-Za-z0-9\/-]+)/i)
         || text.match(/date\s*paid[:\s]+([A-Za-z0-9\/-]+)/i)
         || text.match(/payment\s*date[:\s]+([A-Za-z0-9\/-]+)/i);
@@ -462,21 +426,21 @@ async function analysePayslip(text) {
     return breakdown;
 }
 async function extractPayslip(buffer) {
-    const text = await extractPdfText(buffer);
-    const breakdown = await analysePayslip(text || '');
-    const payDate = breakdown.payDate || breakdown.periodEnd || breakdown.periodStart || new Date().toISOString().slice(0, 10);
+    const { fullText } = await (0, extractPdfText_js_1.extractPdfText)(buffer);
+    const breakdown = await analysePayslip(fullText || '');
+    const payDate = breakdown.payDate || breakdown.periodEnd || breakdown.periodStart || null;
     const periodStart = breakdown.periodStart || breakdown.payDate || null;
     const periodEnd = breakdown.periodEnd || breakdown.payDate || null;
     const monthSource = (periodEnd && periodEnd.slice(0, 7)) ||
         (periodStart && periodStart.slice(0, 7)) ||
         (breakdown.payDate && breakdown.payDate.slice(0, 7)) ||
-        payDate.slice(0, 7);
+        (payDate ? payDate.slice(0, 7) : null);
     return {
         payDate,
         period: {
             start: periodStart,
             end: periodEnd,
-            month: monthSource,
+            month: monthSource || null,
         },
         employer: breakdown.employerName || null,
         gross: breakdown.gross ?? null,
