@@ -10,7 +10,7 @@ const DEFAULT_PARSER_VERSIONS = {
 };
 
 function resolveParserVersion() {
-  return DEFAULT_PARSER_VERSIONS.statement;
+  return process.env.PARSER_VERSIONS_UNKNOWN || 'unknown@0';
 }
 
 function resolveModel() {
