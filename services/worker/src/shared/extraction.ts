@@ -1,3 +1,8 @@
+// services/worker/src/shared/extraction.ts
+// Purpose: robust, environment-agnostic dynamic imports for shared extractors.
+// Works in dev (ts-node-dev), local build (node dist), and Docker.
+// Do not change public function signatures.
+
 type PayslipExtractionResult = {
   payDate: string;
   period?: { start?: string | null; end?: string | null; month?: string | null };
@@ -15,7 +20,7 @@ type StatementExtractionResult = {
   bankName?: string | null;
   accountNumberMasked?: string | null;
   accountType?: string | null;
-  period: { start: string; end: string; month?: string };
+  period: { start: string | null; end: string | null };
   openingBalance?: number | null;
   closingBalance?: number | null;
   inflows?: number | null;
@@ -29,22 +34,24 @@ type StatementExtractionResult = {
   }>;
 };
 
-const PAYSLIP_MODULE: string = '../../../../shared/extraction/payslip.js';
-const STATEMENT_MODULE: string = '../../../../shared/extraction/statement.js';
+// Use absolute file:// URLs based on the current module’s URL.
+// This avoids fragile relative pathing in dev vs dist vs Docker.
+const PAYSLIP_MODULE_URL   = new URL('../../../../shared/extraction/payslip.js', import.meta.url).href;
+const STATEMENT_MODULE_URL = new URL('../../../../shared/extraction/statement.js', import.meta.url).href;
 
 let payslipModulePromise: Promise<any> | null = null;
 let statementModulePromise: Promise<any> | null = null;
 
 function loadPayslipModule() {
   if (!payslipModulePromise) {
-    payslipModulePromise = import(PAYSLIP_MODULE) as Promise<any>;
+    payslipModulePromise = import(PAYSLIP_MODULE_URL);
   }
   return payslipModulePromise;
 }
 
 function loadStatementModule() {
   if (!statementModulePromise) {
-    statementModulePromise = import(STATEMENT_MODULE) as Promise<any>;
+    statementModulePromise = import(STATEMENT_MODULE_URL);
   }
   return statementModulePromise;
 }
