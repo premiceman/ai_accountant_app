@@ -23,7 +23,7 @@ export async function callStructuredExtraction<T = unknown>(
     const systemPrompt =
       options.systemPrompt || 'You are a meticulous financial analyst that extracts structured payroll data.';
     const responseFormat = schema
-      ? { type: 'json_schema', json_schema: schema }
+      ? { type: 'json_schema', json_schema: { ...schema, strict: true } }
       : { type: 'json_object' };
     const body: Record<string, unknown> = {
       model: OPENAI_EXTRACTION_MODEL,

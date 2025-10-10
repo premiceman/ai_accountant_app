@@ -229,12 +229,14 @@ async function llmCategoriseTransactions(transactions) {
             type: 'object',
             additionalProperties: false,
             properties: {
-              index: { type: 'number' },
+              index: { type: 'integer' },
               category: { type: 'string' },
             },
+            required: ['index','category']
           },
         },
       },
+      required: ['categories']
     },
     strict: true,
   };
@@ -293,6 +295,7 @@ async function llmStatementExtraction(text) {
             start_date: { type: ['string', 'null'] },
             end_date: { type: ['string', 'null'] },
           },
+          required: ['start_date','end_date']
         },
         transactions: {
           type: 'array',
