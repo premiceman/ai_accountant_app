@@ -55,6 +55,7 @@ function serialiseFlagsForClient() {
     ENABLE_FRONTEND_ANALYTICS_V1: featureFlags.enableFrontendAnalyticsV1,
     ENABLE_ANALYTICS_LEGACY: featureFlags.enableAnalyticsLegacy,
     ENABLE_STAGED_LOADER_ANALYTICS: featureFlags.enableStagedLoaderAnalytics,
+    JSON_TEST_ENABLED: toBoolean(process.env.JSON_TEST),
   };
 }
 

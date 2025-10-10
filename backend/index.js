@@ -33,6 +33,7 @@ const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequi
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
 const truelayerRouter  = null;
 const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
+const jsonTestRouter = safeRequire('./src/routes/jsonTest.routes');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -92,6 +93,7 @@ mount('/api/vault', vaultRouter, 'vault');
 mount('/api/analytics', analyticsRouter, 'analytics');
 mount('/api/flags', flagsRouter, 'flags');
 mount('/api/tax', taxRouter, 'tax');
+mount('/api/json-test', jsonTestRouter, 'json-test');
 if (qaDevRouter) {
   mount('/__qa__', qaDevRouter, 'qa-dev');
 }
