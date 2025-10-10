@@ -1703,6 +1703,7 @@
   }
 
   function queueRefresh() {
+    if (unauthorised) return;
     if (!state.timers.tiles) {
       fetchTiles();
       state.timers.tiles = setInterval(fetchTiles, POLL_INTERVAL_TILES);
@@ -1740,6 +1741,9 @@
 
     setupDropzone();
     await fetchFeatureFlags();
+    if (unauthorised) {
+      return;
+    }
     restoreSessionsFromStorage();
     queueRefresh();
     fetchTiles();
