@@ -10,6 +10,36 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+  const dangerActions = {
+    purge: {
+      id: 'purge',
+      title: 'Delete all data',
+      copy: 'This permanently removes your documents, insights, analytics and integrations. Your profile and billing stay intact.',
+      endpoint: '/api/user/purge',
+      method: 'POST',
+      confirmLabel: 'Delete data',
+      confirmLabelPending: 'Deleting…',
+      successMessage: 'All non-billing data has been deleted.',
+      successVariant: 'success',
+      requiresReload: true
+    },
+    delete: {
+      id: 'delete',
+      title: 'Delete profile & all data',
+      copy: 'This will delete your profile, billing records, and every piece of stored data. There is no way to undo this.',
+      endpoint: '/api/user/me',
+      method: 'DELETE',
+      confirmLabel: 'Delete everything',
+      confirmLabelPending: 'Deleting…',
+      successMessage: 'Your account has been deleted. Redirecting…',
+      successVariant: 'success',
+      triggersSignOut: true
+    }
+  };
+
+  let activeDangerAction = null;
+  let dangerDialogBusy = false;
+
   const moneyFormatter = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', minimumFractionDigits: 2 });
   const intFormatter = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 });
 
@@ -87,6 +117,18 @@
       return;
     }
     box.className = `alert alert-${variant} border border-${variant}-subtle mb-3`;
+    box.textContent = message;
+  }
+
+  function showDangerStatus(message, variant = 'info') {
+    const box = $('#danger-status');
+    if (!box) return;
+    if (!message) {
+      box.classList.add('d-none');
+      box.textContent = '';
+      return;
+    }
+    box.className = `alert alert-${variant} border border-${variant}-subtle`;
     box.textContent = message;
   }
 
@@ -468,6 +510,195 @@
     });
   }
 
+  async function performDangerAction(action, confirmEmail) {
+    const options = {
+      method: action.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmEmail }),
+      cache: 'no-store'
+    };
+
+    const response = await Auth.fetch(action.endpoint, options);
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    let payload = null;
+    if (contentType.includes('application/json')) {
+      try { payload = await response.json(); } catch { payload = null; }
+    } else {
+      const text = await response.text().catch(() => '');
+      payload = text ? { message: text } : null;
+    }
+
+    if (!response.ok) {
+      if (response.status === 401 && window.Auth && typeof window.Auth.signOut === 'function') {
+        window.Auth.signOut({ reason: 'unauthorized', redirect: '/login.html' });
+      }
+      const message = payload?.error || payload?.message || 'Unable to complete this action.';
+      throw new Error(message);
+    }
+
+    return payload;
+  }
+
+  function bindDangerZone() {
+    const zone = $('#danger-zone');
+    const dialog = $('#danger-dialog');
+    if (!zone || !dialog) return;
+    if (zone.dataset.bound === '1') return;
+    zone.dataset.bound = '1';
+
+    const titleEl = $('#danger-dialog-title');
+    const copyEl = $('#danger-dialog-copy');
+    const emailEl = $('#danger-dialog-email');
+    const inputEl = $('#danger-dialog-input');
+    const confirmBtn = $('#danger-dialog-confirm');
+    const cancelBtn = $('#danger-dialog-cancel');
+    const closeBtn = $('#danger-dialog-close');
+    const errorEl = $('#danger-dialog-error');
+    const backdrop = $('#danger-dialog-backdrop');
+
+    function setDialogError(message) {
+      if (!errorEl) return;
+      if (!message) {
+        errorEl.classList.add('d-none');
+        errorEl.textContent = '';
+        return;
+      }
+      errorEl.classList.remove('d-none');
+      errorEl.textContent = message;
+    }
+
+    function resetDialog() {
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = activeDangerAction?.confirmLabel || 'Delete';
+      }
+      if (cancelBtn) cancelBtn.disabled = false;
+      if (closeBtn) closeBtn.disabled = false;
+      if (inputEl) {
+        inputEl.value = '';
+        inputEl.disabled = false;
+      }
+      setDialogError('');
+    }
+
+    function updateConfirmState() {
+      if (!confirmBtn) return;
+      const expected = state.user?.email || '';
+      const typed = (inputEl?.value || '').trim();
+      const match = expected && typed === expected;
+      confirmBtn.disabled = !activeDangerAction || dangerDialogBusy || !match;
+    }
+
+    function closeDialog(force = false) {
+      if (dangerDialogBusy && !force) return;
+      dialog.classList.remove('show');
+      dialog.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('modal-open');
+      activeDangerAction = null;
+      dangerDialogBusy = false;
+      resetDialog();
+    }
+
+    function openDialog(actionId) {
+      const action = dangerActions[actionId];
+      if (!action || !state.user?.email) return;
+      activeDangerAction = action;
+      dangerDialogBusy = false;
+      if (titleEl) titleEl.textContent = action.title;
+      if (copyEl) copyEl.textContent = action.copy;
+      if (emailEl) emailEl.textContent = state.user.email;
+      resetDialog();
+      updateConfirmState();
+      dialog.classList.add('show');
+      dialog.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
+      window.setTimeout(() => { inputEl?.focus(); }, 60);
+    }
+
+    async function handleConfirm(event) {
+      event.preventDefault();
+      if (!activeDangerAction || dangerDialogBusy) return;
+      const expected = state.user?.email || '';
+      const typed = (inputEl?.value || '').trim();
+      if (!expected || typed !== expected) {
+        setDialogError('Enter your email exactly to confirm.');
+        updateConfirmState();
+        return;
+      }
+
+      dangerDialogBusy = true;
+      setDialogError('');
+      if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = activeDangerAction.confirmLabelPending || activeDangerAction.confirmLabel || 'Deleting…';
+      }
+      if (cancelBtn) cancelBtn.disabled = true;
+      if (closeBtn) closeBtn.disabled = true;
+      if (inputEl) inputEl.disabled = true;
+
+      try {
+        await performDangerAction(activeDangerAction, typed);
+        closeDialog(true);
+        showDangerStatus(activeDangerAction.successMessage, activeDangerAction.successVariant || 'success');
+        if (activeDangerAction.requiresReload) {
+          try {
+            await refreshData();
+            renderProfile();
+            renderBilling();
+            computeStats();
+          } catch (err) {
+            console.error('Failed to refresh profile after purge', err);
+          }
+        }
+        if (activeDangerAction.triggersSignOut) {
+          window.setTimeout(() => {
+            if (window.Auth && typeof window.Auth.signOut === 'function') {
+              window.Auth.signOut({ redirect: '/signup.html', reason: 'account-deleted' });
+            } else {
+              window.location.assign('/signup.html');
+            }
+          }, 1200);
+        }
+      } catch (err) {
+        console.error('Danger zone action failed', err);
+        const msg = err?.message || 'Unable to complete this action.';
+        setDialogError(msg);
+        if (confirmBtn) {
+          confirmBtn.textContent = activeDangerAction?.confirmLabel || 'Delete';
+        }
+        if (inputEl) {
+          inputEl.disabled = false;
+          inputEl.focus();
+          inputEl.select();
+        }
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (closeBtn) closeBtn.disabled = false;
+        dangerDialogBusy = false;
+        updateConfirmState();
+      }
+    }
+
+    zone.addEventListener('click', (event) => {
+      const target = event.target.closest('[data-danger-action]');
+      if (!target) return;
+      event.preventDefault();
+      const actionId = target.getAttribute('data-danger-action');
+      openDialog(actionId);
+    });
+
+    confirmBtn?.addEventListener('click', handleConfirm);
+    cancelBtn?.addEventListener('click', (event) => { event.preventDefault(); closeDialog(); });
+    closeBtn?.addEventListener('click', (event) => { event.preventDefault(); closeDialog(); });
+    backdrop?.addEventListener('click', (event) => { event.preventDefault(); closeDialog(); });
+    inputEl?.addEventListener('input', () => { setDialogError(''); updateConfirmState(); });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && dialog.classList.contains('show')) {
+        event.preventDefault();
+        closeDialog();
+      }
+    });
+  }
+
   async function refreshData() {
     const [meRes, subscriptionRes, paymentRes, plansRes] = await Promise.all([
       Auth.fetch('/api/user/me?t=' + Date.now(), { cache: 'no-store' }),
@@ -525,6 +756,7 @@
       bindProfileEditing();
       bindOnboardingRerun();
       initNotes();
+      bindDangerZone();
     } catch (err) {
       console.error('Profile initialisation failed', err);
       showStatus(err.message || 'Unable to load your profile.', 'danger');
