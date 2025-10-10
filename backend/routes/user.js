@@ -16,6 +16,8 @@ const { randomUUID } = require('crypto');
 
 const router = express.Router();
 
+const { purgeUserData, deleteUserAccount } = require('../services/user/purge');
+
 function escapeRegex(str = '') {
   return String(str).replace(/[.*+\-?^${}()|[\]\\]/g, '\$&');
 }
@@ -796,6 +798,50 @@ router.put('/me', auth, async (req, res) => {
   } catch (e) {
     console.error('PUT /user/me error:', e);
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/user/purge — delete all non-billing data but keep profile
+router.post('/purge', auth, async (req, res) => {
+  try {
+    const confirmEmail = typeof req.body?.confirmEmail === 'string' ? req.body.confirmEmail.trim() : '';
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!confirmEmail || confirmEmail !== user.email) {
+      return res.status(400).json({ error: 'Email confirmation does not match' });
+    }
+
+    const result = await purgeUserData(user._id, { preserveProfile: true, existingUser: user });
+    if (!result?.ok) {
+      return res.status(500).json({ error: 'Unable to purge data' });
+    }
+
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error('POST /user/purge error:', err);
+    res.status(500).json({ error: 'Unable to purge data' });
+  }
+});
+
+// DELETE /api/user/me — remove account and all associated data
+router.delete('/me', auth, async (req, res) => {
+  try {
+    const confirmEmail = typeof req.body?.confirmEmail === 'string' ? req.body.confirmEmail.trim() : '';
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!confirmEmail || confirmEmail !== user.email) {
+      return res.status(400).json({ error: 'Email confirmation does not match' });
+    }
+
+    const result = await deleteUserAccount(user);
+    if (!result?.ok) {
+      return res.status(500).json({ error: 'Unable to delete account' });
+    }
+
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error('DELETE /user/me error:', err);
+    res.status(500).json({ error: 'Unable to delete account' });
   }
 });
 

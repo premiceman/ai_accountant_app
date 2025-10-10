@@ -333,6 +333,160 @@
       color: var(--fg);
     }
 
+    .danger-zone {
+      border: 1px solid rgba(220, 38, 38, 0.18);
+      box-shadow: 0 22px 44px rgba(220, 38, 38, 0.12);
+    }
+
+    .danger-zone .card-body {
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+    }
+
+    .danger-zone .eyebrow,
+    .danger-zone h5 {
+      color: var(--danger);
+    }
+
+    .danger-zone .danger-subcopy {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0;
+    }
+
+    .danger-zone .danger-action {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1.5rem;
+      padding: 1rem 0;
+      border-top: 1px solid rgba(220, 38, 38, 0.12);
+    }
+
+    .danger-zone .danger-action:first-of-type {
+      padding-top: 0;
+      border-top: none;
+    }
+
+    .danger-zone .danger-action:last-of-type {
+      padding-bottom: 0;
+    }
+
+    .danger-zone .danger-copy {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .danger-zone .danger-copy strong {
+      display: block;
+      font-size: 1rem;
+    }
+
+    .danger-zone .danger-copy p {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .danger-zone .btn-danger {
+      min-width: 200px;
+      font-weight: 600;
+    }
+
+    .danger-zone .btn-danger:hover {
+      box-shadow: 0 14px 32px rgba(220, 38, 38, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .danger-dialog {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      z-index: 1080;
+    }
+
+    .danger-dialog.show {
+      display: flex;
+    }
+
+    .danger-dialog-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.62);
+      animation: fadeIn 0.18s ease;
+    }
+
+    .danger-dialog-window {
+      position: relative;
+      z-index: 1;
+      background: var(--tile-bg);
+      border-radius: 20px;
+      box-shadow: 0 28px 64px rgba(15, 23, 42, 0.35);
+      padding: clamp(1.4rem, 2.2vw, 1.9rem);
+      width: min(92vw, 420px);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      animation: dangerDialogPop 0.22s ease;
+    }
+
+    .danger-dialog-title {
+      margin: 0;
+      color: var(--danger);
+    }
+
+    .danger-dialog-body p {
+      margin: 0;
+    }
+
+    .danger-dialog-close {
+      position: absolute;
+      top: 0.65rem;
+      right: 0.7rem;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 1.6rem;
+      line-height: 1;
+    }
+
+    .danger-dialog-close:hover {
+      color: var(--danger);
+    }
+
+    .danger-dialog-error {
+      color: var(--danger);
+      font-size: 0.85rem;
+    }
+
+    .danger-dialog-email {
+      font-weight: 600;
+    }
+
+    @keyframes dangerDialogPop {
+      from {
+        transform: translateY(12px) scale(0.97);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0) scale(1);
+        opacity: 1;
+      }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    body.modal-open {
+      overflow: hidden;
+    }
+
     @media (max-width: 767.98px) {
       main.profile-shell {
         padding-inline: 0.75rem;
@@ -368,6 +522,15 @@
 
       .tile-grid {
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+
+      .danger-zone .danger-action {
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .danger-zone .btn-danger {
+        width: 100%;
       }
     }
   </style>
@@ -485,6 +648,34 @@
             </div>
           </div>
         </div>
+
+        <div class="card card-elev mt-3 danger-zone" id="danger-zone">
+          <div class="card-body">
+            <div class="section-hd">
+              <div>
+                <div class="eyebrow">Danger zone</div>
+                <h5 class="mb-0">Delete data</h5>
+              </div>
+              <small class="muted">These actions cannot be undone.</small>
+            </div>
+            <div id="danger-status" class="alert d-none" role="status"></div>
+            <p class="danger-subcopy">Remove information from your workspace. Billing details stay active unless you delete your profile.</p>
+            <div class="danger-action">
+              <div class="danger-copy">
+                <strong>Delete all data</strong>
+                <p>Erase documents, integrations, analytics and insights while keeping your profile and billing records.</p>
+              </div>
+              <button class="btn btn-danger" type="button" data-danger-action="purge">Delete all data</button>
+            </div>
+            <div class="danger-action">
+              <div class="danger-copy">
+                <strong>Delete profile &amp; all data</strong>
+                <p>Completely remove your account, billing records and every stored file. This is immediate and irreversible.</p>
+              </div>
+              <button class="btn btn-danger" type="button" data-danger-action="delete">Delete profile &amp; all data</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="secondary-col">
@@ -552,5 +743,25 @@
   <script>Auth.enforce();</script>
   <script src="/js/profile.js"></script>
   <script src="/js/mobile-sidebar.js"></script>
+
+  <div id="danger-dialog" class="danger-dialog" aria-hidden="true">
+    <div id="danger-dialog-backdrop" class="danger-dialog-backdrop" role="presentation"></div>
+    <div class="danger-dialog-window" role="dialog" aria-modal="true" aria-labelledby="danger-dialog-title">
+      <button type="button" class="danger-dialog-close" id="danger-dialog-close" aria-label="Close">×</button>
+      <div class="danger-dialog-body">
+        <h5 id="danger-dialog-title" class="danger-dialog-title">Confirm deletion</h5>
+        <p id="danger-dialog-copy" class="small">Type your email address to confirm this action. This cannot be undone.</p>
+        <div>
+          <label class="form-label small fw-semibold" for="danger-dialog-input">Type <span id="danger-dialog-email" class="danger-dialog-email"></span> to confirm</label>
+          <input id="danger-dialog-input" class="form-control" type="email" autocomplete="off" placeholder="you@example.com">
+        </div>
+        <div id="danger-dialog-error" class="danger-dialog-error d-none"></div>
+        <div class="d-flex justify-content-end gap-2 mt-2">
+          <button type="button" class="btn btn-outline-secondary" id="danger-dialog-cancel">Cancel</button>
+          <button type="button" class="btn btn-danger" id="danger-dialog-confirm" disabled>Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
