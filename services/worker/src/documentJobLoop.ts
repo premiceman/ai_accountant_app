@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import type { HydratedDocument, Types } from 'mongoose';
 import pino from 'pino';
 import * as v1 from '../../../shared/v1/index.js';
+import { extractPayslip, extractStatement } from './shared/extraction.js';
 import { featureFlags } from './config/featureFlags.js';
 
 import { fileIdToKey, getObject } from './lib/r2.js';
@@ -956,6 +957,80 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
   }
 
   const payload = buildInsightPayload(job, classification, buffer);
+  if (classification.type === 'payslip') {
+    try {
+      const extraction = await extractPayslip(buffer);
+      const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
+      payload.metrics = {
+        ...metrics,
+        gross: extraction.gross ?? 0,
+        net: extraction.net ?? 0,
+        tax: extraction.tax ?? 0,
+        ni: extraction.ni ?? 0,
+        pension: extraction.pension ?? 0,
+        studentLoan: extraction.studentLoan ?? 0,
+        payFrequency: extraction.payFrequency ?? 'Monthly',
+      };
+      const existingMetadata = (payload.metadata ?? {}) as Record<string, unknown>;
+      const period = extraction.period ?? {};
+      payload.metadata = {
+        ...existingMetadata,
+        employerName: extraction.employer ?? (existingMetadata.employerName as string | null) ?? null,
+        period: {
+          start: period.start ?? extraction.payDate ?? null,
+          end: period.end ?? extraction.payDate ?? null,
+          month: period.month ?? (extraction.payDate ? extraction.payDate.slice(0, 7) : null),
+        },
+      } as typeof payload.metadata;
+      const payDate = extraction.payDate ? new Date(extraction.payDate) : null;
+      if (payDate && !Number.isNaN(payDate.getTime())) {
+        payload.documentDate = payDate;
+        payload.documentMonth = extraction.payDate!.slice(0, 7);
+      } else {
+        payload.documentMonth = extraction.period?.month ?? payload.documentMonth;
+      }
+      payload.parserVersion = process.env.PARSER_VERSIONS_PAYSLIP || 'payslip@1.3.0';
+    } catch (err) {
+      logger.warn({ jobId: job.jobId, err }, 'Payslip extraction failed; using defaults');
+    }
+  } else if (isStatementClassification(classification.type)) {
+    try {
+      const extraction = await extractStatement(buffer);
+      payload.transactions = Array.isArray(extraction.transactions) ? extraction.transactions : [];
+      const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
+      payload.metrics = {
+        ...metrics,
+        openingBalance: extraction.openingBalance ?? 0,
+        closingBalance: extraction.closingBalance ?? 0,
+        inflows: extraction.inflows ?? 0,
+        outflows: extraction.outflows ?? 0,
+      };
+      const existingMetadata = (payload.metadata ?? {}) as Record<string, unknown>;
+      payload.metadata = {
+        ...existingMetadata,
+        bankName: extraction.bankName ?? null,
+        accountNumberMasked: extraction.accountNumberMasked ?? null,
+        accountType: extraction.accountType ?? (existingMetadata.accountType as string | null) ?? null,
+        period: {
+          ...extraction.period,
+          month:
+            extraction.period?.end
+              ? extraction.period.end.slice(0, 7)
+              : ((existingMetadata.period as { month?: string } | undefined)?.month ?? undefined),
+        },
+      } as typeof payload.metadata;
+      if (extraction.period?.end) {
+        const endDate = new Date(extraction.period.end);
+        if (!Number.isNaN(endDate.getTime())) {
+          payload.documentDate = endDate;
+          payload.documentMonth = extraction.period.end.slice(0, 7);
+        }
+      }
+      payload.parserVersion = process.env.PARSER_VERSIONS_STATEMENT || 'statement@1.0.0';
+    } catch (err) {
+      logger.warn({ jobId: job.jobId, err }, 'Statement extraction failed; using defaults');
+    }
+  }
   enrichPayloadWithV1(payload, classification, { jobId: job.jobId });
   if (shouldLogTriage) {
     logger.info(
