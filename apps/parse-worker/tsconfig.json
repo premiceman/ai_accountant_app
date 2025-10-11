@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "node16",
     "lib": ["ES2022"],
+    "module": "Node16",
+    "moduleResolution": "Node16",
     "types": ["node"],
     "rootDir": "src",
     "outDir": "dist",
@@ -13,4 +13,3 @@
   },
   "include": ["src", "src/global.d.ts"]
 }
-
