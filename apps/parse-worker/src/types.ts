@@ -59,6 +59,7 @@ export interface ParseResultPayload {
     confidence: number;
     anchors: string[];
   };
+  fieldValues: Record<string, ExtractedFieldValue>;
   insights: {
     metrics: Record<string, number | null>;
   };
