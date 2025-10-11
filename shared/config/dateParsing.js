@@ -59,6 +59,15 @@ function isValidMonth(month) {
   return Number.isInteger(num) && num >= 1 && num <= 12;
 }
 
+function getDefaultDay() {
+  const raw = process.env.DATE_PARSE_DEFAULT_DAY;
+  const trimmed = raw == null ? '' : String(raw).trim();
+  if (!trimmed) return '01';
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed) || !isValidDay(parsed)) return '01';
+  return String(parsed).padStart(2, '0');
+}
+
 function buildIso(year, month, day) {
   if (!year || !month || !day) return null;
   if (!isValidMonth(month) || !isValidDay(day)) return null;
@@ -113,12 +122,41 @@ function parseTextualDate(parts) {
   const month = MONTHS.get(tokens[monthIndex]);
   const remaining = tokens.filter((_, idx) => idx !== monthIndex);
   if (remaining.length < 1) return null;
-  const dayToken = remaining.find((token) => /\d/.test(token));
-  const yearToken = remaining.find((token) => /^\d{2,4}$/.test(token) && token !== dayToken);
-  if (!dayToken) return null;
-  const day = Number.parseInt(dayToken, 10);
-  const year = normaliseYear(yearToken || null);
+  if (remaining.length === 1) {
+    const [candidate] = remaining;
+    if (!/^\d{2,4}$/.test(candidate)) return null;
+    if (/^\d{1,2}$/.test(candidate) && Number.parseInt(candidate, 10) <= 31) return null;
+    const yearOnly = normaliseYear(candidate);
+    if (!yearOnly) return null;
+    return buildIso(yearOnly, month, getDefaultDay());
+  }
+
+  const yearIndexFourDigit = remaining.findIndex((token) => /^\d{4}$/.test(token));
+  let yearIndex = yearIndexFourDigit;
+  if (yearIndex === -1) {
+    yearIndex = remaining.findIndex((token, idx) => {
+      if (!/^\d{2}$/.test(token)) return false;
+      return remaining.some((other, otherIdx) => {
+        if (otherIdx === idx || !/^\d+$/.test(other)) return false;
+        return isValidDay(other);
+      });
+    });
+  }
+  if (yearIndex === -1) return null;
+  const year = normaliseYear(remaining[yearIndex]);
   if (!year) return null;
+
+  let day = null;
+  for (let i = 0; i < remaining.length; i += 1) {
+    if (i === yearIndex) continue;
+    const token = remaining[i];
+    if (!/^\d+$/.test(token)) continue;
+    if (isValidDay(token)) {
+      day = token;
+      break;
+    }
+  }
+  if (!day) return null;
   return buildIso(year, month, day);
 }
 
