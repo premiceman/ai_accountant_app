@@ -15,7 +15,7 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
-const { s3, BUCKET, putObject, deleteObject, listAll, headObject } = require('../utils/r2');
+const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
 const {
   GetObjectCommand,
   PutObjectCommand,
@@ -34,7 +34,6 @@ try {
 }
 
 const User = require('../../models/User');
-const UploadSession = require('../../models/UploadSession');
 const {
   catalogue: DOCUMENT_CATALOGUE,
   getCatalogueEntry,
@@ -181,97 +180,6 @@ function extractDisplayNameFromKey(key) {
   const tail = String(key).split('/').pop() || 'file.pdf';
   const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/i);
   return m ? m[3] : tail;
-}
-
-function parseStoragePath(key) {
-  const parts = String(key || '').split('/');
-  if (parts.length === 0) {
-    return { accountSegment: null, collectionId: null, monthSegment: null, fileName: null };
-  }
-  let documentsSegment = parts[1] || '';
-  let collectionSegment = parts[2] || null;
-  let monthSegment = parts[3] || null;
-  let tail = parts.slice(4).join('/');
-  if (documentsSegment !== 'documents') {
-    collectionSegment = documentsSegment || null;
-    monthSegment = parts[2] || null;
-    tail = parts.slice(3).join('/');
-    documentsSegment = 'documents';
-  }
-  if (!tail) {
-    tail = parts[parts.length - 1] || null;
-  }
-  return {
-    accountSegment: parts[0] || null,
-    documentsSegment,
-    collectionId: collectionSegment || null,
-    monthSegment: monthSegment || null,
-    fileName: tail || null,
-  };
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function clonePlainObject(input) {
-  if (!isPlainObject(input)) return {};
-  const out = {};
-  Object.entries(input).forEach(([key, value]) => {
-    out[key] = value;
-  });
-  return out;
-}
-
-const MANUAL_STATEMENT_KEYS = new Set([
-  'current_account_statement',
-  'savings_account_statement',
-  'isa_statement',
-  'pension_statement',
-]);
-
-function resolveManualBaseKey(schemaKey, baseSchemaKey) {
-  const schema = String(schemaKey || '').trim();
-  const base = String(baseSchemaKey || '').trim();
-  if (schema === 'payslip' || base === 'payslip') return 'payslip';
-  if (MANUAL_STATEMENT_KEYS.has(schema) || base === 'statement') return 'current_account_statement';
-  return schema || base || null;
-}
-
-function computeSessionSummaryForManual(files, overrideId, overrideStatus) {
-  const summary = { total: 0, accepted: 0, rejected: 0 };
-  if (!Array.isArray(files)) return summary;
-  files.forEach((file) => {
-    if (!file || !file.fileId) return;
-    summary.total += 1;
-    const status = file.fileId === overrideId ? overrideStatus : file.status;
-    if (status === 'rejected') summary.rejected += 1;
-    else summary.accepted += 1;
-  });
-  return summary;
-}
-
-async function markUploadSessionManualComplete(userId, fileId) {
-  if (!userId || !fileId) return null;
-  try {
-    const sessionDoc = await UploadSession.findOne({ userId, 'files.fileId': fileId }).lean();
-    if (!sessionDoc) return null;
-    const summary = computeSessionSummaryForManual(sessionDoc.files, fileId, 'done');
-    await UploadSession.updateOne(
-      { _id: sessionDoc._id, 'files.fileId': fileId },
-      {
-        $set: {
-          'files.$.status': 'done',
-          'files.$.reason': null,
-          summary,
-        },
-      }
-    ).exec().catch(() => {});
-    return summary;
-  } catch (error) {
-    console.warn('Failed to update upload session after manual insights', error);
-    return null;
-  }
 }
 
 function docMatchesFile(doc, file) {
@@ -874,106 +782,6 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     });
     throw err;
   }
-});
-
-router.post('/files/:id/manual-insights', express.json({ limit: '1mb' }), async (req, res) => {
-  const u = getUser(req);
-  if (!u) return res.status(401).json({ error: 'Unauthorized' });
-
-  const fileId = String(req.params.id || '').trim();
-  if (!fileId) return res.status(400).json({ error: 'Invalid file id' });
-
-  const schemaInput = typeof req.body?.schema === 'string' ? req.body.schema.trim() : '';
-  const baseSchemaInput = typeof req.body?.baseSchema === 'string' ? req.body.baseSchema.trim() : '';
-  if (!schemaInput && !baseSchemaInput) {
-    return res.status(400).json({ error: 'Document schema is required' });
-  }
-
-  let objectKey;
-  try {
-    objectKey = fileIdToKey(fileId);
-  } catch (error) {
-    return res.status(400).json({ error: 'Invalid file id' });
-  }
-
-  const storage = await getStorageContext(u.id);
-  if (!objectKey.startsWith(storage.rootPrefix)) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const catalogueEntry = getCatalogueEntry(schemaInput) || getCatalogueEntry(baseSchemaInput);
-  const catalogueKey = catalogueEntry?.key || schemaInput || baseSchemaInput;
-  if (!catalogueKey) {
-    return res.status(400).json({ error: 'Unsupported document schema' });
-  }
-
-  let head;
-  try {
-    head = await headObject(objectKey);
-  } catch (error) {
-    console.warn('Manual insights headObject failed', error);
-    return res.status(404).json({ error: 'Document not found' });
-  }
-
-  const metrics = clonePlainObject(req.body?.metrics);
-  const metadata = clonePlainObject(req.body?.metadata);
-  const nowIso = new Date().toISOString();
-
-  const fileName = extractDisplayNameFromKey(objectKey);
-  const uploadedAt = head?.LastModified ? new Date(head.LastModified).toISOString() : null;
-  const fileSize = Number(head?.ContentLength) || 0;
-
-  if (!metadata.documentName && fileName) metadata.documentName = fileName;
-  metadata.extractionSource = metadata.extractionSource || 'manual-entry';
-  metadata.manualEntry = true;
-  metadata.manuallyEditedAt = nowIso;
-
-  const baseKey = resolveManualBaseKey(schemaInput || catalogueKey, baseSchemaInput) || catalogueKey;
-
-  const insights = {
-    storeKey: catalogueKey,
-    baseKey,
-    metrics,
-    metadata,
-    narrative: Array.isArray(req.body?.narrative) ? req.body.narrative : [],
-    insightType: 'manual-entry',
-  };
-
-  const fileInfo = {
-    id: fileId,
-    name: fileName,
-    uploadedAt: uploadedAt || nowIso,
-  };
-
-  try {
-    await applyDocumentInsights(u.id, catalogueKey, insights, fileInfo);
-  } catch (error) {
-    console.error('Failed to persist manual insights', error);
-    return res.status(500).json({ error: 'Failed to save manual insights' });
-  }
-
-  try {
-    const { collectionId } = parseStoragePath(objectKey);
-    await recordCatalogueUploads(
-      u.id,
-      catalogueKey,
-      [
-        {
-          id: fileId,
-          name: fileName,
-          size: fileSize,
-          uploadedAt: uploadedAt || nowIso,
-        },
-      ],
-      collectionId || null
-    );
-  } catch (error) {
-    console.warn('Failed to record manual catalogue usage', error);
-  }
-
-  await markUploadSessionManualComplete(u.id, fileId);
-
-  res.json({ ok: true, catalogueKey });
 });
 
 router.delete('/files/:id', async (req, res) => {
