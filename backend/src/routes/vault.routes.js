@@ -15,7 +15,7 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
-const { s3, BUCKET, putObject, deleteObject, listAll, headObject } = require('../utils/r2');
+const { s3, BUCKET, putObject, deleteObject, listAll } = require('../utils/r2');
 const {
   GetObjectCommand,
   PutObjectCommand,
@@ -34,7 +34,6 @@ try {
 }
 
 const User = require('../../models/User');
-const UploadSession = require('../../models/UploadSession');
 const {
   catalogue: DOCUMENT_CATALOGUE,
   getCatalogueEntry,
@@ -43,7 +42,6 @@ const {
 } = require('../services/documents/catalogue');
 const { analyseDocument } = require('../services/documents/ingest');
 const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
-const { enqueueDocumentParse } = require('../lib/queue');
 
 const REQUIRED_KEYS = getKeysByCategory('required');
 const HELPFUL_KEYS = getKeysByCategory('helpful');
@@ -182,97 +180,6 @@ function extractDisplayNameFromKey(key) {
   const tail = String(key).split('/').pop() || 'file.pdf';
   const m = tail.match(/^(\d{8})-([0-9a-fA-F-]{36})-(.+)$/i);
   return m ? m[3] : tail;
-}
-
-function parseStoragePath(key) {
-  const parts = String(key || '').split('/');
-  if (parts.length === 0) {
-    return { accountSegment: null, collectionId: null, monthSegment: null, fileName: null };
-  }
-  let documentsSegment = parts[1] || '';
-  let collectionSegment = parts[2] || null;
-  let monthSegment = parts[3] || null;
-  let tail = parts.slice(4).join('/');
-  if (documentsSegment !== 'documents') {
-    collectionSegment = documentsSegment || null;
-    monthSegment = parts[2] || null;
-    tail = parts.slice(3).join('/');
-    documentsSegment = 'documents';
-  }
-  if (!tail) {
-    tail = parts[parts.length - 1] || null;
-  }
-  return {
-    accountSegment: parts[0] || null,
-    documentsSegment,
-    collectionId: collectionSegment || null,
-    monthSegment: monthSegment || null,
-    fileName: tail || null,
-  };
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function clonePlainObject(input) {
-  if (!isPlainObject(input)) return {};
-  const out = {};
-  Object.entries(input).forEach(([key, value]) => {
-    out[key] = value;
-  });
-  return out;
-}
-
-const MANUAL_STATEMENT_KEYS = new Set([
-  'current_account_statement',
-  'savings_account_statement',
-  'isa_statement',
-  'pension_statement',
-]);
-
-function resolveManualBaseKey(schemaKey, baseSchemaKey) {
-  const schema = String(schemaKey || '').trim();
-  const base = String(baseSchemaKey || '').trim();
-  if (schema === 'payslip' || base === 'payslip') return 'payslip';
-  if (MANUAL_STATEMENT_KEYS.has(schema) || base === 'statement') return 'current_account_statement';
-  return schema || base || null;
-}
-
-function computeSessionSummaryForManual(files, overrideId, overrideStatus) {
-  const summary = { total: 0, accepted: 0, rejected: 0 };
-  if (!Array.isArray(files)) return summary;
-  files.forEach((file) => {
-    if (!file || !file.fileId) return;
-    summary.total += 1;
-    const status = file.fileId === overrideId ? overrideStatus : file.status;
-    if (status === 'rejected') summary.rejected += 1;
-    else summary.accepted += 1;
-  });
-  return summary;
-}
-
-async function markUploadSessionManualComplete(userId, fileId) {
-  if (!userId || !fileId) return null;
-  try {
-    const sessionDoc = await UploadSession.findOne({ userId, 'files.fileId': fileId }).lean();
-    if (!sessionDoc) return null;
-    const summary = computeSessionSummaryForManual(sessionDoc.files, fileId, 'done');
-    await UploadSession.updateOne(
-      { _id: sessionDoc._id, 'files.fileId': fileId },
-      {
-        $set: {
-          'files.$.status': 'done',
-          'files.$.reason': null,
-          summary,
-        },
-      }
-    ).exec().catch(() => {});
-    return summary;
-  } catch (error) {
-    console.warn('Failed to update upload session after manual insights', error);
-    return null;
-  }
 }
 
 function docMatchesFile(doc, file) {
@@ -794,13 +701,10 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     : colId;
 
   const uploaded = [];
-  const useNewParser = process.env.PARSER_ENGINE === 'v2';
   const analyses = [];
   await setInsightsProcessing(u.id, normalizedCatalogueKey, {
     active: true,
-    message: useNewParser
-      ? `Queued ${entryForCatalogue?.label || 'document'} for parsing…`
-      : `Analysing ${entryForCatalogue?.label || 'document'}…`,
+    message: `Analysing ${entryForCatalogue?.label || 'document'}…`,
   });
   try {
     for (const f of files) {
@@ -810,18 +714,15 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         return res.status(400).json({ error: 'Only PDF files are allowed' });
       }
 
-      let analysis = null;
-      if (!useNewParser) {
-        analysis = await analyseDocument(
-          entryForCatalogue,
-          f.buffer,
-          f.originalname || 'document.pdf',
-          { user: userContext }
-        );
-        if (!analysis.valid) {
-          await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
-          return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
-        }
+      const analysis = await analyseDocument(
+        entryForCatalogue,
+        f.buffer,
+        f.originalname || 'document.pdf',
+        { user: userContext }
+      );
+      if (!analysis.valid) {
+        await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
+        return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
       }
 
       const date = dayjs().format('YYYYMMDD');
@@ -836,10 +737,8 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       const id = keyToFileId(key);
       await setInsightsProcessing(u.id, normalizedCatalogueKey, {
         active: true,
-        message: useNewParser
-          ? `Queued ${safeBase} for parsing engine…`
-          : `Extracting insights from ${safeBase}…`,
-        step: useNewParser ? 'queued' : 'analyse',
+        message: `Extracting insights from ${safeBase}…`,
+        step: 'analyse',
         fileId: id,
         fileName: safeBase,
       });
@@ -852,50 +751,29 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         downloadUrl: `/api/vault/files/${id}/download`,
         catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
       });
-      if (!useNewParser && analysis) {
-        analyses.push({
-          fileId: id,
-          insights: analysis.insights,
-          fileName: safeBase,
-          uploadedAt: new Date(),
-        });
-      }
+      analyses.push({
+        fileId: id,
+        insights: analysis.insights,
+        fileName: safeBase,
+        uploadedAt: new Date(),
+      });
     }
     if (hasValidCatalogueKey) {
       await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, storageCollectionId);
     }
-    if (useNewParser) {
-      await Promise.all(
-        uploaded.map((item) =>
-          enqueueDocumentParse({
-            userId: u.id,
-            fileId: item.id,
-            docType: normalizedCatalogueKey,
-          })
-        )
-      );
-      await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-        active: true,
-        message: `${entryForCatalogue?.label || 'Document'} queued for new parsing engine`,
-        step: 'queued',
-        fileId: uploaded[uploaded.length - 1]?.id || null,
-        fileName: uploaded[uploaded.length - 1]?.name || null,
-      });
-    } else {
-      for (const item of analyses) {
-        await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
-          id: item.fileId,
-          name: item.fileName,
-          uploadedAt: item.uploadedAt,
-        });
-      }
-      await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-        active: false,
-        message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
-        fileId: analyses[analyses.length - 1]?.fileId || null,
-        fileName: analyses[analyses.length - 1]?.fileName || null,
+    for (const item of analyses) {
+      await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
+        id: item.fileId,
+        name: item.fileName,
+        uploadedAt: item.uploadedAt,
       });
     }
+    await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+      active: false,
+      message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
+      fileId: analyses[analyses.length - 1]?.fileId || null,
+      fileName: analyses[analyses.length - 1]?.fileName || null,
+    });
     res.status(201).json({ uploaded });
   } catch (err) {
     await setInsightsProcessing(u.id, normalizedCatalogueKey, {
@@ -904,106 +782,6 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     });
     throw err;
   }
-});
-
-router.post('/files/:id/manual-insights', express.json({ limit: '1mb' }), async (req, res) => {
-  const u = getUser(req);
-  if (!u) return res.status(401).json({ error: 'Unauthorized' });
-
-  const fileId = String(req.params.id || '').trim();
-  if (!fileId) return res.status(400).json({ error: 'Invalid file id' });
-
-  const schemaInput = typeof req.body?.schema === 'string' ? req.body.schema.trim() : '';
-  const baseSchemaInput = typeof req.body?.baseSchema === 'string' ? req.body.baseSchema.trim() : '';
-  if (!schemaInput && !baseSchemaInput) {
-    return res.status(400).json({ error: 'Document schema is required' });
-  }
-
-  let objectKey;
-  try {
-    objectKey = fileIdToKey(fileId);
-  } catch (error) {
-    return res.status(400).json({ error: 'Invalid file id' });
-  }
-
-  const storage = await getStorageContext(u.id);
-  if (!objectKey.startsWith(storage.rootPrefix)) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const catalogueEntry = getCatalogueEntry(schemaInput) || getCatalogueEntry(baseSchemaInput);
-  const catalogueKey = catalogueEntry?.key || schemaInput || baseSchemaInput;
-  if (!catalogueKey) {
-    return res.status(400).json({ error: 'Unsupported document schema' });
-  }
-
-  let head;
-  try {
-    head = await headObject(objectKey);
-  } catch (error) {
-    console.warn('Manual insights headObject failed', error);
-    return res.status(404).json({ error: 'Document not found' });
-  }
-
-  const metrics = clonePlainObject(req.body?.metrics);
-  const metadata = clonePlainObject(req.body?.metadata);
-  const nowIso = new Date().toISOString();
-
-  const fileName = extractDisplayNameFromKey(objectKey);
-  const uploadedAt = head?.LastModified ? new Date(head.LastModified).toISOString() : null;
-  const fileSize = Number(head?.ContentLength) || 0;
-
-  if (!metadata.documentName && fileName) metadata.documentName = fileName;
-  metadata.extractionSource = metadata.extractionSource || 'manual-entry';
-  metadata.manualEntry = true;
-  metadata.manuallyEditedAt = nowIso;
-
-  const baseKey = resolveManualBaseKey(schemaInput || catalogueKey, baseSchemaInput) || catalogueKey;
-
-  const insights = {
-    storeKey: catalogueKey,
-    baseKey,
-    metrics,
-    metadata,
-    narrative: Array.isArray(req.body?.narrative) ? req.body.narrative : [],
-    insightType: 'manual-entry',
-  };
-
-  const fileInfo = {
-    id: fileId,
-    name: fileName,
-    uploadedAt: uploadedAt || nowIso,
-  };
-
-  try {
-    await applyDocumentInsights(u.id, catalogueKey, insights, fileInfo);
-  } catch (error) {
-    console.error('Failed to persist manual insights', error);
-    return res.status(500).json({ error: 'Failed to save manual insights' });
-  }
-
-  try {
-    const { collectionId } = parseStoragePath(objectKey);
-    await recordCatalogueUploads(
-      u.id,
-      catalogueKey,
-      [
-        {
-          id: fileId,
-          name: fileName,
-          size: fileSize,
-          uploadedAt: uploadedAt || nowIso,
-        },
-      ],
-      collectionId || null
-    );
-  } catch (error) {
-    console.warn('Failed to record manual catalogue usage', error);
-  }
-
-  await markUploadSessionManualComplete(u.id, fileId);
-
-  res.json({ ok: true, catalogueKey });
 });
 
 router.delete('/files/:id', async (req, res) => {

@@ -26,16 +26,6 @@
       --light-red: #ef4444;
       --light-amber: #f59e0b;
       --light-green: #10b981;
-      --vault-info: #3b82f6;
-      --vault-info-bg: rgba(59, 130, 246, 0.14);
-      --vault-warning: #b45309;
-      --vault-warning-bg: rgba(245, 158, 11, 0.18);
-      --vault-danger: #b91c1c;
-      --vault-danger-bg: rgba(239, 68, 68, 0.16);
-      --vault-success-bg: rgba(16, 185, 129, 0.16);
-      --vault-success: #047857;
-      --vault-accent-bg: rgba(103, 89, 255, 0.16);
-      --vault-accent-strong: #4c3fda;
       --mint-card: #d7f8eb;
       --mint-card-selected: #9be7ca;
       --viewer-overlay: rgba(15, 23, 42, 0.42);
@@ -193,381 +183,66 @@
       font-size: 0.85rem;
     }
 
-    .session-grid {
+    .session-table {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .session-row {
       display: grid;
-      gap: 16px;
-    }
-
-    .session-card {
-      position: relative;
-      padding: 18px 20px;
-      border-radius: 16px;
-      border: 1px solid var(--vault-border);
-      background: var(--vault-card-bg);
-      box-shadow: var(--vault-shadow-soft);
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-    }
-
-    .session-card:hover,
-    .session-card:focus-within {
-      transform: translateY(-2px);
-      box-shadow: var(--vault-shadow);
-      border-color: rgba(103, 89, 255, 0.25);
-    }
-
-    .session-card--alert {
-      border-color: rgba(239, 68, 68, 0.3);
-      box-shadow: 0 16px 38px rgba(239, 68, 68, 0.12);
-    }
-
-    .session-card--alert:hover,
-    .session-card--alert:focus-within {
-      border-color: rgba(239, 68, 68, 0.32);
-      box-shadow: 0 18px 42px rgba(239, 68, 68, 0.16);
-    }
-
-    .session-card--complete {
-      border-color: rgba(16, 185, 129, 0.26);
-    }
-
-    .session-card--complete:hover,
-    .session-card--complete:focus-within {
-      border-color: rgba(16, 185, 129, 0.32);
-    }
-
-    .session-card__header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-    }
-
-    .session-card__heading {
-      flex: 1 1 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .session-card__title {
-      margin: 0 0 4px;
-      font-size: 1rem;
-      font-weight: 600;
-    }
-
-    .session-card__meta {
-      margin: 0;
-    }
-
-    .session-card__count {
-      font-weight: 600;
-      color: var(--vault-muted);
-      white-space: nowrap;
-    }
-
-    .session-card__body {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .session-card__progress {
-      margin: 0;
-      font-size: 0.9rem;
-    }
-
-    .session-card__chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .session-card__footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .session-card__details {
-      border: none;
-      background: transparent;
-      color: var(--vault-accent);
-      font-weight: 600;
-      display: inline-flex;
       align-items: center;
-      gap: 6px;
-      font-size: 0.9rem;
-      padding: 6px 12px;
-      margin: -6px -12px;
-      border-radius: 999px;
-      transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-      cursor: pointer;
-    }
-
-    .session-card__details:hover,
-    .session-card__details:focus-visible {
-      background: rgba(103, 89, 255, 0.1);
-      color: var(--vault-accent);
-      outline: none;
-      text-decoration: none;
-    }
-
-    .session-card__details:active {
-      transform: translateY(1px);
-    }
-
-    .session-card__notes {
-      font-size: 0.85rem;
-      color: var(--vault-muted);
-      margin-left: auto;
-    }
-
-    .session-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 999px;
-      line-height: 1.2;
-      background: var(--vault-accent-bg);
-      color: var(--vault-accent-strong);
-    }
-
-    .session-chip__dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-
-    .session-chip__count {
-      font-variant-numeric: tabular-nums;
-    }
-
-    .session-chip[data-variant="progress"],
-    .session-badge[data-variant="progress"] {
-      background: var(--vault-info-bg);
-      color: var(--vault-info);
-    }
-
-    .session-chip[data-variant="success"],
-    .session-badge[data-variant="success"] {
-      background: var(--vault-success-bg);
-      color: var(--vault-success);
-    }
-
-    .session-chip[data-variant="warning"],
-    .session-badge[data-variant="warning"] {
-      background: var(--vault-warning-bg);
-      color: var(--vault-warning);
-    }
-
-    .session-chip[data-variant="danger"],
-    .session-badge[data-variant="danger"] {
-      background: var(--vault-danger-bg);
-      color: var(--vault-danger);
-    }
-
-    .session-badge {
-      display: inline-flex;
-      align-items: center;
-      font-size: 0.78rem;
-      font-weight: 600;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: var(--vault-accent-bg);
-      color: var(--vault-accent-strong);
-      white-space: nowrap;
-    }
-
-    .session-modal {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: rgba(15, 23, 42, 0.55);
-      z-index: 1100;
-    }
-
-    .session-modal[aria-hidden="true"] {
-      display: none;
-    }
-
-    .session-modal__dialog {
-      width: min(560px, 100%);
-      max-height: 90vh;
-      overflow: hidden;
-      border-radius: 20px;
-      border: 1px solid var(--vault-border);
-      background: var(--vault-card-bg);
-      box-shadow: var(--vault-shadow);
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      padding: 20px 24px;
-    }
-
-    .session-modal__dialog:focus-visible {
-      outline: none;
-      box-shadow: 0 0 0 3px rgba(103, 89, 255, 0.25);
-    }
-
-    .session-modal__header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      margin-bottom: 12px;
-    }
-
-    .session-modal__heading {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .session-modal__title {
-      margin: 0 0 4px;
-      font-size: 1.1rem;
-      font-weight: 600;
-    }
-
-    .session-modal__subtitle {
-      margin: 0;
-    }
-
-    .session-modal__close {
-      border: none;
-      background: rgba(15, 23, 42, 0.05);
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      color: var(--vault-muted);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s ease, color 0.2s ease;
-    }
-
-    .session-modal__close:hover,
-    .session-modal__close:focus-visible {
-      background: rgba(103, 89, 255, 0.18);
-      color: var(--vault-accent);
-      outline: none;
-    }
-
-    .session-modal__body {
-      overflow-y: auto;
-      padding-right: 4px;
-    }
-
-    .session-modal__list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .session-modal__item {
-      border: 1px solid rgba(15, 23, 42, 0.08);
+      padding: 12px 16px;
       border-radius: 14px;
-      padding: 12px 14px;
+      border: 1px solid rgba(103, 89, 255, 0.08);
       background: rgba(103, 89, 255, 0.03);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
     }
 
-    .session-modal__name {
+    .session-row .filename {
       font-weight: 600;
       word-break: break-word;
     }
 
-    .session-modal__status {
-      align-self: flex-start;
+    .lights {
+      display: flex;
+      gap: 10px;
+      align-items: center;
     }
 
-    .session-modal__note {
-      margin: 0;
-      font-size: 0.85rem;
-      color: var(--vault-muted);
-      white-space: pre-wrap;
+    .light {
+      position: relative;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--light-red);
+      box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08);
     }
 
-    .session-modal__item--actionable {
-      border-color: rgba(103, 89, 255, 0.25);
-      background: rgba(103, 89, 255, 0.06);
-    }
+    .light[data-state="amber"] { background: var(--light-amber); }
+    .light[data-state="green"] { background: var(--light-green); }
 
-    .session-modal__cta {
-      align-self: flex-start;
-      border: none;
-      border-radius: 999px;
-      background: var(--vault-accent);
+    .light[role="status"]::after {
+      content: attr(aria-label);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      background: rgba(15, 23, 42, 0.88);
       color: #fff;
-      padding: 6px 16px;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      padding: 4px 8px;
+      font-size: 0.75rem;
+      border-radius: 8px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
     }
 
-    .session-modal__cta:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 8px 18px rgba(103, 89, 255, 0.25);
-    }
-
-    .session-modal__cta:focus-visible {
-      outline: none;
-      box-shadow: 0 0 0 3px rgba(103, 89, 255, 0.35);
-    }
-
-    .session-modal__empty {
-      padding: 12px;
-      border-radius: 12px;
-      background: rgba(103, 89, 255, 0.04);
-    }
-
-    body.session-modal-open {
-      overflow: hidden;
-    }
-
-    @media (max-width: 960px) {
-      .session-card {
-        padding: 16px 18px;
-      }
-    }
-
-    @media (max-width: 768px) {
-      .session-card__header {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      .session-card__count {
-        align-self: flex-start;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .session-modal {
-        padding: 12px;
-      }
-
-      .session-modal__dialog {
-        padding: 18px;
-      }
+    .light[role="status"]:focus-visible::after,
+    .light[role="status"]:hover::after {
+      opacity: 1;
     }
 
     .tiles-grid {
@@ -1251,7 +926,7 @@
           <h2>Upload session</h2>
           <p class="session-empty" id="session-empty">No files queued yet. Start by dragging in a PDF or ZIP.</p>
         </div>
-        <div class="session-grid" id="session-rows" role="list"></div>
+        <div class="session-table" id="session-rows"></div>
       </aside>
     </section>
 
@@ -1300,49 +975,6 @@
         </div>
       </div>
     </section>
-  </div>
-
-  <div class="session-modal" id="session-detail-modal" aria-hidden="true" hidden>
-    <div class="session-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="session-detail-title" aria-describedby="session-detail-subtitle" tabindex="-1">
-      <header class="session-modal__header">
-        <div class="session-modal__heading">
-          <h2 class="session-modal__title" id="session-detail-title">Upload details</h2>
-          <p class="session-modal__subtitle muted" id="session-detail-subtitle"></p>
-        </div>
-        <button type="button" class="session-modal__close" id="session-detail-close">
-          <span class="visually-hidden">Close details</span>
-          <i class="bi bi-x-lg" aria-hidden="true"></i>
-        </button>
-      </header>
-      <div class="session-modal__body">
-        <ul class="session-modal__list" id="session-detail-list" role="list"></ul>
-      </div>
-    </div>
-  </div>
-
-  <div class="vault-manual-modal" id="vault-manual-modal" aria-hidden="true" hidden>
-    <div class="vault-manual-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="vault-manual-modal-title" tabindex="-1">
-      <header class="vault-manual-modal__header">
-        <h2 class="vault-manual-modal__title" id="vault-manual-modal-title">Edit document details</h2>
-        <button type="button" class="vault-manual-modal__close" aria-label="Close">
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </header>
-      <div class="vault-manual-modal__body">
-        <form class="vault-manual-modal__form">
-          <div class="vault-manual-modal__schema">
-            <label for="vault-manual-schema">Document type</label>
-            <select id="vault-manual-schema" name="manual-schema"></select>
-          </div>
-          <div class="vault-manual-modal__grid"></div>
-          <div class="vault-manual-modal__error" role="alert" hidden></div>
-          <div class="vault-manual-modal__footer">
-            <button type="button" class="vault-manual-modal__cancel">Cancel</button>
-            <button type="submit" class="vault-manual-modal__save">Save changes</button>
-          </div>
-        </form>
-      </div>
-    </div>
   </div>
 
   <script src="/js/vault.js"></script>

@@ -4,17 +4,8 @@
   const POLL_INTERVAL_UPLOAD = 3000;
   const POLL_INTERVAL_TILES = 10000;
   const POLL_INTERVAL_LISTS = 15000;
+  const LIGHT_LABELS = { red: 'Waiting', amber: 'Processing', green: 'Complete' };
   const STORAGE_KEY = 'vault.uploadSessions.v1';
-
-  const SESSION_STATUS_META = {
-    uploading: { label: 'Uploading', variant: 'accent', description: 'Files are uploading.' },
-    processing: { label: 'Processing', variant: 'progress', description: 'Documents are being processed.' },
-    complete: { label: 'Processed', variant: 'success', description: 'Documents processed successfully.' },
-    attention: { label: 'Needs attention', variant: 'warning', description: 'Some files include notes that require review.' },
-    rejected: { label: 'Rejected', variant: 'danger', description: 'Files were rejected and need new uploads.' },
-  };
-
-  const SESSION_STATUS_ORDER = ['attention', 'rejected', 'processing', 'uploading', 'complete'];
 
   const BRAND_THEMES = [
     { className: 'grid-card--brand-monzo', tokens: ['monzo'] },
@@ -111,187 +102,6 @@
   let jsonModalClose = null;
   let jsonModalReturnFocus = null;
   let jsonModalStylesInjected = false;
-  let sessionDetailReturnFocus = null;
-  let sessionModalKeydownBound = false;
-
-  const MANUAL_FIELD_DEFS = {
-    payslip: [
-      { name: 'payDate', label: 'Pay date', type: 'date' },
-      { name: 'payFrequency', label: 'Pay frequency', type: 'text', placeholder: 'e.g. Monthly' },
-      { name: 'currency', label: 'Currency', type: 'text', maxLength: 3, transform: (value) => value.toUpperCase() },
-      { name: 'totalEarnings', label: 'Total earnings', type: 'number', inputMode: 'decimal' },
-      { name: 'totalDeductions', label: 'Total deductibles', type: 'number', inputMode: 'decimal' },
-      { name: 'netPay', label: 'Net pay', type: 'number', inputMode: 'decimal' },
-      { name: 'periodStart', label: 'Period start', type: 'date' },
-      { name: 'periodEnd', label: 'Period end', type: 'date' },
-      { name: 'taxCode', label: 'Tax code', type: 'text' },
-      { name: 'tax', label: 'Income tax', type: 'number', inputMode: 'decimal' },
-      { name: 'ni', label: 'National Insurance', type: 'number', inputMode: 'decimal' },
-      { name: 'pension', label: 'Pension', type: 'number', inputMode: 'decimal' },
-      { name: 'studentLoan', label: 'Student loan', type: 'number', inputMode: 'decimal' },
-    ],
-    statement: [
-      { name: 'accountName', label: 'Account name', type: 'text' },
-      { name: 'accountNumber', label: 'Account number', type: 'text' },
-      { name: 'accountType', label: 'Account type', type: 'text', placeholder: 'e.g. Current account' },
-      { name: 'currency', label: 'Currency', type: 'text', maxLength: 3, transform: (value) => value.toUpperCase() },
-      { name: 'periodStart', label: 'Period start', type: 'date' },
-      { name: 'periodEnd', label: 'Period end', type: 'date' },
-      { name: 'openingBalance', label: 'Opening balance', type: 'number', inputMode: 'decimal' },
-      { name: 'closingBalance', label: 'Closing balance', type: 'number', inputMode: 'decimal' },
-      { name: 'totalIn', label: 'Total in', type: 'number', inputMode: 'decimal' },
-      { name: 'totalOut', label: 'Total out', type: 'number', inputMode: 'decimal' },
-    ],
-  };
-
-  const MANUAL_SCHEMA_CONFIG = {
-    payslip: { label: 'Payslip', base: 'payslip', alwaysInclude: true },
-    current_account_statement: {
-      label: 'Current account statement',
-      base: 'statement',
-      alwaysInclude: true,
-    },
-    savings_account_statement: { label: 'Savings account statement', base: 'statement' },
-    isa_statement: { label: 'ISA statement', base: 'statement' },
-    pension_statement: { label: 'Pension contribution statement', base: 'statement' },
-  };
-
-  let manualSchemaOptions = [];
-  let manualSchemaOptionMap = new Map();
-  const manualCatalogueState = { loaded: false, loading: false, catalogue: [], error: null };
-
-  function deriveManualSchemaOptions(catalogue = []) {
-    const availableKeys = new Set();
-    if (Array.isArray(catalogue)) {
-      catalogue.forEach((entry) => {
-        if (entry && entry.key) availableKeys.add(String(entry.key));
-      });
-    }
-
-    const options = [];
-    Object.entries(MANUAL_SCHEMA_CONFIG).forEach(([value, config]) => {
-      const include = config.alwaysInclude || availableKeys.has(value);
-      if (!include) return;
-      const labelFromCatalogue = Array.isArray(catalogue)
-        ? catalogue.find((entry) => entry && entry.key === value)?.label
-        : null;
-      options.push({
-        value,
-        label: labelFromCatalogue || config.label || value,
-        base: config.base || value,
-      });
-    });
-
-    if (!options.length) {
-      options.push({ value: 'payslip', label: 'Payslip', base: 'payslip' });
-      options.push({ value: 'current_account_statement', label: 'Account statement', base: 'statement' });
-    }
-
-    const unique = [];
-    const seen = new Set();
-    options.forEach((option) => {
-      if (seen.has(option.value)) return;
-      seen.add(option.value);
-      unique.push(option);
-    });
-    return unique;
-  }
-
-  function resolveManualBase(schemaKey) {
-    if (!schemaKey) return null;
-    const option = manualSchemaOptionMap.get(schemaKey);
-    if (option) return option.base || schemaKey;
-    const config = MANUAL_SCHEMA_CONFIG[schemaKey];
-    if (config) return config.base || schemaKey;
-    if (MANUAL_FIELD_DEFS[schemaKey]) return schemaKey;
-    return null;
-  }
-
-  function getManualOption(schemaKey) {
-    if (!schemaKey) return null;
-    if (manualSchemaOptionMap.has(schemaKey)) return manualSchemaOptionMap.get(schemaKey);
-    const config = MANUAL_SCHEMA_CONFIG[schemaKey];
-    if (config) {
-      return { value: schemaKey, label: config.label || schemaKey, base: config.base || schemaKey };
-    }
-    if (MANUAL_FIELD_DEFS[schemaKey]) {
-      return { value: schemaKey, label: schemaKey, base: schemaKey };
-    }
-    return null;
-  }
-
-  function findSchemaForViewerType(type) {
-    if (!type) return null;
-    for (const option of manualSchemaOptions) {
-      if (option.value === type || option.base === type) {
-        return option.value;
-      }
-    }
-    return null;
-  }
-
-  function setManualSchemaOptions(options) {
-    const resolved = Array.isArray(options) && options.length ? options : deriveManualSchemaOptions();
-    manualSchemaOptions = resolved;
-    manualSchemaOptionMap = new Map(resolved.map((option) => [option.value, option]));
-
-    if (typeof manualModalState === 'object' && manualModalState) {
-      if (!manualModalState.schema || !manualSchemaOptionMap.has(manualModalState.schema)) {
-        manualModalState.schema = manualSchemaOptions[0]?.value || null;
-      }
-      if (manualModalState.file) {
-        manualSchemaOptions.forEach((option) => {
-          if (!manualModalState.valuesBySchema.has(option.value)) {
-            manualModalState.valuesBySchema.set(option.value, extractManualValues(manualModalState.file, option.value));
-          }
-        });
-      }
-    }
-
-    populateManualSchemaSelect();
-  }
-
-  async function ensureManualCatalogue() {
-    if (manualCatalogueState.loaded || manualCatalogueState.loading) {
-      return manualSchemaOptions;
-    }
-    manualCatalogueState.loading = true;
-    try {
-      const response = await apiFetch('/catalogue');
-      if (!response.ok) {
-        throw new Error('Failed to load document catalogue');
-      }
-      const data = await response.json().catch(() => null);
-      const catalogue = Array.isArray(data?.catalogue) ? data.catalogue : [];
-      manualCatalogueState.catalogue = catalogue;
-      manualCatalogueState.loaded = true;
-      setManualSchemaOptions(deriveManualSchemaOptions(catalogue));
-      return manualSchemaOptions;
-    } catch (error) {
-      manualCatalogueState.error = error;
-      manualCatalogueState.loaded = true;
-      console.warn('Failed to load manual catalogue metadata', error);
-      setManualSchemaOptions(deriveManualSchemaOptions());
-      return manualSchemaOptions;
-    } finally {
-      manualCatalogueState.loading = false;
-    }
-  }
-
-  let manualModal = null;
-  let manualModalDialog = null;
-  let manualModalTitle = null;
-  let manualModalForm = null;
-  let manualModalSchema = null;
-  let manualModalFields = null;
-  let manualModalError = null;
-  let manualModalSave = null;
-  let manualModalCancel = null;
-  let manualModalReturnFocus = null;
-  let manualModalStylesInjected = false;
-  const manualModalState = { file: null, schema: null, valuesBySchema: new Map() };
-  const manualFileCache = new Map();
-  setManualSchemaOptions(deriveManualSchemaOptions());
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
@@ -317,29 +127,12 @@
   const viewerTitle = document.getElementById('file-viewer-title');
   const viewerSubtitle = document.getElementById('file-viewer-subtitle');
   const viewerClose = document.getElementById('file-viewer-close');
-  const sessionModal = document.getElementById('session-detail-modal');
-  const sessionModalDialog = sessionModal ? sessionModal.querySelector('.session-modal__dialog') : null;
-  const sessionModalTitle = document.getElementById('session-detail-title');
-  const sessionModalSubtitle = document.getElementById('session-detail-subtitle');
-  const sessionModalList = document.getElementById('session-detail-list');
-  const sessionModalClose = document.getElementById('session-detail-close');
 
   function formatDate(value) {
     if (!value) return '—';
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '—';
     return date.toLocaleDateString();
-  }
-
-  function formatDateTime(value) {
-    if (!value) return '—';
-    const date = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(date.getTime())) return '—';
-    try {
-      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
-    } catch (error) {
-      return date.toLocaleString();
-    }
   }
 
   function toNumberLike(value) {
@@ -716,979 +509,6 @@
     }
   }
 
-  function injectManualModalStyles() {
-    if (manualModalStylesInjected) return;
-    manualModalStylesInjected = true;
-    const style = document.createElement('style');
-    style.textContent = `
-      .vault-manual-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.55); z-index: 1325; }
-      .vault-manual-modal.is-visible { display: flex; }
-      .vault-manual-modal__dialog { position: relative; width: min(720px, 100%); max-height: min(85vh, 720px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid var(--vault-border, rgba(15, 23, 42, 0.08)); box-shadow: var(--vault-shadow, 0 18px 50px rgba(15, 23, 42, 0.15)); display: flex; flex-direction: column; overflow: hidden; }
-      .vault-manual-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
-      .vault-manual-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
-      .vault-manual-modal__close { border: none; background: transparent; font-size: 1.35rem; line-height: 1; padding: 4px; cursor: pointer; color: inherit; }
-      .vault-manual-modal__body { flex: 1; overflow: auto; padding: 18px 22px 6px; }
-      .vault-manual-modal__form { display: flex; flex-direction: column; gap: 16px; }
-      .vault-manual-modal__schema { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
-      .vault-manual-modal__schema select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(15, 23, 42, 0.12); background: rgba(248, 250, 255, 0.9); color: inherit; }
-      .vault-manual-modal__grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-      .vault-manual-modal__field { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
-      .vault-manual-modal__field label { font-weight: 600; font-size: 0.85rem; color: rgba(15, 23, 42, 0.75); }
-      .vault-manual-modal__field input,
-      .vault-manual-modal__field select,
-      .vault-manual-modal__field textarea { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(15, 23, 42, 0.12); background: rgba(248, 250, 255, 0.9); color: inherit; }
-      .vault-manual-modal__field input:focus,
-      .vault-manual-modal__field select:focus,
-      .vault-manual-modal__field textarea:focus { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 1px; }
-      .vault-manual-modal__error { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #b91c1c; padding: 10px 12px; border-radius: 12px; font-size: 0.85rem; }
-      .vault-manual-modal__footer { display: flex; justify-content: flex-end; gap: 12px; padding: 12px 22px 20px; border-top: 1px solid rgba(15, 23, 42, 0.08); background: rgba(248, 250, 255, 0.6); }
-      .vault-manual-modal__footer button { border-radius: 999px; padding: 8px 18px; font-size: 0.9rem; border: 1px solid rgba(103, 89, 255, 0.22); background: #fff; color: rgba(103, 89, 255, 0.9); cursor: pointer; transition: background 0.18s ease, color 0.18s ease; }
-      .vault-manual-modal__footer button:hover:not(:disabled) { background: rgba(103, 89, 255, 0.16); }
-      .vault-manual-modal__footer button:disabled { opacity: 0.6; cursor: not-allowed; }
-      .vault-manual-modal__cancel { border-color: rgba(15, 23, 42, 0.18); color: rgba(15, 23, 42, 0.75); }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function ensureManualModal() {
-    if (manualModal) return manualModal;
-    injectManualModalStyles();
-
-    const existing = document.getElementById('vault-manual-modal');
-    if (existing) {
-      manualModal = existing;
-      manualModalDialog = existing.querySelector('.vault-manual-modal__dialog');
-      manualModalTitle = existing.querySelector('.vault-manual-modal__title');
-      manualModalForm = existing.querySelector('.vault-manual-modal__form');
-      manualModalSchema = existing.querySelector('[name="manual-schema"]');
-      manualModalFields = existing.querySelector('.vault-manual-modal__grid');
-      manualModalError = existing.querySelector('.vault-manual-modal__error');
-      manualModalSave = existing.querySelector('.vault-manual-modal__save')
-        || manualModalForm?.querySelector('button[type="submit"]');
-      manualModalCancel = existing.querySelector('.vault-manual-modal__cancel');
-
-      const closeBtn = existing.querySelector('.vault-manual-modal__close');
-      existing.addEventListener('click', (event) => {
-        if (event.target === existing) {
-          closeManualModal();
-        }
-      });
-      if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-          closeManualModal();
-        });
-      }
-      if (manualModalCancel) {
-        manualModalCancel.addEventListener('click', (event) => {
-          event.preventDefault();
-          closeManualModal();
-        });
-      }
-      if (manualModalForm) {
-        manualModalForm.addEventListener('submit', (event) => {
-          event.preventDefault();
-          submitManualInsight();
-        });
-      }
-      if (manualModalSchema) {
-        manualModalSchema.addEventListener('change', () => {
-          handleManualSchemaChange(manualModalSchema.value);
-        });
-      }
-      populateManualSchemaSelect();
-      return manualModal;
-    }
-
-    const modal = document.createElement('div');
-    modal.className = 'vault-manual-modal';
-    modal.setAttribute('aria-hidden', 'true');
-
-    const dialog = document.createElement('div');
-    dialog.className = 'vault-manual-modal__dialog';
-    dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-labelledby', 'vault-manual-modal-title');
-    dialog.tabIndex = -1;
-
-    const header = document.createElement('header');
-    header.className = 'vault-manual-modal__header';
-
-    const title = document.createElement('h2');
-    title.className = 'vault-manual-modal__title';
-    title.id = 'vault-manual-modal-title';
-    title.textContent = 'Edit document details';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'vault-manual-modal__close';
-    closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.innerHTML = '&times;';
-
-    header.append(title, closeBtn);
-
-    const body = document.createElement('div');
-    body.className = 'vault-manual-modal__body';
-
-    const form = document.createElement('form');
-    form.className = 'vault-manual-modal__form';
-
-    const schemaField = document.createElement('div');
-    schemaField.className = 'vault-manual-modal__schema';
-
-    const schemaLabel = document.createElement('label');
-    schemaLabel.textContent = 'Document schema';
-
-    const schemaSelect = document.createElement('select');
-    schemaSelect.name = 'manual-schema';
-    schemaField.append(schemaLabel, schemaSelect);
-
-    const fieldsGrid = document.createElement('div');
-    fieldsGrid.className = 'vault-manual-modal__grid';
-
-    const errorBox = document.createElement('div');
-    errorBox.className = 'vault-manual-modal__error';
-    errorBox.hidden = true;
-
-    const footer = document.createElement('div');
-    footer.className = 'vault-manual-modal__footer';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'vault-manual-modal__cancel';
-    cancelBtn.textContent = 'Cancel';
-
-    const saveBtn = document.createElement('button');
-    saveBtn.type = 'submit';
-    saveBtn.className = 'vault-manual-modal__save';
-    saveBtn.textContent = 'Save changes';
-
-    footer.append(cancelBtn, saveBtn);
-
-    form.append(schemaField, fieldsGrid, errorBox, footer);
-    body.appendChild(form);
-    dialog.append(header, body);
-    modal.appendChild(dialog);
-    document.body.appendChild(modal);
-
-    manualModal = modal;
-    manualModalDialog = dialog;
-    manualModalTitle = title;
-    manualModalForm = form;
-    manualModalSchema = schemaSelect;
-    manualModalFields = fieldsGrid;
-    manualModalError = errorBox;
-    manualModalSave = saveBtn;
-    manualModalCancel = cancelBtn;
-
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal) {
-        closeManualModal();
-      }
-    });
-    closeBtn.addEventListener('click', () => {
-      closeManualModal();
-    });
-    cancelBtn.addEventListener('click', (event) => {
-      event.preventDefault();
-      closeManualModal();
-    });
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      submitManualInsight();
-    });
-    schemaSelect.addEventListener('change', () => {
-      handleManualSchemaChange(schemaSelect.value);
-    });
-    populateManualSchemaSelect();
-
-    return modal;
-  }
-
-  function closeManualModal({ restoreFocus = true } = {}) {
-    if (!manualModal) return;
-    manualModal.classList.remove('is-visible');
-    manualModal.setAttribute('aria-hidden', 'true');
-    manualModalState.file = null;
-    if (restoreFocus && manualModalReturnFocus) {
-      try {
-        manualModalReturnFocus.focus();
-      } catch (error) {
-        console.warn('Failed to restore focus after closing manual modal', error);
-      }
-    }
-    manualModalReturnFocus = null;
-  }
-
-  function populateManualSchemaSelect() {
-    if (!manualModalSchema) return;
-    const previousValue = manualModalSchema.value;
-    manualModalSchema.innerHTML = '';
-    manualSchemaOptions.forEach((option) => {
-      const opt = document.createElement('option');
-      opt.value = option.value;
-      opt.textContent = option.label;
-      manualModalSchema.appendChild(opt);
-    });
-    const fallback = manualSchemaOptions[0]?.value || '';
-    let nextValue = manualModalState.schema && manualSchemaOptionMap.has(manualModalState.schema)
-      ? manualModalState.schema
-      : manualSchemaOptionMap.has(previousValue)
-      ? previousValue
-      : fallback;
-    if (nextValue) {
-      manualModalSchema.value = nextValue;
-      manualModalState.schema = nextValue;
-    } else {
-      manualModalSchema.selectedIndex = -1;
-      manualModalState.schema = null;
-    }
-  }
-
-  function getManualFieldDefs(schema) {
-    const base = resolveManualBase(schema);
-    if (!base) return [];
-    return MANUAL_FIELD_DEFS[base] || [];
-  }
-
-  function cacheManualFile(file) {
-    if (!file || !file.fileId) return;
-    manualFileCache.set(file.fileId, file);
-    const record = state.files.get(file.fileId);
-    if (record) {
-      if (file.raw?.catalogueKey) {
-        record.catalogueKey = file.raw.catalogueKey;
-      }
-    }
-  }
-
-  function getManualFileById(fileId) {
-    if (!fileId) return null;
-    if (manualFileCache.has(fileId)) {
-      return manualFileCache.get(fileId);
-    }
-    const record = state.files.get(fileId);
-    if (!record) return null;
-    const fallback = {
-      fileId,
-      title: record.originalName || 'Document',
-      subtitle: '',
-      summary: [],
-      details: [],
-      metrics: {},
-      metadata: {},
-      raw: { metrics: {}, metadata: {}, catalogueKey: record.catalogueKey || null },
-    };
-    manualFileCache.set(fileId, fallback);
-    return fallback;
-  }
-
-  function getFieldLabel(schema, name) {
-    const defs = getManualFieldDefs(schema);
-    const match = defs.find((field) => field.name === name);
-    return match ? match.label : name;
-  }
-
-  function toInputDateValue(value) {
-    if (!value) return '';
-    const date = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(date.getTime())) return '';
-    return date.toISOString().slice(0, 10);
-  }
-
-  function formatInputNumber(value) {
-    if (value === '' || value == null) return '';
-    const number = toNumberLike(value);
-    if (number == null) {
-      return String(value);
-    }
-    return String(number);
-  }
-
-  function safeStringValue(value) {
-    if (value == null) return '';
-    return String(value);
-  }
-
-  function getDetailValue(details, label) {
-    if (!Array.isArray(details)) return null;
-    const entry = details.find((item) => item && item.label === label);
-    return entry ? entry.value : null;
-  }
-
-  function getSummaryValue(summary, label) {
-    if (!Array.isArray(summary)) return null;
-    const entry = summary.find((item) => item && item.label === label);
-    return entry ? entry.value : null;
-  }
-
-  function extractManualValues(file, schema) {
-    const metrics = file?.metrics || {};
-    const details = Array.isArray(file?.details) ? file.details : [];
-    const values = {};
-    const base = resolveManualBase(schema);
-    if (base === 'payslip') {
-      const payDate = metrics.payDate || metrics.documentDate || metrics.documentMonth || file?.raw?.documentDate || null;
-      values.payDate = toInputDateValue(payDate);
-      values.payFrequency = metrics.payFrequency || getDetailValue(details, 'Pay frequency') || '';
-      const currency = metrics.currency || metrics.currencyCode || file.currency || getDetailValue(details, 'Currency') || '';
-      values.currency = safeStringValue(currency).toUpperCase();
-      values.totalEarnings = formatInputNumber(
-        pickMetric(metrics, ['totalEarnings', 'gross', 'grossPay']) || getSummaryValue(file?.summary, 'Total earnings')
-      );
-      values.totalDeductions = formatInputNumber(
-        pickMetric(metrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']) ||
-          getSummaryValue(file?.summary, 'Total deductibles')
-      );
-      values.netPay = formatInputNumber(
-        pickMetric(metrics, ['net', 'netPay', 'takeHome']) || getSummaryValue(file?.summary, 'Net pay')
-      );
-      const periodStart = metrics.periodStart || metrics.period?.start || metrics.periodStartDate || metrics.period?.from;
-      const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.periodEndDate || metrics.period?.to;
-      values.periodStart = toInputDateValue(periodStart || getDetailValue(details, 'Period start'));
-      values.periodEnd = toInputDateValue(periodEnd || getDetailValue(details, 'Period end'));
-      values.taxCode = metrics.taxCode || getDetailValue(details, 'Tax code') || '';
-      values.tax = formatInputNumber(metrics.tax ?? getDetailValue(details, 'Income tax'));
-      values.ni = formatInputNumber(metrics.ni ?? getDetailValue(details, 'National Insurance'));
-      values.pension = formatInputNumber(metrics.pension ?? getDetailValue(details, 'Pension'));
-      values.studentLoan = formatInputNumber(metrics.studentLoan ?? getDetailValue(details, 'Student loan'));
-    } else if (base === 'statement') {
-      const currency = metrics.currency || metrics.currencyCode || file.currency || getDetailValue(details, 'Currency') || '';
-      const periodStart = metrics.periodStart || metrics.period?.start || metrics.period?.from || metrics.statementPeriod?.start;
-      const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.period?.to || metrics.statementPeriod?.end;
-      values.accountName = metrics.accountName || file.title || getDetailValue(details, 'Account name') || '';
-      values.accountNumber = metrics.accountNumber || getSummaryValue(file?.summary, 'Account number') || '';
-      values.accountType = metrics.accountType || getDetailValue(details, 'Account type') || '';
-      values.currency = safeStringValue(currency).toUpperCase();
-      values.periodStart = toInputDateValue(periodStart || getDetailValue(details, 'Period start'));
-      values.periodEnd = toInputDateValue(periodEnd || getDetailValue(details, 'Period end'));
-      values.openingBalance = formatInputNumber(
-        pickMetric(metrics, ['openingBalance', 'startingBalance']) || getDetailValue(details, 'Opening balance')
-      );
-      values.closingBalance = formatInputNumber(
-        pickMetric(metrics, ['closingBalance', 'endingBalance']) || getDetailValue(details, 'Closing balance')
-      );
-      values.totalIn = formatInputNumber(
-        pickMetric(metrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']) ||
-          getSummaryValue(file?.summary, 'Total in')
-      );
-      values.totalOut = formatInputNumber(
-        pickMetric(metrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']) ||
-          getSummaryValue(file?.summary, 'Total out')
-      );
-    }
-    return values;
-  }
-
-  function renderManualFields(schema, values = {}) {
-    if (!manualModalFields) return;
-    manualModalFields.innerHTML = '';
-    const defs = getManualFieldDefs(schema);
-    defs.forEach((field) => {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'vault-manual-modal__field';
-
-      const label = document.createElement('label');
-      label.setAttribute('for', `manual-${field.name}`);
-      label.textContent = field.label;
-
-      let control = null;
-      if (field.type === 'textarea') {
-        control = document.createElement('textarea');
-      } else if (field.type === 'select') {
-        control = document.createElement('select');
-      } else {
-        control = document.createElement('input');
-        control.type = field.type === 'date' ? 'date' : 'text';
-        if (field.type === 'number') {
-          control.inputMode = field.inputMode || 'decimal';
-          control.setAttribute('step', 'any');
-        }
-      }
-      control.id = `manual-${field.name}`;
-      control.name = `manual-${field.name}`;
-      control.autocomplete = 'off';
-      if (field.placeholder) control.placeholder = field.placeholder;
-      if (field.maxLength) control.maxLength = field.maxLength;
-      if (field.inputMode && field.type !== 'number') control.inputMode = field.inputMode;
-      if (field.type === 'date') control.max = '9999-12-31';
-      control.value = values[field.name] != null ? values[field.name] : '';
-
-      wrapper.append(label, control);
-      manualModalFields.appendChild(wrapper);
-    });
-    const firstField = manualModalFields.querySelector('input, select, textarea');
-    if (firstField) {
-      firstField.focus({ preventScroll: true });
-    }
-  }
-
-  function initialiseManualValues(file) {
-    manualModalState.valuesBySchema.clear();
-    manualSchemaOptions.forEach((option) => {
-      manualModalState.valuesBySchema.set(option.value, extractManualValues(file, option.value));
-    });
-  }
-
-  function handleManualSchemaChange(nextSchema) {
-    if (!manualModalSchema) return;
-    const fallback = manualSchemaOptions[0]?.value || null;
-    const schemaKey = manualSchemaOptionMap.has(nextSchema) ? nextSchema : fallback;
-    if (!schemaKey) return;
-    if (manualModalState.schema && manualModalState.schema !== schemaKey) {
-      const currentValues = readManualInputs(manualModalState.schema);
-      manualModalState.valuesBySchema.set(manualModalState.schema, currentValues);
-    }
-    manualModalState.schema = schemaKey;
-    manualModalSchema.value = schemaKey;
-    if (!manualModalState.valuesBySchema.has(schemaKey) && manualModalState.file) {
-      manualModalState.valuesBySchema.set(schemaKey, extractManualValues(manualModalState.file, schemaKey));
-    }
-    const values = manualModalState.valuesBySchema.get(schemaKey) || {};
-    renderManualFields(schemaKey, values);
-  }
-
-  function readManualInputs(schema) {
-    const values = {};
-    const defs = getManualFieldDefs(schema);
-    defs.forEach((field) => {
-      const input = manualModalForm?.elements[`manual-${field.name}`];
-      if (!input) {
-        values[field.name] = '';
-        return;
-      }
-      if (
-        input instanceof HTMLInputElement ||
-        input instanceof HTMLTextAreaElement ||
-        input instanceof HTMLSelectElement
-      ) {
-        values[field.name] = input.value;
-      } else {
-        values[field.name] = '';
-      }
-    });
-    return values;
-  }
-
-  function pruneUndefined(source) {
-    if (!source) return {};
-    const result = {};
-    Object.entries(source).forEach(([key, value]) => {
-      if (value !== undefined) {
-        result[key] = value;
-      }
-    });
-    return result;
-  }
-
-  function readNumberField(schema, rawValues, name, cleanedRaw, errors) {
-    const label = getFieldLabel(schema, name);
-    const rawValue = rawValues[name] == null ? '' : String(rawValues[name]).trim();
-    cleanedRaw[name] = rawValue;
-    if (!rawValue) {
-      return { shouldApply: true, value: null };
-    }
-    const parsed = toNumberLike(rawValue);
-    if (parsed == null || !Number.isFinite(parsed)) {
-      errors.push(`${label} must be a number`);
-      return { shouldApply: false, value: null };
-    }
-    return { shouldApply: true, value: parsed };
-  }
-
-  function readStringField(schema, rawValues, name, cleanedRaw, { uppercase = false } = {}) {
-    let rawValue = rawValues[name] == null ? '' : String(rawValues[name]).trim();
-    if (uppercase) rawValue = rawValue.toUpperCase();
-    cleanedRaw[name] = rawValue;
-    if (!rawValue) {
-      return { shouldApply: true, value: null };
-    }
-    return { shouldApply: true, value: rawValue };
-  }
-
-  function readDateField(schema, rawValues, name, cleanedRaw, errors) {
-    const label = getFieldLabel(schema, name);
-    const rawValue = rawValues[name] == null ? '' : String(rawValues[name]).trim();
-    cleanedRaw[name] = rawValue;
-    if (!rawValue) {
-      return { shouldApply: true, value: null };
-    }
-    const date = new Date(rawValue);
-    if (Number.isNaN(date.getTime())) {
-      errors.push(`${label} must be a valid date`);
-      return { shouldApply: false, value: null };
-    }
-    return { shouldApply: true, value: rawValue };
-  }
-
-  function transformManualValues(schema, rawValues, file) {
-    const base = resolveManualBase(schema);
-    if (!schema || !base || !MANUAL_FIELD_DEFS[base]) {
-      return { error: 'Unsupported document schema selected.' };
-    }
-    const cleanedRaw = {};
-    const errors = [];
-    const patch = {};
-    const metadataPatch = {};
-    const existingMetrics = { ...(file?.metrics || {}) };
-
-    if (base === 'payslip') {
-      const payDate = readDateField(schema, rawValues, 'payDate', cleanedRaw, errors);
-      if (payDate.shouldApply) {
-        patch.payDate = payDate.value;
-        metadataPatch.documentDate = payDate.value;
-      }
-      const payFrequency = readStringField(schema, rawValues, 'payFrequency', cleanedRaw);
-      if (payFrequency.shouldApply) {
-        patch.payFrequency = payFrequency.value;
-      }
-      const currency = readStringField(schema, rawValues, 'currency', cleanedRaw, { uppercase: true });
-      if (currency.shouldApply) {
-        patch.currency = currency.value;
-      }
-      const totalEarnings = readNumberField(schema, rawValues, 'totalEarnings', cleanedRaw, errors);
-      if (totalEarnings.shouldApply) {
-        patch.totalEarnings = totalEarnings.value;
-      }
-      const totalDeductions = readNumberField(schema, rawValues, 'totalDeductions', cleanedRaw, errors);
-      if (totalDeductions.shouldApply) {
-        patch.totalDeductions = totalDeductions.value;
-      }
-      const netPay = readNumberField(schema, rawValues, 'netPay', cleanedRaw, errors);
-      if (netPay.shouldApply) {
-        patch.netPay = netPay.value;
-      }
-      const periodStart = readDateField(schema, rawValues, 'periodStart', cleanedRaw, errors);
-      const periodEnd = readDateField(schema, rawValues, 'periodEnd', cleanedRaw, errors);
-      if (periodStart.shouldApply || periodEnd.shouldApply) {
-        patch.periodStart = periodStart.shouldApply ? periodStart.value : undefined;
-        patch.periodEnd = periodEnd.shouldApply ? periodEnd.value : undefined;
-        metadataPatch.period = {
-          start: periodStart.shouldApply ? periodStart.value : existingMetrics.period?.start || existingMetrics.periodStart || null,
-          end: periodEnd.shouldApply ? periodEnd.value : existingMetrics.period?.end || existingMetrics.periodEnd || null,
-        };
-      }
-      const taxCode = readStringField(schema, rawValues, 'taxCode', cleanedRaw);
-      if (taxCode.shouldApply) {
-        patch.taxCode = taxCode.value;
-      }
-      const tax = readNumberField(schema, rawValues, 'tax', cleanedRaw, errors);
-      if (tax.shouldApply) {
-        patch.tax = tax.value;
-      }
-      const ni = readNumberField(schema, rawValues, 'ni', cleanedRaw, errors);
-      if (ni.shouldApply) {
-        patch.ni = ni.value;
-      }
-      const pension = readNumberField(schema, rawValues, 'pension', cleanedRaw, errors);
-      if (pension.shouldApply) {
-        patch.pension = pension.value;
-      }
-      const studentLoan = readNumberField(schema, rawValues, 'studentLoan', cleanedRaw, errors);
-      if (studentLoan.shouldApply) {
-        patch.studentLoan = studentLoan.value;
-      }
-
-      if (errors.length) {
-        return { error: errors.join(' ') };
-      }
-
-      const mergedMetrics = { ...existingMetrics };
-      Object.entries(patch).forEach(([key, value]) => {
-        if (value === undefined) return;
-        if (value === null) {
-          delete mergedMetrics[key];
-        } else {
-          mergedMetrics[key] = value;
-        }
-      });
-
-      const currencyCode = patch.currency || mergedMetrics.currency || file.currency || 'GBP';
-      mergedMetrics.currency = currencyCode || 'GBP';
-
-      const mergedPeriodStart =
-        (patch.periodStart !== undefined ? patch.periodStart : mergedMetrics.periodStart || mergedMetrics.period?.start) || null;
-      const mergedPeriodEnd =
-        (patch.periodEnd !== undefined ? patch.periodEnd : mergedMetrics.periodEnd || mergedMetrics.period?.end) || null;
-
-      if (mergedPeriodStart || mergedPeriodEnd) {
-        mergedMetrics.period = { ...(mergedMetrics.period || {}) };
-        if (mergedPeriodStart) {
-          mergedMetrics.period.start = mergedPeriodStart;
-        } else {
-          delete mergedMetrics.period.start;
-        }
-        if (mergedPeriodEnd) {
-          mergedMetrics.period.end = mergedPeriodEnd;
-        } else {
-          delete mergedMetrics.period.end;
-        }
-      }
-
-      const payDateValue =
-        (patch.payDate !== undefined ? patch.payDate : mergedMetrics.payDate || mergedMetrics.documentDate || mergedMetrics.documentMonth) ||
-        null;
-      if (payDateValue) {
-        mergedMetrics.payDate = payDateValue;
-      } else {
-        delete mergedMetrics.payDate;
-      }
-
-      const totalEarningsValue = pickMetric(mergedMetrics, ['totalEarnings', 'gross', 'grossPay']);
-      const totalDeductionsValue = pickMetric(mergedMetrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']);
-      const netPayValue = pickMetric(mergedMetrics, ['net', 'netPay', 'takeHome']);
-
-      const summary = [
-        { label: 'Date of payslip', value: formatDate(payDateValue) },
-        { label: 'Total earnings', value: formatMoney(totalEarningsValue, mergedMetrics.currency) },
-        { label: 'Total deductibles', value: formatMoney(totalDeductionsValue, mergedMetrics.currency) },
-        { label: 'Net pay', value: formatMoney(netPayValue, mergedMetrics.currency) },
-      ];
-
-      const details = [];
-      if (mergedPeriodStart) details.push({ label: 'Period start', value: formatDate(mergedPeriodStart) });
-      if (mergedPeriodEnd) details.push({ label: 'Period end', value: formatDate(mergedPeriodEnd) });
-      if (mergedMetrics.payFrequency) details.push({ label: 'Pay frequency', value: mergedMetrics.payFrequency });
-      if (mergedMetrics.taxCode) details.push({ label: 'Tax code', value: mergedMetrics.taxCode });
-      if (mergedMetrics.tax != null) details.push({ label: 'Income tax', value: formatMoney(mergedMetrics.tax, mergedMetrics.currency) });
-      if (mergedMetrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(mergedMetrics.ni, mergedMetrics.currency) });
-      if (mergedMetrics.pension != null)
-        details.push({ label: 'Pension', value: formatMoney(mergedMetrics.pension, mergedMetrics.currency) });
-      if (mergedMetrics.studentLoan != null)
-        details.push({ label: 'Student loan', value: formatMoney(mergedMetrics.studentLoan, mergedMetrics.currency) });
-
-      const subtitle = mergedMetrics.payFrequency ? `${mergedMetrics.payFrequency} payslip` : file.subtitle || 'Payslip';
-      const title = formatDate(payDateValue) || file.title || 'Payslip';
-
-      return {
-        payload: {
-          schema,
-          baseSchema: base,
-          metrics: pruneUndefined(patch),
-          metadata: pruneUndefined(metadataPatch),
-        },
-        display: {
-          metrics: mergedMetrics,
-          metadata: metadataPatch,
-          currency: mergedMetrics.currency,
-          title,
-          subtitle,
-          summary,
-          details,
-        },
-        rawValues: cleanedRaw,
-      };
-    }
-
-    if (base === 'statement') {
-      const accountName = readStringField(schema, rawValues, 'accountName', cleanedRaw);
-      if (accountName.shouldApply) {
-        metadataPatch.accountName = accountName.value;
-        patch.accountName = accountName.value;
-      }
-      const accountNumber = readStringField(schema, rawValues, 'accountNumber', cleanedRaw);
-      if (accountNumber.shouldApply) {
-        patch.accountNumber = accountNumber.value;
-      }
-      const accountType = readStringField(schema, rawValues, 'accountType', cleanedRaw);
-      if (accountType.shouldApply) {
-        patch.accountType = accountType.value;
-      }
-      const currency = readStringField(schema, rawValues, 'currency', cleanedRaw, { uppercase: true });
-      if (currency.shouldApply) {
-        patch.currency = currency.value;
-      }
-      const periodStart = readDateField(schema, rawValues, 'periodStart', cleanedRaw, errors);
-      const periodEnd = readDateField(schema, rawValues, 'periodEnd', cleanedRaw, errors);
-      if (periodStart.shouldApply || periodEnd.shouldApply) {
-        patch.periodStart = periodStart.shouldApply ? periodStart.value : undefined;
-        patch.periodEnd = periodEnd.shouldApply ? periodEnd.value : undefined;
-        metadataPatch.statementPeriod = {
-          start: periodStart.shouldApply
-            ? periodStart.value
-            : existingMetrics.statementPeriod?.start || existingMetrics.periodStart || null,
-          end: periodEnd.shouldApply
-            ? periodEnd.value
-            : existingMetrics.statementPeriod?.end || existingMetrics.periodEnd || null,
-        };
-      }
-      const openingBalance = readNumberField(schema, rawValues, 'openingBalance', cleanedRaw, errors);
-      if (openingBalance.shouldApply) {
-        patch.openingBalance = openingBalance.value;
-      }
-      const closingBalance = readNumberField(schema, rawValues, 'closingBalance', cleanedRaw, errors);
-      if (closingBalance.shouldApply) {
-        patch.closingBalance = closingBalance.value;
-      }
-      const totalIn = readNumberField(schema, rawValues, 'totalIn', cleanedRaw, errors);
-      if (totalIn.shouldApply) {
-        patch.totalIn = totalIn.value;
-      }
-      const totalOut = readNumberField(schema, rawValues, 'totalOut', cleanedRaw, errors);
-      if (totalOut.shouldApply) {
-        patch.totalOut = totalOut.value;
-      }
-
-      if (errors.length) {
-        return { error: errors.join(' ') };
-      }
-
-      const mergedMetrics = { ...existingMetrics };
-      Object.entries(patch).forEach(([key, value]) => {
-        if (value === undefined) return;
-        if (value === null) {
-          delete mergedMetrics[key];
-        } else {
-          mergedMetrics[key] = value;
-        }
-      });
-
-      const currencyCode = patch.currency || mergedMetrics.currency || file.currency || 'GBP';
-      mergedMetrics.currency = currencyCode || 'GBP';
-
-      const mergedPeriodStart =
-        (patch.periodStart !== undefined
-          ? patch.periodStart
-          : mergedMetrics.periodStart || mergedMetrics.period?.start || mergedMetrics.statementPeriod?.start) || null;
-      const mergedPeriodEnd =
-        (patch.periodEnd !== undefined
-          ? patch.periodEnd
-          : mergedMetrics.periodEnd || mergedMetrics.period?.end || mergedMetrics.statementPeriod?.end) || null;
-
-      if (mergedPeriodStart || mergedPeriodEnd) {
-        mergedMetrics.period = { ...(mergedMetrics.period || {}) };
-        mergedMetrics.statementPeriod = { ...(mergedMetrics.statementPeriod || {}) };
-        if (mergedPeriodStart) {
-          mergedMetrics.period.start = mergedPeriodStart;
-          mergedMetrics.statementPeriod.start = mergedPeriodStart;
-        } else {
-          delete mergedMetrics.period.start;
-          delete mergedMetrics.statementPeriod.start;
-        }
-        if (mergedPeriodEnd) {
-          mergedMetrics.period.end = mergedPeriodEnd;
-          mergedMetrics.statementPeriod.end = mergedPeriodEnd;
-        } else {
-          delete mergedMetrics.period.end;
-          delete mergedMetrics.statementPeriod.end;
-        }
-      }
-
-      const totalInValue = pickMetric(mergedMetrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']);
-      const totalOutValue = pickMetric(mergedMetrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']);
-      const openingBalanceValue = pickMetric(mergedMetrics, ['openingBalance', 'startingBalance']);
-      const closingBalanceValue = pickMetric(mergedMetrics, ['closingBalance', 'endingBalance']);
-
-      const accountNumberValue =
-        patch.accountNumber !== undefined
-          ? patch.accountNumber
-          : mergedMetrics.accountNumber || getSummaryValue(file?.summary, 'Account number') || '—';
-      const accountNameValue =
-        patch.accountName !== undefined ? patch.accountName : mergedMetrics.accountName || file.title || 'Statement';
-
-      const summary = [
-        { label: 'Account number', value: accountNumberValue || '—' },
-        { label: 'Total in', value: formatMoney(totalInValue, mergedMetrics.currency) },
-        { label: 'Total out', value: formatMoney(totalOutValue, mergedMetrics.currency) },
-      ];
-
-      const details = [];
-      if (mergedPeriodStart) details.push({ label: 'Period start', value: formatDate(mergedPeriodStart) });
-      if (mergedPeriodEnd) details.push({ label: 'Period end', value: formatDate(mergedPeriodEnd) });
-      if (openingBalanceValue != null)
-        details.push({ label: 'Opening balance', value: formatMoney(openingBalanceValue, mergedMetrics.currency) });
-      if (closingBalanceValue != null)
-        details.push({ label: 'Closing balance', value: formatMoney(closingBalanceValue, mergedMetrics.currency) });
-      if (mergedMetrics.currency) details.push({ label: 'Currency', value: mergedMetrics.currency });
-      if (patch.accountType !== undefined || mergedMetrics.accountType)
-        details.push({
-          label: 'Account type',
-          value: patch.accountType !== undefined ? patch.accountType || '—' : mergedMetrics.accountType || '—',
-        });
-
-      const subtitle = mergedPeriodEnd
-        ? `Statement ending ${formatDate(mergedPeriodEnd)}`
-        : mergedMetrics.documentDate
-        ? `Statement ${formatDate(mergedMetrics.documentDate)}`
-        : file.subtitle || 'Statement';
-
-      const title = accountNameValue || file.title || 'Statement';
-
-      return {
-        payload: {
-          schema,
-          baseSchema: base,
-          metrics: pruneUndefined(patch),
-          metadata: pruneUndefined(metadataPatch),
-        },
-        display: {
-          metrics: mergedMetrics,
-          metadata: metadataPatch,
-          currency: mergedMetrics.currency,
-          title,
-          subtitle,
-          summary,
-          details,
-        },
-        rawValues: cleanedRaw,
-      };
-    }
-
-    return { error: 'Unsupported document schema selected.' };
-  }
-
-  function openManualModal(file, { schema, trigger } = {}) {
-    if (!file) return;
-    ensureManualCatalogue().catch(() => {});
-    const modal = ensureManualModal();
-    if (!modal || !manualModalSchema) return;
-    cacheManualFile(file);
-    manualModalState.file = getManualFileById(file.fileId) || file;
-    const fallbackSchema = manualSchemaOptions[0]?.value || null;
-    const requestedSchema = schema && manualSchemaOptionMap.has(schema) ? schema : null;
-    const recordSchema = manualModalState.file?.raw?.catalogueKey && manualSchemaOptionMap.has(manualModalState.file.raw.catalogueKey)
-      ? manualModalState.file.raw.catalogueKey
-      : null;
-    const viewerSchema = findSchemaForViewerType(state.viewer.type);
-    const resolvedSchema = requestedSchema || recordSchema || manualModalState.schema || viewerSchema || fallbackSchema;
-    manualModalReturnFocus = trigger || null;
-    if (manualModalTitle) {
-      manualModalTitle.textContent = `Edit document details — ${file.title || 'Document'}`;
-    }
-    initialiseManualValues(manualModalState.file);
-    handleManualSchemaChange(resolvedSchema);
-    if (manualModalError) {
-      manualModalError.hidden = true;
-      manualModalError.textContent = '';
-    }
-    manualModal.classList.add('is-visible');
-    manualModal.setAttribute('aria-hidden', 'false');
-    manualModalDialog?.focus({ preventScroll: true });
-  }
-
-  async function submitManualInsight() {
-    if (!manualModalState.file || !manualModalSchema) return;
-    const fallbackSchema = manualSchemaOptions[0]?.value || null;
-    const schema = manualModalSchema.value && manualSchemaOptionMap.has(manualModalSchema.value)
-      ? manualModalSchema.value
-      : fallbackSchema;
-    if (!schema) return;
-    const rawValues = readManualInputs(schema);
-    const transform = transformManualValues(schema, rawValues, manualModalState.file);
-    if (transform?.error) {
-      if (manualModalError) {
-        manualModalError.hidden = false;
-        manualModalError.textContent = transform.error;
-      }
-      return;
-    }
-    if (!transform) return;
-
-    manualModalState.valuesBySchema.set(schema, transform.rawValues || rawValues);
-
-    const payload = {
-      schema,
-      baseSchema: transform.payload.baseSchema || resolveManualBase(schema) || schema,
-      metrics: transform.payload.metrics || {},
-      metadata: transform.payload.metadata || {},
-    };
-
-    if (manualModalError) {
-      manualModalError.hidden = true;
-      manualModalError.textContent = '';
-    }
-
-    const originalLabel = manualModalSave ? manualModalSave.textContent : '';
-    if (manualModalSave) {
-      manualModalSave.disabled = true;
-      manualModalSave.textContent = 'Saving…';
-    }
-    if (manualModalSchema) manualModalSchema.disabled = true;
-
-    try {
-      const response = await apiFetch(`/files/${encodeURIComponent(manualModalState.file.fileId)}/manual-insights`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.status === 401) {
-        handleUnauthorised('Please sign in again to update this document.');
-        if (manualModalError) {
-          manualModalError.hidden = false;
-          manualModalError.textContent = 'Session expired. Please sign in and try again.';
-        }
-        return;
-      }
-      if (!response.ok) {
-        const text = await safeJson(response);
-        throw new Error(text?.error || 'Unable to save manual insight');
-      }
-      const data = await response.json().catch(() => ({}));
-      const appliedCatalogueKey = data?.catalogueKey || schema;
-      applyManualUpdateToViewerFile(manualModalState.file, schema, transform.display);
-      manualModalState.file.status = 'done';
-      manualModalState.file.message = '';
-      manualModalState.file.reason = null;
-      manualModalState.file.raw = manualModalState.file.raw || {};
-      manualModalState.file.raw.catalogueKey = appliedCatalogueKey;
-      manualModalState.file.catalogueKey = appliedCatalogueKey;
-      cacheManualFile(manualModalState.file);
-      const record = state.files.get(manualModalState.file.fileId);
-      if (record) {
-        record.status = 'done';
-        record.message = '';
-        record.reason = null;
-        record.processing = 'green';
-        record.upload = 'green';
-        record.catalogueKey = appliedCatalogueKey;
-        const session = state.sessions.get(record.sessionId);
-        if (session) {
-          session.files.set(record.fileId, record);
-        }
-      }
-      renderViewerFiles();
-      if (manualModalState.file && state.viewer.selectedFileId === manualModalState.file.fileId) {
-        renderViewerSelection();
-      }
-      renderSessionPanel();
-      queueRefresh();
-      closeManualModal();
-    } catch (error) {
-      console.error('Failed to persist manual insight', error);
-      if (manualModalError) {
-        manualModalError.hidden = false;
-        manualModalError.textContent = error.message || 'Unable to save changes right now.';
-      }
-      return;
-    } finally {
-      if (manualModalSave) {
-        manualModalSave.disabled = false;
-        manualModalSave.textContent = originalLabel || 'Save changes';
-      }
-      if (manualModalSchema) manualModalSchema.disabled = false;
-    }
-  }
-
-  function applyManualUpdateToViewerFile(file, schema, display) {
-    if (!file || !display) return;
-    if (display.metrics) {
-      file.metrics = { ...(file.metrics || {}), ...display.metrics };
-    }
-    if (display.metadata) {
-      file.metadata = { ...(file.metadata || {}), ...display.metadata };
-    }
-    if (file.raw) {
-      file.raw.metrics = { ...(file.raw.metrics || {}), ...(display.metrics || {}) };
-      file.raw.metadata = { ...(file.raw.metadata || {}), ...(display.metadata || {}) };
-    }
-    file.currency = display.currency || file.currency;
-    file.title = display.title || file.title;
-    file.subtitle = display.subtitle || file.subtitle;
-    file.summary = Array.isArray(display.summary) ? display.summary : file.summary;
-    file.details = Array.isArray(display.details) ? display.details : file.details;
-    file.catalogueKey = file.raw?.catalogueKey || file.catalogueKey;
-    cacheManualFile(file);
-  }
-
   async function deleteViewerFile(fileId) {
     if (!fileId) return;
     const confirmed = window.confirm('Are you sure you want to delete this document? This action cannot be undone.');
@@ -1802,18 +622,6 @@
     });
     actions.appendChild(downloadButton);
 
-    const editButton = document.createElement('button');
-    editButton.type = 'button';
-    editButton.className = 'viewer__file-edit';
-    editButton.setAttribute('aria-label', 'Edit document details');
-    editButton.innerHTML = '<i class="bi bi-pencil"></i>';
-    editButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      openManualModal(file, { schema: state.viewer.type, trigger: editButton });
-    });
-    actions.appendChild(editButton);
-
     let jsonButton = null;
     if (jsonTestEnabled) {
       jsonButton = document.createElement('button');
@@ -1866,7 +674,6 @@
 
   function renderViewerFiles() {
     if (!viewerList) return;
-    const previousScrollTop = viewerList.scrollTop;
     viewerList.innerHTML = '';
     const files = Array.isArray(state.viewer.files) ? state.viewer.files : [];
     if (!files.length) {
@@ -1884,7 +691,6 @@
       viewerList.appendChild(buildViewerFileCard(file));
     });
     renderViewerSelection();
-    viewerList.scrollTop = previousScrollTop;
     if (viewerEmpty) {
       viewerEmpty.style.display = state.viewer.selectedFileId ? 'none' : '';
       if (!state.viewer.selectedFileId) {
@@ -1911,17 +717,12 @@
       const payload = {
         sessions: Array.from(state.sessions.entries()).map(([sessionId, session]) => ({
           sessionId,
-          createdAt: session.createdAt || Date.now(),
-          displayName: session.displayName || null,
           files: Array.from(session.files.values()).map((file) => ({
             fileId: file.fileId,
             originalName: file.originalName,
             upload: file.upload,
             processing: file.processing,
             message: file.message || '',
-            status: file.status || null,
-            reason: file.reason || null,
-            catalogueKey: file.catalogueKey || null,
           })),
           rejected: Array.isArray(session.rejected)
             ? session.rejected.map((entry) => ({ originalName: entry.originalName, reason: entry.reason }))
@@ -1944,13 +745,6 @@
       data.sessions.forEach((entry) => {
         if (!entry || !entry.sessionId) return;
         const session = upsertSession(entry.sessionId);
-        const createdAtValue = Number(entry.createdAt);
-        if (Number.isFinite(createdAtValue)) {
-          session.createdAt = createdAtValue;
-        }
-        if (entry.displayName) {
-          session.displayName = entry.displayName;
-        }
         session.rejected = Array.isArray(entry.rejected)
           ? entry.rejected.map((item) => ({ originalName: item.originalName, reason: item.reason }))
           : [];
@@ -1963,9 +757,6 @@
               upload: file.upload || 'amber',
               processing: file.processing || 'red',
               message: file.message || '',
-              status: file.status || null,
-              reason: file.reason || null,
-              catalogueKey: file.catalogueKey || null,
             });
             session.files.set(file.fileId, record);
           });
@@ -2058,463 +849,78 @@
   function renderSessionPanel() {
     if (!(sessionRows && sessionEmpty)) return;
     sessionRows.innerHTML = '';
-    const sessionEntries = Array.from(state.sessions.entries());
-    if (sessionEntries.length === 0) {
-      sessionEmpty.style.display = '';
-      closeSessionDetail();
-      updateProgressUI();
-      persistState();
-      return;
+    let rowCount = 0;
+    for (const session of state.sessions.values()) {
+      for (const file of session.files.values()) {
+        rowCount += 1;
+        sessionRows.appendChild(renderFileRow(file));
+      }
+      for (const rejected of session.rejected) {
+        rowCount += 1;
+        sessionRows.appendChild(renderRejectedRow(rejected));
+      }
     }
-
-    sessionEmpty.style.display = 'none';
-    let hasCards = false;
-    sessionEntries.forEach(([sessionId, session], index) => {
-      const summary = summariseSession(sessionId, session);
-      const card = buildSessionCard(sessionId, session, index, summary);
-      sessionRows.appendChild(card);
-      hasCards = true;
-    });
-
-    if (!hasCards) {
+    if (rowCount === 0) {
       sessionEmpty.style.display = '';
+    } else {
+      sessionEmpty.style.display = 'none';
     }
     updateProgressUI();
     persistState();
-    refreshSessionDetailModal();
   }
 
-  function getStatusMeta(statusKey) {
-    if (SESSION_STATUS_META[statusKey]) return SESSION_STATUS_META[statusKey];
-    const label = typeof statusKey === 'string' && statusKey
-      ? statusKey.charAt(0).toUpperCase() + statusKey.slice(1)
-      : 'Status';
-    return { label, variant: 'accent', description: '' };
+  function renderFileRow(file) {
+    const row = document.createElement('div');
+    row.className = 'session-row';
+    const name = document.createElement('div');
+    name.className = 'filename';
+    name.textContent = file.originalName;
+    row.appendChild(name);
+
+    const uploadLight = createLight('Upload', file.upload || 'amber');
+    const processingLight = createLight('Processing', file.processing || 'red');
+
+    const lights = document.createElement('div');
+    lights.className = 'lights';
+    lights.append(uploadLight, processingLight);
+    row.appendChild(lights);
+
+    const message = document.createElement('div');
+    message.className = 'message muted';
+    message.textContent = file.message || '';
+    row.appendChild(message);
+    return row;
   }
 
-  function getSessionDisplayLabel(sessionId, session, index) {
-    if (session && session.displayName) return session.displayName;
-    let resolvedIndex = typeof index === 'number' ? index : -1;
-    if (resolvedIndex < 0) {
-      const keys = Array.from(state.sessions.keys());
-      resolvedIndex = keys.indexOf(sessionId);
-    }
-    if (resolvedIndex >= 0) {
-      return `Upload batch ${resolvedIndex + 1}`;
-    }
-    return 'Upload batch';
+  function renderRejectedRow(entry) {
+    const row = document.createElement('div');
+    row.className = 'session-row';
+    const name = document.createElement('div');
+    name.className = 'filename';
+    name.textContent = entry.originalName;
+    row.appendChild(name);
+
+    const lights = document.createElement('div');
+    lights.className = 'lights';
+    lights.appendChild(createLight('Upload', 'red'));
+    lights.appendChild(createLight('Processing', 'red'));
+    row.appendChild(lights);
+
+    const message = document.createElement('div');
+    message.className = 'message muted';
+    message.textContent = entry.reason || 'Rejected';
+    row.appendChild(message);
+    return row;
   }
 
-  function deriveFileStatus(file) {
-    if (!file) return 'uploading';
-    const explicitStatus = typeof file.status === 'string' ? file.status.toLowerCase() : '';
-    if (explicitStatus === 'done' || explicitStatus === 'complete') return 'complete';
-    if (explicitStatus === 'rejected') return 'rejected';
-    if (explicitStatus === 'processing') return 'processing';
-    if (explicitStatus === 'attention') return 'attention';
-    const message = typeof file.message === 'string' ? file.message.trim() : '';
-    if (file.processing === 'green') return 'complete';
-    if (file.processing === 'amber') return 'processing';
-    if (message && file.processing !== 'green') return 'attention';
-    if (file.upload === 'green') return 'processing';
-    if (file.upload === 'red') return message ? 'attention' : 'uploading';
-    return 'uploading';
-  }
-
-  function isManualReviewMessage(message) {
-    if (!message) return false;
-    const text = String(message).toLowerCase();
-    return (
-      text.includes('low confidence')
-      || text.includes('manual review')
-      || text.includes('manual entry')
-      || text.includes('unable to extract')
-      || text.includes('could not extract')
-      || text.includes('needs review')
-      || text.includes('confidence below')
-    );
-  }
-
-  function requiresManualReview(record) {
-    if (!record) return false;
-    const status = typeof record.status === 'string' ? record.status.toLowerCase() : '';
-    if (status === 'rejected') return true;
-    if (isManualReviewMessage(record.message)) return true;
-    if (isManualReviewMessage(record.reason)) return true;
-    return false;
-  }
-
-  function guessManualSchemaForRecord(record) {
-    if (!record) return manualSchemaOptions[0]?.value || null;
-    if (record.catalogueKey && manualSchemaOptionMap.has(record.catalogueKey)) {
-      return record.catalogueKey;
-    }
-    const name = String(record.originalName || '').toLowerCase();
-    const message = String(record.message || record.reason || '').toLowerCase();
-    const payslipHint = name.includes('payslip') || message.includes('payslip') || message.includes('pay slip');
-    if (payslipHint) {
-      const option = manualSchemaOptions.find((item) => item.base === 'payslip');
-      if (option) return option.value;
-    }
-    const statementHint = ['statement', 'account', 'bank', 'transaction'].some((token) =>
-      name.includes(token) || message.includes(token)
-    );
-    if (statementHint) {
-      const option = manualSchemaOptions.find((item) => item.base === 'statement');
-      if (option) return option.value;
-    }
-    return manualSchemaOptions[0]?.value || null;
-  }
-
-  function summariseSession(sessionId, session) {
-    const summary = { entries: [], statusCounts: new Map(), noteCount: 0, total: 0 };
-    if (!session) return summary;
-    for (const file of session.files.values()) {
-      const statusKey = deriveFileStatus(file);
-      const reasonText = typeof file.reason === 'string' ? file.reason.trim() : '';
-      let message = typeof file.message === 'string' ? file.message.trim() : '';
-      if (!message && statusKey === 'rejected') {
-        message = reasonText || 'Manual review required';
-      }
-      if (message) summary.noteCount += 1;
-      const needsManual = requiresManualReview(file);
-      summary.entries.push({
-        type: 'file',
-        id: file.fileId,
-        name: file.originalName || 'Document',
-        statusKey,
-        message,
-        fileId: file.fileId,
-        status: file.status || null,
-        requiresManual: needsManual,
-        manualSchema: needsManual ? guessManualSchemaForRecord(file) : null,
-      });
-      summary.statusCounts.set(statusKey, (summary.statusCounts.get(statusKey) || 0) + 1);
-    }
-    if (Array.isArray(session.rejected)) {
-      session.rejected.forEach((entry, index) => {
-        const reason = typeof entry.reason === 'string' ? entry.reason.trim() : '';
-        const message = reason || 'Rejected';
-        if (reason) summary.noteCount += 1;
-        summary.entries.push({
-          type: 'rejected',
-          id: `rejected-${sessionId}-${index}`,
-          name: entry.originalName || 'Document',
-          statusKey: 'rejected',
-          message,
-        });
-        summary.statusCounts.set('rejected', (summary.statusCounts.get('rejected') || 0) + 1);
-      });
-    }
-    summary.total = summary.entries.length;
-    return summary;
-  }
-
-  function createSessionChip(statusKey, count) {
-    const meta = getStatusMeta(statusKey);
-    const chip = document.createElement('span');
-    chip.className = 'session-chip';
-    chip.dataset.variant = meta.variant || 'accent';
-    chip.setAttribute('role', 'listitem');
-    chip.setAttribute('aria-label', `${meta.label}: ${count}`);
-    chip.title = meta.description || meta.label;
-
-    const dot = document.createElement('span');
-    dot.className = 'session-chip__dot';
-    chip.appendChild(dot);
-
-    const label = document.createElement('span');
-    label.className = 'session-chip__label';
-    label.textContent = meta.label;
-    chip.appendChild(label);
-
-    const countEl = document.createElement('span');
-    countEl.className = 'session-chip__count';
-    countEl.textContent = count;
-    chip.appendChild(countEl);
-    return chip;
-  }
-
-  function createSessionBadge(statusKey) {
-    const meta = getStatusMeta(statusKey);
-    const badge = document.createElement('span');
-    badge.className = 'session-badge';
-    badge.dataset.variant = meta.variant || 'accent';
-    badge.textContent = meta.label;
-    if (meta.description) {
-      badge.title = meta.description;
-    }
-    return badge;
-  }
-
-  function buildSessionCard(sessionId, session, index, summary) {
-    const card = document.createElement('article');
-    card.className = 'session-card';
-    card.dataset.sessionId = sessionId;
-    card.setAttribute('role', 'listitem');
-
-    const attentionCount = (summary.statusCounts.get('attention') || 0)
-      + (summary.statusCounts.get('rejected') || 0);
-    const completedCount = summary.statusCounts.get('complete') || 0;
-    if (attentionCount > 0) {
-      card.classList.add('session-card--alert');
-    } else if (summary.total > 0 && completedCount === summary.total) {
-      card.classList.add('session-card--complete');
-    }
-
-    const titleText = getSessionDisplayLabel(sessionId, session, index);
-    const header = document.createElement('header');
-    header.className = 'session-card__header';
-
-    const heading = document.createElement('div');
-    heading.className = 'session-card__heading';
-
-    const title = document.createElement('h3');
-    title.className = 'session-card__title';
-    const titleId = `session-card-title-${index}`;
-    title.id = titleId;
-    title.textContent = titleText;
-    card.setAttribute('aria-labelledby', titleId);
-    heading.appendChild(title);
-
-    const started = session && session.createdAt ? formatDateTime(session.createdAt) : null;
-    if (started && started !== '—') {
-      const meta = document.createElement('p');
-      meta.className = 'session-card__meta muted';
-      meta.textContent = `Started ${started}`;
-      heading.appendChild(meta);
-    }
-
-    header.appendChild(heading);
-
-    const count = document.createElement('span');
-    count.className = 'session-card__count';
-    count.textContent = summary.total
-      ? `${summary.total} document${summary.total === 1 ? '' : 's'}`
-      : 'Waiting for files';
-    header.appendChild(count);
-
-    card.appendChild(header);
-
-    const body = document.createElement('div');
-    body.className = 'session-card__body';
-
-    const progress = document.createElement('p');
-    progress.className = 'session-card__progress muted';
-    progress.textContent = summary.total
-      ? `${completedCount} of ${summary.total} processed`
-      : 'Waiting for files';
-    body.appendChild(progress);
-
-    const chips = document.createElement('div');
-    chips.className = 'session-card__chips';
-    chips.setAttribute('role', 'list');
-    chips.setAttribute('aria-label', 'Session status overview');
-
-    const renderedStatuses = new Set();
-    SESSION_STATUS_ORDER.forEach((statusKey) => {
-      const countValue = summary.statusCounts.get(statusKey);
-      if (!countValue) return;
-      renderedStatuses.add(statusKey);
-      chips.appendChild(createSessionChip(statusKey, countValue));
-    });
-    summary.statusCounts.forEach((countValue, statusKey) => {
-      if (renderedStatuses.has(statusKey)) return;
-      chips.appendChild(createSessionChip(statusKey, countValue));
-    });
-    if (chips.childElementCount > 0) {
-      body.appendChild(chips);
-    }
-
-    card.appendChild(body);
-
-    const footer = document.createElement('div');
-    footer.className = 'session-card__footer';
-
-    const detailBtn = document.createElement('button');
-    detailBtn.type = 'button';
-    detailBtn.className = 'session-card__details';
-    detailBtn.dataset.sessionId = sessionId;
-    detailBtn.dataset.sessionLabel = titleText;
-    detailBtn.textContent = summary.noteCount
-      ? `View files (${summary.noteCount} notes)`
-      : 'View files';
-    detailBtn.setAttribute(
-      'aria-label',
-      summary.noteCount
-        ? `${titleText}. View files. ${summary.noteCount} file${summary.noteCount === 1 ? '' : 's'} include notes.`
-        : `${titleText}. View files.`,
-    );
-    detailBtn.addEventListener('click', handleSessionDetailButton);
-    footer.appendChild(detailBtn);
-
-    if (summary.noteCount > 0) {
-      const notes = document.createElement('span');
-      notes.className = 'session-card__notes';
-      notes.textContent = `${summary.noteCount} note${summary.noteCount === 1 ? '' : 's'}`;
-      footer.appendChild(notes);
-    }
-
-    card.appendChild(footer);
-    return card;
-  }
-
-  function handleSessionDetailButton(event) {
-    const button = event.currentTarget;
-    if (!(button && button.dataset)) return;
-    const { sessionId } = button.dataset;
-    if (!sessionId) return;
-    sessionDetailReturnFocus = button;
-    openSessionDetail(sessionId, { label: button.dataset.sessionLabel });
-  }
-
-  function populateSessionDetailModal(sessionId, { label } = {}) {
-    if (!(sessionModal && sessionModalList)) return false;
-    const session = state.sessions.get(sessionId);
-    if (!session) return false;
-
-    const summary = summariseSession(sessionId, session);
-    const entries = Array.from(state.sessions.entries());
-    const index = entries.findIndex(([id]) => id === sessionId);
-    const sessionLabel = label || getSessionDisplayLabel(sessionId, session, index);
-
-    if (sessionModalTitle) {
-      sessionModalTitle.textContent = sessionLabel;
-    }
-
-    if (sessionModalSubtitle) {
-      const started = session.createdAt ? formatDateTime(session.createdAt) : '';
-      const docSummary = summary.total
-        ? `${summary.total} document${summary.total === 1 ? '' : 's'}`
-        : 'No documents yet';
-      sessionModalSubtitle.textContent = started && started !== '—'
-        ? `${docSummary} • Started ${started}`
-        : docSummary;
-    }
-
-    sessionModalList.innerHTML = '';
-
-    if (summary.entries.length === 0) {
-      const empty = document.createElement('li');
-      empty.className = 'session-modal__empty muted';
-      empty.textContent = 'No files uploaded yet.';
-      sessionModalList.appendChild(empty);
-    } else {
-      summary.entries.forEach((entry) => {
-        const item = document.createElement('li');
-        item.className = 'session-modal__item';
-        item.setAttribute('role', 'listitem');
-
-        const name = document.createElement('div');
-        name.className = 'session-modal__name';
-        name.textContent = entry.name || 'Document';
-        item.appendChild(name);
-
-        const status = createSessionBadge(entry.statusKey);
-        status.classList.add('session-modal__status');
-        item.appendChild(status);
-
-        if (entry.message) {
-          const note = document.createElement('p');
-          note.className = 'session-modal__note';
-          note.textContent = entry.message;
-          item.appendChild(note);
-        }
-
-        if (entry.requiresManual && entry.fileId) {
-          item.classList.add('session-modal__item--actionable');
-          const action = document.createElement('button');
-          action.type = 'button';
-          action.className = 'session-modal__cta';
-          action.textContent = 'Review & complete';
-          action.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const manualFile = getManualFileById(entry.fileId);
-            if (!manualFile) {
-              window.alert('Unable to open the manual editor for this document right now.');
-              return;
-            }
-            openManualModal(manualFile, { schema: entry.manualSchema, trigger: action });
-          });
-          item.appendChild(action);
-        }
-
-        sessionModalList.appendChild(item);
-      });
-    }
-
-    sessionModal.dataset.sessionId = sessionId;
-    sessionModal.dataset.sessionLabel = sessionLabel;
-    sessionModal.dataset.noteCount = String(summary.noteCount || 0);
-    return true;
-  }
-
-  function openSessionDetail(sessionId, { label } = {}) {
-    if (!sessionModal) return;
-    const populated = populateSessionDetailModal(sessionId, { label });
-    if (!populated) return;
-    if (!sessionDetailReturnFocus && document.activeElement instanceof HTMLElement) {
-      sessionDetailReturnFocus = document.activeElement;
-    }
-    sessionModal.removeAttribute('hidden');
-    sessionModal.setAttribute('aria-hidden', 'false');
-    if (document.body) {
-      document.body.classList.add('session-modal-open');
-    }
-    if (sessionModalDialog) {
-      sessionModalDialog.focus();
-    }
-    if (!sessionModalKeydownBound) {
-      document.addEventListener('keydown', handleSessionModalKeydown);
-      sessionModalKeydownBound = true;
-    }
-  }
-
-  function closeSessionDetail() {
-    if (!sessionModal) return;
-    if (sessionModal.getAttribute('aria-hidden') === 'true') return;
-    sessionModal.setAttribute('aria-hidden', 'true');
-    sessionModal.setAttribute('hidden', '');
-    sessionModal.dataset.sessionId = '';
-    sessionModal.dataset.sessionLabel = '';
-    sessionModal.dataset.noteCount = '';
-    if (sessionModalList) {
-      sessionModalList.innerHTML = '';
-    }
-    if (document.body) {
-      document.body.classList.remove('session-modal-open');
-    }
-    if (sessionModalKeydownBound) {
-      document.removeEventListener('keydown', handleSessionModalKeydown);
-      sessionModalKeydownBound = false;
-    }
-    if (sessionDetailReturnFocus && typeof sessionDetailReturnFocus.focus === 'function') {
-      sessionDetailReturnFocus.focus();
-    }
-    sessionDetailReturnFocus = null;
-  }
-
-  function refreshSessionDetailModal() {
-    if (!(sessionModal && sessionModal.getAttribute('aria-hidden') === 'false')) return;
-    const sessionId = sessionModal.dataset.sessionId;
-    if (!sessionId) {
-      closeSessionDetail();
-      return;
-    }
-    const populated = populateSessionDetailModal(sessionId, {
-      label: sessionModal.dataset.sessionLabel,
-    });
-    if (!populated) {
-      closeSessionDetail();
-    }
-  }
-
-  function handleSessionModalKeydown(event) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeSessionDetail();
-    }
+  function createLight(label, stateValue) {
+    const light = document.createElement('span');
+    light.className = 'light';
+    light.dataset.state = stateValue;
+    light.setAttribute('role', 'status');
+    light.setAttribute('tabindex', '0');
+    light.setAttribute('aria-label', `${label}: ${LIGHT_LABELS[stateValue] || stateValue}`);
+    return light;
   }
 
   function normaliseFileRecord(sessionId, file) {
@@ -2543,40 +949,15 @@
     } else if (record.message == null) {
       record.message = '';
     }
-    if (file.status) {
-      record.status = file.status;
-    } else if (!record.status) {
-      record.status = 'uploaded';
-    }
-    if (file.reason !== undefined) {
-      record.reason = file.reason;
-    }
-    if (file.catalogueKey) {
-      record.catalogueKey = file.catalogueKey;
-    }
     state.files.set(file.fileId, record);
     return record;
   }
 
   function upsertSession(sessionId) {
     if (!state.sessions.has(sessionId)) {
-      const nextIndex = state.sessions.size + 1;
-      state.sessions.set(sessionId, {
-        files: new Map(),
-        rejected: [],
-        createdAt: Date.now(),
-        displayName: `Upload batch ${nextIndex}`,
-      });
+      state.sessions.set(sessionId, { files: new Map(), rejected: [] });
     }
-    const session = state.sessions.get(sessionId);
-    if (session && !session.createdAt) {
-      session.createdAt = Date.now();
-    }
-    if (session && !session.displayName) {
-      const index = Array.from(state.sessions.keys()).indexOf(sessionId);
-      session.displayName = index >= 0 ? `Upload batch ${index + 1}` : 'Upload batch';
-    }
-    return session;
+    return state.sessions.get(sessionId);
   }
 
   function handleUploadResponse(payload) {
@@ -2607,7 +988,6 @@
     sessionRows.innerHTML = '';
     sessionEmpty.style.display = '';
     sessionEmpty.textContent = message;
-    closeSessionDetail();
     hideProgress();
   }
 
@@ -2657,15 +1037,7 @@
   }
 
   function setupDropzone() {
-    dropzone.addEventListener('click', (event) => {
-      if (!fileInput) return;
-      const target = event.target;
-      if (target === fileInput) return;
-      if (target && typeof target.closest === 'function' && target.closest('input[type="file"]')) {
-        return;
-      }
-      fileInput.click();
-    });
+    dropzone.addEventListener('click', () => fileInput.click());
     dropzone.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
@@ -2939,7 +1311,7 @@
             if (metrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(metrics.ni, currency) });
             if (metrics.pension != null) details.push({ label: 'Pension', value: formatMoney(metrics.pension, currency) });
             if (metrics.studentLoan != null) details.push({ label: 'Student loan', value: formatMoney(metrics.studentLoan, currency) });
-            const fileEntry = {
+            return {
               fileId: file.fileId,
               title: formatDate(payDate) || 'Payslip',
               subtitle: metrics.payFrequency ? `${metrics.payFrequency} payslip` : 'Payslip',
@@ -2955,12 +1327,6 @@
               currency,
               isExpanded: false,
             };
-            cacheManualFile(fileEntry);
-            const record = state.files.get(file.fileId);
-            if (record && fileEntry.raw?.catalogueKey) {
-              record.catalogueKey = fileEntry.raw.catalogueKey;
-            }
-            return fileEntry;
           })
         : [];
       const employerName = employer.name || data?.employer || 'Employer';
@@ -3052,7 +1418,7 @@
           if (closingBalance != null) details.push({ label: 'Closing balance', value: formatMoney(closingBalance, currency) });
           if (metrics.currency) details.push({ label: 'Currency', value: metrics.currency });
           if (accountType) details.push({ label: 'Account type', value: accountType });
-          const fileEntry = {
+          files.push({
             fileId: file.fileId,
             title: accountName || 'Statement',
             subtitle: periodEnd ? `Statement ending ${formatDate(periodEnd)}` : (file.documentDate ? `Statement ${formatDate(file.documentDate)}` : 'Statement'),
@@ -3066,13 +1432,7 @@
             raw: file,
             currency,
             isExpanded: false,
-          };
-          cacheManualFile(fileEntry);
-          const record = state.files.get(file.fileId);
-          if (record && fileEntry.raw?.catalogueKey) {
-            record.catalogueKey = fileEntry.raw.catalogueKey;
-          }
-          files.push(fileEntry);
+          });
         });
       });
       showViewer({
@@ -3343,7 +1703,6 @@
   }
 
   function queueRefresh() {
-    if (unauthorised) return;
     if (!state.timers.tiles) {
       fetchTiles();
       state.timers.tiles = setInterval(fetchTiles, POLL_INTERVAL_TILES);
@@ -3381,13 +1740,6 @@
 
     setupDropzone();
     await fetchFeatureFlags();
-    if (unauthorised) {
-      return;
-    }
-    await ensureManualCatalogue().catch(() => {});
-    if (unauthorised) {
-      return;
-    }
     restoreSessionsFromStorage();
     queueRefresh();
     fetchTiles();
@@ -3407,32 +1759,10 @@
     });
   }
 
-  if (sessionModalClose) {
-    sessionModalClose.addEventListener('click', () => {
-      closeSessionDetail();
-    });
-  }
-
-  if (sessionModal) {
-    sessionModal.addEventListener('click', (event) => {
-      if (event.target === sessionModal) {
-        closeSessionDetail();
-      }
-    });
-  }
-
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
-    if (manualModal && manualModal.classList.contains('is-visible')) {
-      closeManualModal();
-      return;
-    }
     if (jsonModal && jsonModal.classList.contains('is-visible')) {
       hideJsonModal();
-      return;
-    }
-    if (sessionModal && sessionModal.getAttribute('aria-hidden') === 'false') {
-      closeSessionDetail();
       return;
     }
     if (viewerRoot && viewerRoot.getAttribute('aria-hidden') === 'false') {
