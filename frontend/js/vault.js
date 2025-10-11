@@ -114,11 +114,6 @@
   let sessionDetailReturnFocus = null;
   let sessionModalKeydownBound = false;
 
-  const MANUAL_SCHEMA_OPTIONS = [
-    { value: 'payslip', label: 'Payslip' },
-    { value: 'statement', label: 'Statement' },
-  ];
-
   const MANUAL_FIELD_DEFS = {
     payslip: [
       { name: 'payDate', label: 'Pay date', type: 'date' },
@@ -149,6 +144,140 @@
     ],
   };
 
+  const MANUAL_SCHEMA_CONFIG = {
+    payslip: { label: 'Payslip', base: 'payslip', alwaysInclude: true },
+    current_account_statement: {
+      label: 'Current account statement',
+      base: 'statement',
+      alwaysInclude: true,
+    },
+    savings_account_statement: { label: 'Savings account statement', base: 'statement' },
+    isa_statement: { label: 'ISA statement', base: 'statement' },
+    pension_statement: { label: 'Pension contribution statement', base: 'statement' },
+  };
+
+  let manualSchemaOptions = [];
+  let manualSchemaOptionMap = new Map();
+  const manualCatalogueState = { loaded: false, loading: false, catalogue: [], error: null };
+
+  function deriveManualSchemaOptions(catalogue = []) {
+    const availableKeys = new Set();
+    if (Array.isArray(catalogue)) {
+      catalogue.forEach((entry) => {
+        if (entry && entry.key) availableKeys.add(String(entry.key));
+      });
+    }
+
+    const options = [];
+    Object.entries(MANUAL_SCHEMA_CONFIG).forEach(([value, config]) => {
+      const include = config.alwaysInclude || availableKeys.has(value);
+      if (!include) return;
+      const labelFromCatalogue = Array.isArray(catalogue)
+        ? catalogue.find((entry) => entry && entry.key === value)?.label
+        : null;
+      options.push({
+        value,
+        label: labelFromCatalogue || config.label || value,
+        base: config.base || value,
+      });
+    });
+
+    if (!options.length) {
+      options.push({ value: 'payslip', label: 'Payslip', base: 'payslip' });
+      options.push({ value: 'current_account_statement', label: 'Account statement', base: 'statement' });
+    }
+
+    const unique = [];
+    const seen = new Set();
+    options.forEach((option) => {
+      if (seen.has(option.value)) return;
+      seen.add(option.value);
+      unique.push(option);
+    });
+    return unique;
+  }
+
+  function resolveManualBase(schemaKey) {
+    if (!schemaKey) return null;
+    const option = manualSchemaOptionMap.get(schemaKey);
+    if (option) return option.base || schemaKey;
+    const config = MANUAL_SCHEMA_CONFIG[schemaKey];
+    if (config) return config.base || schemaKey;
+    if (MANUAL_FIELD_DEFS[schemaKey]) return schemaKey;
+    return null;
+  }
+
+  function getManualOption(schemaKey) {
+    if (!schemaKey) return null;
+    if (manualSchemaOptionMap.has(schemaKey)) return manualSchemaOptionMap.get(schemaKey);
+    const config = MANUAL_SCHEMA_CONFIG[schemaKey];
+    if (config) {
+      return { value: schemaKey, label: config.label || schemaKey, base: config.base || schemaKey };
+    }
+    if (MANUAL_FIELD_DEFS[schemaKey]) {
+      return { value: schemaKey, label: schemaKey, base: schemaKey };
+    }
+    return null;
+  }
+
+  function findSchemaForViewerType(type) {
+    if (!type) return null;
+    for (const option of manualSchemaOptions) {
+      if (option.value === type || option.base === type) {
+        return option.value;
+      }
+    }
+    return null;
+  }
+
+  function setManualSchemaOptions(options) {
+    const resolved = Array.isArray(options) && options.length ? options : deriveManualSchemaOptions();
+    manualSchemaOptions = resolved;
+    manualSchemaOptionMap = new Map(resolved.map((option) => [option.value, option]));
+
+    if (typeof manualModalState === 'object' && manualModalState) {
+      if (!manualModalState.schema || !manualSchemaOptionMap.has(manualModalState.schema)) {
+        manualModalState.schema = manualSchemaOptions[0]?.value || null;
+      }
+      if (manualModalState.file) {
+        manualSchemaOptions.forEach((option) => {
+          if (!manualModalState.valuesBySchema.has(option.value)) {
+            manualModalState.valuesBySchema.set(option.value, extractManualValues(manualModalState.file, option.value));
+          }
+        });
+      }
+    }
+
+    populateManualSchemaSelect();
+  }
+
+  async function ensureManualCatalogue() {
+    if (manualCatalogueState.loaded || manualCatalogueState.loading) {
+      return manualSchemaOptions;
+    }
+    manualCatalogueState.loading = true;
+    try {
+      const response = await apiFetch('/catalogue');
+      if (!response.ok) {
+        throw new Error('Failed to load document catalogue');
+      }
+      const data = await response.json().catch(() => null);
+      const catalogue = Array.isArray(data?.catalogue) ? data.catalogue : [];
+      manualCatalogueState.catalogue = catalogue;
+      manualCatalogueState.loaded = true;
+      setManualSchemaOptions(deriveManualSchemaOptions(catalogue));
+      return manualSchemaOptions;
+    } catch (error) {
+      manualCatalogueState.error = error;
+      manualCatalogueState.loaded = true;
+      console.warn('Failed to load manual catalogue metadata', error);
+      setManualSchemaOptions(deriveManualSchemaOptions());
+      return manualSchemaOptions;
+    } finally {
+      manualCatalogueState.loading = false;
+    }
+  }
+
   let manualModal = null;
   let manualModalDialog = null;
   let manualModalTitle = null;
@@ -160,7 +289,9 @@
   let manualModalCancel = null;
   let manualModalReturnFocus = null;
   let manualModalStylesInjected = false;
-  const manualModalState = { file: null, schema: 'payslip', valuesBySchema: new Map() };
+  const manualModalState = { file: null, schema: null, valuesBySchema: new Map() };
+  const manualFileCache = new Map();
+  setManualSchemaOptions(deriveManualSchemaOptions());
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
@@ -623,6 +754,51 @@
     if (manualModal) return manualModal;
     injectManualModalStyles();
 
+    const existing = document.getElementById('vault-manual-modal');
+    if (existing) {
+      manualModal = existing;
+      manualModalDialog = existing.querySelector('.vault-manual-modal__dialog');
+      manualModalTitle = existing.querySelector('.vault-manual-modal__title');
+      manualModalForm = existing.querySelector('.vault-manual-modal__form');
+      manualModalSchema = existing.querySelector('[name="manual-schema"]');
+      manualModalFields = existing.querySelector('.vault-manual-modal__grid');
+      manualModalError = existing.querySelector('.vault-manual-modal__error');
+      manualModalSave = existing.querySelector('.vault-manual-modal__save')
+        || manualModalForm?.querySelector('button[type="submit"]');
+      manualModalCancel = existing.querySelector('.vault-manual-modal__cancel');
+
+      const closeBtn = existing.querySelector('.vault-manual-modal__close');
+      existing.addEventListener('click', (event) => {
+        if (event.target === existing) {
+          closeManualModal();
+        }
+      });
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          closeManualModal();
+        });
+      }
+      if (manualModalCancel) {
+        manualModalCancel.addEventListener('click', (event) => {
+          event.preventDefault();
+          closeManualModal();
+        });
+      }
+      if (manualModalForm) {
+        manualModalForm.addEventListener('submit', (event) => {
+          event.preventDefault();
+          submitManualInsight();
+        });
+      }
+      if (manualModalSchema) {
+        manualModalSchema.addEventListener('change', () => {
+          handleManualSchemaChange(manualModalSchema.value);
+        });
+      }
+      populateManualSchemaSelect();
+      return manualModal;
+    }
+
     const modal = document.createElement('div');
     modal.className = 'vault-manual-modal';
     modal.setAttribute('aria-hidden', 'true');
@@ -664,12 +840,6 @@
 
     const schemaSelect = document.createElement('select');
     schemaSelect.name = 'manual-schema';
-    MANUAL_SCHEMA_OPTIONS.forEach((option) => {
-      const opt = document.createElement('option');
-      opt.value = option.value;
-      opt.textContent = option.label;
-      schemaSelect.appendChild(opt);
-    });
     schemaField.append(schemaLabel, schemaSelect);
 
     const fieldsGrid = document.createElement('div');
@@ -689,6 +859,7 @@
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'submit';
+    saveBtn.className = 'vault-manual-modal__save';
     saveBtn.textContent = 'Save changes';
 
     footer.append(cancelBtn, saveBtn);
@@ -728,6 +899,7 @@
     schemaSelect.addEventListener('change', () => {
       handleManualSchemaChange(schemaSelect.value);
     });
+    populateManualSchemaSelect();
 
     return modal;
   }
@@ -747,8 +919,71 @@
     manualModalReturnFocus = null;
   }
 
+  function populateManualSchemaSelect() {
+    if (!manualModalSchema) return;
+    const previousValue = manualModalSchema.value;
+    manualModalSchema.innerHTML = '';
+    manualSchemaOptions.forEach((option) => {
+      const opt = document.createElement('option');
+      opt.value = option.value;
+      opt.textContent = option.label;
+      manualModalSchema.appendChild(opt);
+    });
+    const fallback = manualSchemaOptions[0]?.value || '';
+    let nextValue = manualModalState.schema && manualSchemaOptionMap.has(manualModalState.schema)
+      ? manualModalState.schema
+      : manualSchemaOptionMap.has(previousValue)
+      ? previousValue
+      : fallback;
+    if (nextValue) {
+      manualModalSchema.value = nextValue;
+      manualModalState.schema = nextValue;
+    } else {
+      manualModalSchema.selectedIndex = -1;
+      manualModalState.schema = null;
+    }
+  }
+
+  function getManualFieldDefs(schema) {
+    const base = resolveManualBase(schema);
+    if (!base) return [];
+    return MANUAL_FIELD_DEFS[base] || [];
+  }
+
+  function cacheManualFile(file) {
+    if (!file || !file.fileId) return;
+    manualFileCache.set(file.fileId, file);
+    const record = state.files.get(file.fileId);
+    if (record) {
+      if (file.raw?.catalogueKey) {
+        record.catalogueKey = file.raw.catalogueKey;
+      }
+    }
+  }
+
+  function getManualFileById(fileId) {
+    if (!fileId) return null;
+    if (manualFileCache.has(fileId)) {
+      return manualFileCache.get(fileId);
+    }
+    const record = state.files.get(fileId);
+    if (!record) return null;
+    const fallback = {
+      fileId,
+      title: record.originalName || 'Document',
+      subtitle: '',
+      summary: [],
+      details: [],
+      metrics: {},
+      metadata: {},
+      raw: { metrics: {}, metadata: {}, catalogueKey: record.catalogueKey || null },
+    };
+    manualFileCache.set(fileId, fallback);
+    return fallback;
+  }
+
   function getFieldLabel(schema, name) {
-    const defs = MANUAL_FIELD_DEFS[schema] || [];
+    const defs = getManualFieldDefs(schema);
     const match = defs.find((field) => field.name === name);
     return match ? match.label : name;
   }
@@ -790,7 +1025,8 @@
     const metrics = file?.metrics || {};
     const details = Array.isArray(file?.details) ? file.details : [];
     const values = {};
-    if (schema === 'payslip') {
+    const base = resolveManualBase(schema);
+    if (base === 'payslip') {
       const payDate = metrics.payDate || metrics.documentDate || metrics.documentMonth || file?.raw?.documentDate || null;
       values.payDate = toInputDateValue(payDate);
       values.payFrequency = metrics.payFrequency || getDetailValue(details, 'Pay frequency') || '';
@@ -815,7 +1051,7 @@
       values.ni = formatInputNumber(metrics.ni ?? getDetailValue(details, 'National Insurance'));
       values.pension = formatInputNumber(metrics.pension ?? getDetailValue(details, 'Pension'));
       values.studentLoan = formatInputNumber(metrics.studentLoan ?? getDetailValue(details, 'Student loan'));
-    } else if (schema === 'statement') {
+    } else if (base === 'statement') {
       const currency = metrics.currency || metrics.currencyCode || file.currency || getDetailValue(details, 'Currency') || '';
       const periodStart = metrics.periodStart || metrics.period?.start || metrics.period?.from || metrics.statementPeriod?.start;
       const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.period?.to || metrics.statementPeriod?.end;
@@ -846,7 +1082,7 @@
   function renderManualFields(schema, values = {}) {
     if (!manualModalFields) return;
     manualModalFields.innerHTML = '';
-    const defs = MANUAL_FIELD_DEFS[schema] || [];
+    const defs = getManualFieldDefs(schema);
     defs.forEach((field) => {
       const wrapper = document.createElement('div');
       wrapper.className = 'vault-manual-modal__field';
@@ -888,27 +1124,32 @@
 
   function initialiseManualValues(file) {
     manualModalState.valuesBySchema.clear();
-    MANUAL_SCHEMA_OPTIONS.forEach((option) => {
+    manualSchemaOptions.forEach((option) => {
       manualModalState.valuesBySchema.set(option.value, extractManualValues(file, option.value));
     });
   }
 
   function handleManualSchemaChange(nextSchema) {
     if (!manualModalSchema) return;
-    const schemaKey = MANUAL_FIELD_DEFS[nextSchema] ? nextSchema : MANUAL_SCHEMA_OPTIONS[0].value;
+    const fallback = manualSchemaOptions[0]?.value || null;
+    const schemaKey = manualSchemaOptionMap.has(nextSchema) ? nextSchema : fallback;
+    if (!schemaKey) return;
     if (manualModalState.schema && manualModalState.schema !== schemaKey) {
       const currentValues = readManualInputs(manualModalState.schema);
       manualModalState.valuesBySchema.set(manualModalState.schema, currentValues);
     }
     manualModalState.schema = schemaKey;
     manualModalSchema.value = schemaKey;
+    if (!manualModalState.valuesBySchema.has(schemaKey) && manualModalState.file) {
+      manualModalState.valuesBySchema.set(schemaKey, extractManualValues(manualModalState.file, schemaKey));
+    }
     const values = manualModalState.valuesBySchema.get(schemaKey) || {};
     renderManualFields(schemaKey, values);
   }
 
   function readManualInputs(schema) {
     const values = {};
-    const defs = MANUAL_FIELD_DEFS[schema] || [];
+    const defs = getManualFieldDefs(schema);
     defs.forEach((field) => {
       const input = manualModalForm?.elements[`manual-${field.name}`];
       if (!input) {
@@ -980,7 +1221,8 @@
   }
 
   function transformManualValues(schema, rawValues, file) {
-    if (!schema || !MANUAL_FIELD_DEFS[schema]) {
+    const base = resolveManualBase(schema);
+    if (!schema || !base || !MANUAL_FIELD_DEFS[base]) {
       return { error: 'Unsupported document schema selected.' };
     }
     const cleanedRaw = {};
@@ -989,7 +1231,7 @@
     const metadataPatch = {};
     const existingMetrics = { ...(file?.metrics || {}) };
 
-    if (schema === 'payslip') {
+    if (base === 'payslip') {
       const payDate = readDateField(schema, rawValues, 'payDate', cleanedRaw, errors);
       if (payDate.shouldApply) {
         patch.payDate = payDate.value;
@@ -1118,7 +1360,12 @@
       const title = formatDate(payDateValue) || file.title || 'Payslip';
 
       return {
-        payload: { metrics: pruneUndefined(patch), metadata: pruneUndefined(metadataPatch) },
+        payload: {
+          schema,
+          baseSchema: base,
+          metrics: pruneUndefined(patch),
+          metadata: pruneUndefined(metadataPatch),
+        },
         display: {
           metrics: mergedMetrics,
           metadata: metadataPatch,
@@ -1132,7 +1379,7 @@
       };
     }
 
-    if (schema === 'statement') {
+    if (base === 'statement') {
       const accountName = readStringField(schema, rawValues, 'accountName', cleanedRaw);
       if (accountName.shouldApply) {
         metadataPatch.accountName = accountName.value;
@@ -1267,7 +1514,12 @@
       const title = accountNameValue || file.title || 'Statement';
 
       return {
-        payload: { metrics: pruneUndefined(patch), metadata: pruneUndefined(metadataPatch) },
+        payload: {
+          schema,
+          baseSchema: base,
+          metrics: pruneUndefined(patch),
+          metadata: pruneUndefined(metadataPatch),
+        },
         display: {
           metrics: mergedMetrics,
           metadata: metadataPatch,
@@ -1286,17 +1538,24 @@
 
   function openManualModal(file, { schema, trigger } = {}) {
     if (!file) return;
+    ensureManualCatalogue().catch(() => {});
     const modal = ensureManualModal();
     if (!modal || !manualModalSchema) return;
-    manualModalState.file = file;
-    const initialSchema = schema && MANUAL_FIELD_DEFS[schema] ? schema : state.viewer.type || MANUAL_SCHEMA_OPTIONS[0].value;
-    manualModalState.schema = MANUAL_FIELD_DEFS[initialSchema] ? initialSchema : MANUAL_SCHEMA_OPTIONS[0].value;
+    cacheManualFile(file);
+    manualModalState.file = getManualFileById(file.fileId) || file;
+    const fallbackSchema = manualSchemaOptions[0]?.value || null;
+    const requestedSchema = schema && manualSchemaOptionMap.has(schema) ? schema : null;
+    const recordSchema = manualModalState.file?.raw?.catalogueKey && manualSchemaOptionMap.has(manualModalState.file.raw.catalogueKey)
+      ? manualModalState.file.raw.catalogueKey
+      : null;
+    const viewerSchema = findSchemaForViewerType(state.viewer.type);
+    const resolvedSchema = requestedSchema || recordSchema || manualModalState.schema || viewerSchema || fallbackSchema;
     manualModalReturnFocus = trigger || null;
-    manualModalTitle.textContent = `Edit document details — ${file.title || 'Document'}`;
-    initialiseManualValues(file);
-    manualModalSchema.value = manualModalState.schema;
-    const values = manualModalState.valuesBySchema.get(manualModalState.schema) || {};
-    renderManualFields(manualModalState.schema, values);
+    if (manualModalTitle) {
+      manualModalTitle.textContent = `Edit document details — ${file.title || 'Document'}`;
+    }
+    initialiseManualValues(manualModalState.file);
+    handleManualSchemaChange(resolvedSchema);
     if (manualModalError) {
       manualModalError.hidden = true;
       manualModalError.textContent = '';
@@ -1308,7 +1567,11 @@
 
   async function submitManualInsight() {
     if (!manualModalState.file || !manualModalSchema) return;
-    const schema = manualModalSchema.value && MANUAL_FIELD_DEFS[manualModalSchema.value] ? manualModalSchema.value : MANUAL_SCHEMA_OPTIONS[0].value;
+    const fallbackSchema = manualSchemaOptions[0]?.value || null;
+    const schema = manualModalSchema.value && manualSchemaOptionMap.has(manualModalSchema.value)
+      ? manualModalSchema.value
+      : fallbackSchema;
+    if (!schema) return;
     const rawValues = readManualInputs(schema);
     const transform = transformManualValues(schema, rawValues, manualModalState.file);
     if (transform?.error) {
@@ -1323,8 +1586,8 @@
     manualModalState.valuesBySchema.set(schema, transform.rawValues || rawValues);
 
     const payload = {
-      fileId: manualModalState.file.fileId,
       schema,
+      baseSchema: transform.payload.baseSchema || resolveManualBase(schema) || schema,
       metrics: transform.payload.metrics || {},
       metadata: transform.payload.metadata || {},
     };
@@ -1342,7 +1605,7 @@
     if (manualModalSchema) manualModalSchema.disabled = true;
 
     try {
-      const response = await apiFetch('/manual-insights', {
+      const response = await apiFetch(`/files/${encodeURIComponent(manualModalState.file.fileId)}/manual-insights`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1359,12 +1622,35 @@
         const text = await safeJson(response);
         throw new Error(text?.error || 'Unable to save manual insight');
       }
-      await response.json().catch(() => null);
+      const data = await response.json().catch(() => ({}));
+      const appliedCatalogueKey = data?.catalogueKey || schema;
       applyManualUpdateToViewerFile(manualModalState.file, schema, transform.display);
+      manualModalState.file.status = 'done';
+      manualModalState.file.message = '';
+      manualModalState.file.reason = null;
+      manualModalState.file.raw = manualModalState.file.raw || {};
+      manualModalState.file.raw.catalogueKey = appliedCatalogueKey;
+      manualModalState.file.catalogueKey = appliedCatalogueKey;
+      cacheManualFile(manualModalState.file);
+      const record = state.files.get(manualModalState.file.fileId);
+      if (record) {
+        record.status = 'done';
+        record.message = '';
+        record.reason = null;
+        record.processing = 'green';
+        record.upload = 'green';
+        record.catalogueKey = appliedCatalogueKey;
+        const session = state.sessions.get(record.sessionId);
+        if (session) {
+          session.files.set(record.fileId, record);
+        }
+      }
       renderViewerFiles();
       if (manualModalState.file && state.viewer.selectedFileId === manualModalState.file.fileId) {
         renderViewerSelection();
       }
+      renderSessionPanel();
+      queueRefresh();
       closeManualModal();
     } catch (error) {
       console.error('Failed to persist manual insight', error);
@@ -1399,6 +1685,8 @@
     file.subtitle = display.subtitle || file.subtitle;
     file.summary = Array.isArray(display.summary) ? display.summary : file.summary;
     file.details = Array.isArray(display.details) ? display.details : file.details;
+    file.catalogueKey = file.raw?.catalogueKey || file.catalogueKey;
+    cacheManualFile(file);
   }
 
   async function deleteViewerFile(fileId) {
@@ -1631,6 +1919,9 @@
             upload: file.upload,
             processing: file.processing,
             message: file.message || '',
+            status: file.status || null,
+            reason: file.reason || null,
+            catalogueKey: file.catalogueKey || null,
           })),
           rejected: Array.isArray(session.rejected)
             ? session.rejected.map((entry) => ({ originalName: entry.originalName, reason: entry.reason }))
@@ -1672,6 +1963,9 @@
               upload: file.upload || 'amber',
               processing: file.processing || 'red',
               message: file.message || '',
+              status: file.status || null,
+              reason: file.reason || null,
+              catalogueKey: file.catalogueKey || null,
             });
             session.files.set(file.fileId, record);
           });
@@ -1813,6 +2107,11 @@
 
   function deriveFileStatus(file) {
     if (!file) return 'uploading';
+    const explicitStatus = typeof file.status === 'string' ? file.status.toLowerCase() : '';
+    if (explicitStatus === 'done' || explicitStatus === 'complete') return 'complete';
+    if (explicitStatus === 'rejected') return 'rejected';
+    if (explicitStatus === 'processing') return 'processing';
+    if (explicitStatus === 'attention') return 'attention';
     const message = typeof file.message === 'string' ? file.message.trim() : '';
     if (file.processing === 'green') return 'complete';
     if (file.processing === 'amber') return 'processing';
@@ -1822,19 +2121,73 @@
     return 'uploading';
   }
 
+  function isManualReviewMessage(message) {
+    if (!message) return false;
+    const text = String(message).toLowerCase();
+    return (
+      text.includes('low confidence')
+      || text.includes('manual review')
+      || text.includes('manual entry')
+      || text.includes('unable to extract')
+      || text.includes('could not extract')
+      || text.includes('needs review')
+      || text.includes('confidence below')
+    );
+  }
+
+  function requiresManualReview(record) {
+    if (!record) return false;
+    const status = typeof record.status === 'string' ? record.status.toLowerCase() : '';
+    if (status === 'rejected') return true;
+    if (isManualReviewMessage(record.message)) return true;
+    if (isManualReviewMessage(record.reason)) return true;
+    return false;
+  }
+
+  function guessManualSchemaForRecord(record) {
+    if (!record) return manualSchemaOptions[0]?.value || null;
+    if (record.catalogueKey && manualSchemaOptionMap.has(record.catalogueKey)) {
+      return record.catalogueKey;
+    }
+    const name = String(record.originalName || '').toLowerCase();
+    const message = String(record.message || record.reason || '').toLowerCase();
+    const payslipHint = name.includes('payslip') || message.includes('payslip') || message.includes('pay slip');
+    if (payslipHint) {
+      const option = manualSchemaOptions.find((item) => item.base === 'payslip');
+      if (option) return option.value;
+    }
+    const statementHint = ['statement', 'account', 'bank', 'transaction'].some((token) =>
+      name.includes(token) || message.includes(token)
+    );
+    if (statementHint) {
+      const option = manualSchemaOptions.find((item) => item.base === 'statement');
+      if (option) return option.value;
+    }
+    return manualSchemaOptions[0]?.value || null;
+  }
+
   function summariseSession(sessionId, session) {
     const summary = { entries: [], statusCounts: new Map(), noteCount: 0, total: 0 };
     if (!session) return summary;
     for (const file of session.files.values()) {
       const statusKey = deriveFileStatus(file);
-      const message = typeof file.message === 'string' ? file.message.trim() : '';
+      const reasonText = typeof file.reason === 'string' ? file.reason.trim() : '';
+      let message = typeof file.message === 'string' ? file.message.trim() : '';
+      if (!message && statusKey === 'rejected') {
+        message = reasonText || 'Manual review required';
+      }
       if (message) summary.noteCount += 1;
+      const needsManual = requiresManualReview(file);
       summary.entries.push({
         type: 'file',
         id: file.fileId,
         name: file.originalName || 'Document',
         statusKey,
         message,
+        fileId: file.fileId,
+        status: file.status || null,
+        requiresManual: needsManual,
+        manualSchema: needsManual ? guessManualSchemaForRecord(file) : null,
       });
       summary.statusCounts.set(statusKey, (summary.statusCounts.get(statusKey) || 0) + 1);
     }
@@ -2068,6 +2421,25 @@
           item.appendChild(note);
         }
 
+        if (entry.requiresManual && entry.fileId) {
+          item.classList.add('session-modal__item--actionable');
+          const action = document.createElement('button');
+          action.type = 'button';
+          action.className = 'session-modal__cta';
+          action.textContent = 'Review & complete';
+          action.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const manualFile = getManualFileById(entry.fileId);
+            if (!manualFile) {
+              window.alert('Unable to open the manual editor for this document right now.');
+              return;
+            }
+            openManualModal(manualFile, { schema: entry.manualSchema, trigger: action });
+          });
+          item.appendChild(action);
+        }
+
         sessionModalList.appendChild(item);
       });
     }
@@ -2170,6 +2542,17 @@
       record.message = file.message;
     } else if (record.message == null) {
       record.message = '';
+    }
+    if (file.status) {
+      record.status = file.status;
+    } else if (!record.status) {
+      record.status = 'uploaded';
+    }
+    if (file.reason !== undefined) {
+      record.reason = file.reason;
+    }
+    if (file.catalogueKey) {
+      record.catalogueKey = file.catalogueKey;
     }
     state.files.set(file.fileId, record);
     return record;
@@ -2548,7 +2931,7 @@
             if (metrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(metrics.ni, currency) });
             if (metrics.pension != null) details.push({ label: 'Pension', value: formatMoney(metrics.pension, currency) });
             if (metrics.studentLoan != null) details.push({ label: 'Student loan', value: formatMoney(metrics.studentLoan, currency) });
-            return {
+            const fileEntry = {
               fileId: file.fileId,
               title: formatDate(payDate) || 'Payslip',
               subtitle: metrics.payFrequency ? `${metrics.payFrequency} payslip` : 'Payslip',
@@ -2564,6 +2947,12 @@
               currency,
               isExpanded: false,
             };
+            cacheManualFile(fileEntry);
+            const record = state.files.get(file.fileId);
+            if (record && fileEntry.raw?.catalogueKey) {
+              record.catalogueKey = fileEntry.raw.catalogueKey;
+            }
+            return fileEntry;
           })
         : [];
       const employerName = employer.name || data?.employer || 'Employer';
@@ -2655,7 +3044,7 @@
           if (closingBalance != null) details.push({ label: 'Closing balance', value: formatMoney(closingBalance, currency) });
           if (metrics.currency) details.push({ label: 'Currency', value: metrics.currency });
           if (accountType) details.push({ label: 'Account type', value: accountType });
-          files.push({
+          const fileEntry = {
             fileId: file.fileId,
             title: accountName || 'Statement',
             subtitle: periodEnd ? `Statement ending ${formatDate(periodEnd)}` : (file.documentDate ? `Statement ${formatDate(file.documentDate)}` : 'Statement'),
@@ -2669,7 +3058,13 @@
             raw: file,
             currency,
             isExpanded: false,
-          });
+          };
+          cacheManualFile(fileEntry);
+          const record = state.files.get(file.fileId);
+          if (record && fileEntry.raw?.catalogueKey) {
+            record.catalogueKey = fileEntry.raw.catalogueKey;
+          }
+          files.push(fileEntry);
         });
       });
       showViewer({
@@ -2978,6 +3373,10 @@
 
     setupDropzone();
     await fetchFeatureFlags();
+    if (unauthorised) {
+      return;
+    }
+    await ensureManualCatalogue().catch(() => {});
     if (unauthorised) {
       return;
     }

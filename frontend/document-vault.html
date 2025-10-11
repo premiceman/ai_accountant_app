@@ -505,6 +505,34 @@
       white-space: pre-wrap;
     }
 
+    .session-modal__item--actionable {
+      border-color: rgba(103, 89, 255, 0.25);
+      background: rgba(103, 89, 255, 0.06);
+    }
+
+    .session-modal__cta {
+      align-self: flex-start;
+      border: none;
+      border-radius: 999px;
+      background: var(--vault-accent);
+      color: #fff;
+      padding: 6px 16px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .session-modal__cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(103, 89, 255, 0.25);
+    }
+
+    .session-modal__cta:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(103, 89, 255, 0.35);
+    }
+
     .session-modal__empty {
       padding: 12px;
       border-radius: 12px;
@@ -1288,6 +1316,31 @@
       </header>
       <div class="session-modal__body">
         <ul class="session-modal__list" id="session-detail-list" role="list"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="vault-manual-modal" id="vault-manual-modal" aria-hidden="true" hidden>
+    <div class="vault-manual-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="vault-manual-modal-title" tabindex="-1">
+      <header class="vault-manual-modal__header">
+        <h2 class="vault-manual-modal__title" id="vault-manual-modal-title">Edit document details</h2>
+        <button type="button" class="vault-manual-modal__close" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </header>
+      <div class="vault-manual-modal__body">
+        <form class="vault-manual-modal__form">
+          <div class="vault-manual-modal__schema">
+            <label for="vault-manual-schema">Document type</label>
+            <select id="vault-manual-schema" name="manual-schema"></select>
+          </div>
+          <div class="vault-manual-modal__grid"></div>
+          <div class="vault-manual-modal__error" role="alert" hidden></div>
+          <div class="vault-manual-modal__footer">
+            <button type="button" class="vault-manual-modal__cancel">Cancel</button>
+            <button type="submit" class="vault-manual-modal__save">Save changes</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
