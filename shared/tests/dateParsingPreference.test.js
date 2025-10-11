@@ -89,6 +89,7 @@ async function runScenario(preference) {
   const expectedPeriodEnd = dateParsing.parseDateString('04/05/2024');
   const expectedStatementStart = dateParsing.parseDateString('04/05/2024');
   const expectedStatementEnd = dateParsing.parseDateString('06/05/2024');
+  const textualDate = dateParsing.parseDateString('30TH September 2025');
 
   const payslip = await payslipModule.analysePayslip(
     'Pay Date: 04/05/2024\nPeriod Start: 02/05/2024\nPeriod End: 04/05/2024\nGross Pay £1200\nNet Pay £900'
@@ -103,6 +104,7 @@ async function runScenario(preference) {
   assert.equal(statement.metadata.period.start, expectedStatementStart);
   assert.equal(statement.metadata.period.end, expectedStatementEnd);
   assert.equal(statement.transactions[0].date, expectedStatementEnd);
+  assert.equal(textualDate, '2025-09-30');
 }
 
 async function run() {
