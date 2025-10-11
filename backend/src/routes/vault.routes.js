@@ -43,6 +43,7 @@ const {
 } = require('../services/documents/catalogue');
 const { analyseDocument } = require('../services/documents/ingest');
 const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
+const { enqueueDocumentParse } = require('../lib/queue');
 
 const REQUIRED_KEYS = getKeysByCategory('required');
 const HELPFUL_KEYS = getKeysByCategory('helpful');
@@ -793,10 +794,13 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     : colId;
 
   const uploaded = [];
+  const useNewParser = process.env.PARSER_ENGINE === 'v2';
   const analyses = [];
   await setInsightsProcessing(u.id, normalizedCatalogueKey, {
     active: true,
-    message: `Analysing ${entryForCatalogue?.label || 'document'}…`,
+    message: useNewParser
+      ? `Queued ${entryForCatalogue?.label || 'document'} for parsing…`
+      : `Analysing ${entryForCatalogue?.label || 'document'}…`,
   });
   try {
     for (const f of files) {
@@ -806,15 +810,18 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         return res.status(400).json({ error: 'Only PDF files are allowed' });
       }
 
-      const analysis = await analyseDocument(
-        entryForCatalogue,
-        f.buffer,
-        f.originalname || 'document.pdf',
-        { user: userContext }
-      );
-      if (!analysis.valid) {
-        await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
-        return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
+      let analysis = null;
+      if (!useNewParser) {
+        analysis = await analyseDocument(
+          entryForCatalogue,
+          f.buffer,
+          f.originalname || 'document.pdf',
+          { user: userContext }
+        );
+        if (!analysis.valid) {
+          await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
+          return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
+        }
       }
 
       const date = dayjs().format('YYYYMMDD');
@@ -829,8 +836,10 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       const id = keyToFileId(key);
       await setInsightsProcessing(u.id, normalizedCatalogueKey, {
         active: true,
-        message: `Extracting insights from ${safeBase}…`,
-        step: 'analyse',
+        message: useNewParser
+          ? `Queued ${safeBase} for parsing engine…`
+          : `Extracting insights from ${safeBase}…`,
+        step: useNewParser ? 'queued' : 'analyse',
         fileId: id,
         fileName: safeBase,
       });
@@ -843,29 +852,50 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         downloadUrl: `/api/vault/files/${id}/download`,
         catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
       });
-      analyses.push({
-        fileId: id,
-        insights: analysis.insights,
-        fileName: safeBase,
-        uploadedAt: new Date(),
-      });
+      if (!useNewParser && analysis) {
+        analyses.push({
+          fileId: id,
+          insights: analysis.insights,
+          fileName: safeBase,
+          uploadedAt: new Date(),
+        });
+      }
     }
     if (hasValidCatalogueKey) {
       await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, storageCollectionId);
     }
-    for (const item of analyses) {
-      await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
-        id: item.fileId,
-        name: item.fileName,
-        uploadedAt: item.uploadedAt,
+    if (useNewParser) {
+      await Promise.all(
+        uploaded.map((item) =>
+          enqueueDocumentParse({
+            userId: u.id,
+            fileId: item.id,
+            docType: normalizedCatalogueKey,
+          })
+        )
+      );
+      await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+        active: true,
+        message: `${entryForCatalogue?.label || 'Document'} queued for new parsing engine`,
+        step: 'queued',
+        fileId: uploaded[uploaded.length - 1]?.id || null,
+        fileName: uploaded[uploaded.length - 1]?.name || null,
+      });
+    } else {
+      for (const item of analyses) {
+        await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
+          id: item.fileId,
+          name: item.fileName,
+          uploadedAt: item.uploadedAt,
+        });
+      }
+      await setInsightsProcessing(u.id, normalizedCatalogueKey, {
+        active: false,
+        message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
+        fileId: analyses[analyses.length - 1]?.fileId || null,
+        fileName: analyses[analyses.length - 1]?.fileName || null,
       });
     }
-    await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-      active: false,
-      message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
-      fileId: analyses[analyses.length - 1]?.fileId || null,
-      fileName: analyses[analyses.length - 1]?.fileName || null,
-    });
     res.status(201).json({ uploaded });
   } catch (err) {
     await setInsightsProcessing(u.id, normalizedCatalogueKey, {
