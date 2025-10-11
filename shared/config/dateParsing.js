@@ -11,9 +11,21 @@ function getDateParsePreference() {
 }
 
 const MONTHS = new Map([
-  ['JAN', '01'], ['FEB', '02'], ['MAR', '03'], ['APR', '04'], ['MAY', '05'], ['JUN', '06'],
-  ['JUL', '07'], ['AUG', '08'], ['SEP', '09'], ['SEPT', '09'], ['OCT', '10'], ['NOV', '11'], ['DEC', '12'],
+  ['JAN', '01'], ['JANUARY', '01'],
+  ['FEB', '02'], ['FEBRUARY', '02'],
+  ['MAR', '03'], ['MARCH', '03'],
+  ['APR', '04'], ['APRIL', '04'],
+  ['MAY', '05'],
+  ['JUN', '06'], ['JUNE', '06'],
+  ['JUL', '07'], ['JULY', '07'],
+  ['AUG', '08'], ['AUGUST', '08'],
+  ['SEP', '09'], ['SEPT', '09'], ['SEPTEMBER', '09'],
+  ['OCT', '10'], ['OCTOBER', '10'],
+  ['NOV', '11'], ['NOVEMBER', '11'],
+  ['DEC', '12'], ['DECEMBER', '12'],
 ]);
+
+const DEFAULT_MONTH_YEAR_FALLBACK_DAY = '01';
 
 function normaliseYear(token) {
   if (!token) return null;
@@ -77,44 +89,126 @@ function parseNumericDate(tokens, preference) {
   return buildIso(year, month, day);
 }
 
-function parseTextualDate(parts) {
+function parseTextualDate(parts, options = {}) {
   const cleaned = parts.map((token) => token.replace(/(st|nd|rd|th)$/i, ''));
-  if (cleaned.length < 2 || cleaned.length > 3) return null;
+  if (cleaned.length < 2 || cleaned.length > 3) {
+    return options.captureMetadata ? { iso: null, metadata: { reason: 'unexpected_token_count' } } : null;
+  }
   const upperParts = cleaned.map((token) => token.toUpperCase());
-  let monthIndex = upperParts.findIndex((token) => MONTHS.has(token));
-  if (monthIndex === -1) return null;
+  const monthIndex = upperParts.findIndex((token) => MONTHS.has(token));
+  if (monthIndex === -1) {
+    return options.captureMetadata ? { iso: null, metadata: { reason: 'missing_month' } } : null;
+  }
   const month = MONTHS.get(upperParts[monthIndex]);
   const remaining = cleaned.filter((_, idx) => idx !== monthIndex);
-  if (remaining.length < 1) return null;
-  const dayToken = remaining.find((token) => /\d/.test(token));
+  if (remaining.length < 1) {
+    return options.captureMetadata ? { iso: null, metadata: { reason: 'missing_additional_tokens' } } : null;
+  }
+
+  const dayToken = remaining.find((token) => /^\d{1,2}$/.test(token) && isValidDay(token));
   const yearToken = remaining.find((token) => /^\d{2,4}$/.test(token) && token !== dayToken);
-  if (!dayToken) return null;
-  const day = Number.parseInt(dayToken, 10);
   const year = normaliseYear(yearToken || null);
-  if (!year) return null;
-  return buildIso(year, month, day);
+  if (!year) {
+    return options.captureMetadata ? { iso: null, metadata: { reason: 'invalid_year' } } : null;
+  }
+
+  const captureMetadata = Boolean(options.captureMetadata);
+  const metadata = captureMetadata ? { source: 'textual', monthYear: { month, year } } : null;
+
+  if (!dayToken) {
+    const fallbackDayRaw = options.monthYearFallbackDay;
+    if (fallbackDayRaw != null) {
+      const fallbackDay = String(fallbackDayRaw).padStart(2, '0');
+      const iso = buildIso(year, month, fallbackDay);
+      if (captureMetadata) {
+        metadata.monthYear.inferredDay = fallbackDay;
+        metadata.monthYear.inference = 'fallback';
+        if (!iso) {
+          metadata.monthYear.invalidFallbackDay = true;
+        }
+      }
+      if (iso) {
+        return captureMetadata ? { iso, metadata } : iso;
+      }
+      return captureMetadata ? { iso: null, metadata } : null;
+    }
+
+    if (captureMetadata) {
+      metadata.monthYear.missingDay = true;
+    }
+    return captureMetadata ? { iso: null, metadata } : null;
+  }
+
+  const day = Number.parseInt(dayToken, 10);
+  const iso = buildIso(year, month, day);
+  if (captureMetadata) {
+    metadata.monthYear.day = String(day).padStart(2, '0');
+    if (!iso) {
+      metadata.invalid = true;
+    }
+    return { iso, metadata };
+  }
+  return iso;
 }
 
-function parseDateString(value, preference = getDateParsePreference()) {
+function parseDateString(value, preferenceOrOptions = getDateParsePreference(), maybeOptions = undefined) {
   if (value == null) return null;
   const raw = String(value).trim();
   if (!raw) return null;
   const normalised = raw.replace(/[,]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let preference = getDateParsePreference();
+  let options = {};
+
+  if (typeof preferenceOrOptions === 'string') {
+    preference = preferenceOrOptions;
+    options = maybeOptions || {};
+  } else if (preferenceOrOptions && typeof preferenceOrOptions === 'object') {
+    options = preferenceOrOptions;
+    if (typeof options.preference === 'string') {
+      preference = options.preference;
+    }
+  } else if (preferenceOrOptions == null) {
+    options = maybeOptions || {};
+  }
+
+  const captureMetadata = Boolean(options.returnMetadata);
+  const baseMetadata = captureMetadata ? { preference } : null;
+  const textualOptions = {
+    captureMetadata,
+    monthYearFallbackDay:
+      options.monthYearFallbackDay === undefined ? DEFAULT_MONTH_YEAR_FALLBACK_DAY : options.monthYearFallbackDay,
+  };
   const isoMatch = normalised.match(/^(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})$/);
   if (isoMatch) {
-    return buildIso(isoMatch[1], isoMatch[2], isoMatch[3]);
+    const iso = buildIso(isoMatch[1], isoMatch[2], isoMatch[3]);
+    if (captureMetadata) {
+      return { iso, metadata: { ...baseMetadata, format: 'iso' } };
+    }
+    return iso;
   }
   const numericMatch = normalised.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/);
   if (numericMatch) {
-    return parseNumericDate(numericMatch.slice(1), preference);
+    const iso = parseNumericDate(numericMatch.slice(1), preference);
+    if (captureMetadata) {
+      return { iso, metadata: { ...baseMetadata, format: 'numeric' } };
+    }
+    return iso;
   }
   const tokens = normalised.split(' ');
-  const textual = parseTextualDate(tokens);
+  const textual = parseTextualDate(tokens, textualOptions);
+  if (captureMetadata) {
+    if (!textual) {
+      return { iso: null, metadata: { ...baseMetadata, format: 'textual' } };
+    }
+    const metadata = { ...baseMetadata, ...(textual.metadata || {}), format: 'textual' };
+    return { iso: textual.iso, metadata };
+  }
   if (textual) return textual;
   return null;
 }
 
 module.exports = {
   getDateParsePreference,
+  DEFAULT_MONTH_YEAR_FALLBACK_DAY,
   parseDateString,
 };
