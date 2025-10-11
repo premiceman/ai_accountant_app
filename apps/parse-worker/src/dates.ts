@@ -1,6 +1,13 @@
 import * as chrono from 'chrono-node';
 import { chunkLines, clamp, formatMonthYear } from './utils';
 
+interface ChronoParseResult {
+  text: string;
+  start?: {
+    date(): Date | null;
+  };
+}
+
 interface DateCandidate {
   normalized: string;
   raw: string;
@@ -171,9 +178,9 @@ function collectRegex(line: string, lineIndex: number, tags: Set<AnchorTag>): Da
 
 function collectChrono(line: string, lineIndex: number, tags: Set<AnchorTag>): DateCandidate[] {
   if (tags.size === 0) return [];
-  const parsed = chrono.parse(line, new Date(), { forwardDate: true });
+  const parsed = chrono.parse(line, new Date(), { forwardDate: true }) as ChronoParseResult[];
   return parsed
-    .map((result) => {
+    .map((result: ChronoParseResult) => {
       const date = result.start?.date();
       if (!date) return null;
       return buildCandidate({

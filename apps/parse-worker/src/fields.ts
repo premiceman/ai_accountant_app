@@ -39,7 +39,7 @@ function validateRules(rules: unknown): UserRuleSet | null {
     console.warn('[parse-worker] invalid user rules', result.error.issues);
     return null;
   }
-  return result.data;
+  return result.data as UserRuleSet;
 }
 
 function createCaseInsensitiveRegex(pattern: string): RegExp {
