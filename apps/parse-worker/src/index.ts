@@ -1,143 +1,90 @@
-import 'dotenv/config';
-import { Worker, QueueEvents, Job } from 'bullmq';
-import mongoose from 'mongoose';
-import crypto from 'node:crypto';
-import { Types } from 'mongoose';
-import logger from './lib/logger';
-import getRedis from './lib/redis';
-import connectMongo from './lib/mongo';
-import { loadOverrides, applyOverrides } from './lib/overrides';
-import { extractText } from './lib/extractor/text';
-import routeExtraction from './lib/extractor/router';
-import { validatePayslipMetrics, ValidationError } from './lib/types';
-import { DocumentInsights } from './lib/models';
+import Redis from 'ioredis';
+import { handleJobFailure, processParseJob, shouldSkipJob, writeResult } from './processor';
+import { ParseJob } from './types';
+import { sleep } from './utils';
 
-const queueName = process.env.DOC_INSIGHTS_QUEUE || 'doc-insights';
-const prefix = process.env.BULLMQ_PREFIX || 'ai_accountant';
-const concurrency = Number.parseInt(process.env.WORKER_CONCURRENCY || '5', 10);
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-function mmYYYYToDate(value?: string): Date | null {
-  if (!value) return null;
-  const [month, year] = value.split('/');
-  if (!month || !year) return null;
-  return new Date(Date.UTC(Number.parseInt(year, 10), Number.parseInt(month, 10) - 1, 1));
-}
+class ParseWorker {
+  private redis: Redis;
+  private running = false;
 
-function computeContentHash(payload: unknown): string {
-  const hash = crypto.createHash('sha256');
-  hash.update(JSON.stringify(payload));
-  return hash.digest('hex');
-}
-
-async function processJob(job: Job) {
-  const { userId, fileId, docType, text } = job.data || {};
-  if (!userId || !fileId || !docType) {
-    throw new Error('Job payload missing userId, fileId or docType');
+  constructor(private readonly queueName: string) {
+    this.redis = new Redis(REDIS_URL, { lazyConnect: false });
+    this.redis.on('error', (err) => {
+      console.error('[parse-worker] redis error', err);
+    });
   }
 
-  await connectMongo();
-  const { text: resolvedText } = await extractText({ fileId, text });
+  async start() {
+    this.running = true;
+    console.log('[parse-worker] starting worker');
+    while (this.running) {
+      try {
+        const result = await this.redis.brpop(this.queueName, 0);
+        if (!result) continue;
+        const [, rawJob] = result;
+        let job: ParseJob;
+        try {
+          job = JSON.parse(rawJob) as ParseJob;
+        } catch (err) {
+          console.error('[parse-worker] failed to parse job payload', rawJob, err);
+          continue;
+        }
 
-  const overrides = await loadOverrides(String(userId), String(docType));
-  const overrideApplication = applyOverrides(overrides, resolvedText);
-  if (overrideApplication.errors.length) {
-    const details = overrideApplication.errors.map((e) => `${e.fieldKey}: ${e.error}`).join('; ');
-    const error = new Error(`Override guardrail failure: ${details}`);
-    (error as any).code = 'OVERRIDE_GUARDRAIL';
-    throw error;
-  }
+        if (await shouldSkipJob(this.redis, job)) {
+          console.log('[parse-worker] skipping deduped job', job.docId);
+          continue;
+        }
 
-  const extraction = await routeExtraction(docType, resolvedText, overrideApplication.applied);
-  if (docType === 'payslip') {
-    try {
-      extraction.metrics.payslip = validatePayslipMetrics(extraction.metrics.payslip);
-    } catch (err) {
-      const error = err instanceof ValidationError ? err : new Error('Payslip validation failed');
-      throw error;
+        const started = Date.now();
+        try {
+          const payload = await processParseJob(this.redis, job);
+          await writeResult(this.redis, job, payload);
+          console.log('[parse-worker] processed job', job.docId, {
+            latencyMs: payload.metrics.latencyMs,
+            ruleLatencyMs: payload.metrics.ruleLatencyMs,
+            dateConfidence: payload.metadata.dateConfidence,
+            rulesVersion: payload.metadata.rulesVersion,
+          });
+        } catch (err) {
+          console.error('[parse-worker] job failed', job.docId, err);
+          await handleJobFailure(this.redis, job, err);
+        } finally {
+          const elapsed = Date.now() - started;
+          console.log('[parse-worker] job completed (success or retry scheduled)', job.docId, { elapsed });
+        }
+      } catch (err) {
+        console.error('[parse-worker] loop error', err);
+        await sleep(1000);
+      }
     }
   }
 
-  const metrics = extraction.metrics;
-  const metadata = { ...(extraction.metadata || {}) };
-  const payPeriod = (metrics as any)?.payslip?.period || {};
-  const mmYYYY = payPeriod.payDate || payPeriod.periodEnd || payPeriod.periodStart;
-  if (!mmYYYY) {
-    metadata.notes = [metadata.notes, 'No pay period detected'].filter(Boolean).join(' | ') || 'No pay period detected';
+  async stop() {
+    this.running = false;
+    await this.redis.quit();
   }
-  const documentMonth = mmYYYY || null;
-  const documentDate = mmYYYYToDate(mmYYYY);
-  if (documentMonth) {
-    metadata.documentMonth = documentMonth;
-  }
-  metadata.extractionSource = metadata.extractionSource || 'heuristic';
-  if (overrideApplication.applied.size) {
-    metadata.overridesApplied = Array.from(overrideApplication.applied.keys());
-  }
-  const userObjectId = new Types.ObjectId(userId);
-  const now = new Date();
-  const contentHash = computeContentHash({ userId, fileId, docType, metrics, metadata });
-
-  await DocumentInsights.findOneAndUpdate(
-    { userId: userObjectId, fileId, insightType: docType },
-    {
-      $set: {
-        catalogueKey: docType,
-        baseKey: docType,
-        insightType: docType,
-        schemaVersion: 'parse-worker@1',
-        parserVersion: 'parse-worker@1',
-        promptVersion: 'parse-worker@heuristic',
-        model: 'heuristic-parser',
-        extractionSource: 'heuristic',
-        metrics,
-        metadata,
-        documentMonth,
-        documentDate,
-        contentHash,
-        updatedAt: now,
-        extractedAt: now,
-      },
-      $setOnInsert: {
-        createdAt: now,
-      },
-    },
-    { upsert: true, setDefaultsOnInsert: true }
-  ).exec();
-
-  logger.info({ jobId: job.id, userId, fileId, docType }, 'Document insights updated');
-  return { metrics, metadata };
 }
 
-const connection = getRedis();
-
-const worker = new Worker(queueName, processJob, { connection, prefix, concurrency });
-
-const events = new QueueEvents(queueName, { connection: getRedis(), prefix });
-
-events.on('completed', ({ jobId }) => {
-  logger.info({ jobId }, 'Job completed');
-});
-
-events.on('failed', ({ jobId, failedReason }) => {
-  logger.error({ jobId, failedReason }, 'Job failed');
-});
-
-worker.on('error', (err) => {
-  logger.error({ err }, 'Worker error');
-});
-
-async function shutdown(signal: string) {
-  logger.info({ signal }, 'Shutting down parse worker');
-  await worker.close();
-  await events.close();
-  if (connection.status !== 'end') {
-    connection.disconnect();
-  }
-  if (mongoose.connection.readyState) {
-    await mongoose.connection.close();
-  }
-  process.exit(0);
+async function main() {
+  const worker = new ParseWorker('parse:jobs');
+  process.on('SIGINT', async () => {
+    console.log('[parse-worker] received SIGINT, shutting down');
+    await worker.stop();
+    process.exit(0);
+  });
+  process.on('SIGTERM', async () => {
+    console.log('[parse-worker] received SIGTERM, shutting down');
+    await worker.stop();
+    process.exit(0);
+  });
+  await worker.start();
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+main().catch((err) => {
+  console.error('[parse-worker] fatal error', err);
+  process.exit(1);
+});
+
+export { extractFields, suggestAnchors } from './fields';

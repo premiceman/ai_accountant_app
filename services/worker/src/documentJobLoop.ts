@@ -913,11 +913,6 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
   let lastPlanSummaryString: string | null = null;
   let lastIdempotencyKey: string | null = null;
   await setSessionStatus(job.userId, job.fileId, 'processing');
-  if (process.env.PARSER_ENGINE === 'v2') {
-    await finalizeJob(job, 'succeeded', { delegatedToParseWorker: true });
-    logger.info({ jobId: job.jobId, fileId: job.fileId }, 'Delegated parsing to new worker');
-    return;
-  }
   const key = fileIdToKey(job.fileId);
   const object = await getObject(key);
   const body = object.Body as Readable | Uint8Array | Buffer & { transformToByteArray?: () => Promise<Uint8Array> };

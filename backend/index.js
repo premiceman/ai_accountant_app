@@ -30,7 +30,6 @@ const vaultRouter  = safeRequire('./routes/vault')                || safeRequire
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');
-const overridesRouter = safeRequire('./src/routes/overrides.routes') || safeRequire('./routes/overrides.routes');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
 const truelayerRouter  = null;
 const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
@@ -92,7 +91,6 @@ mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
-mount('/api/overrides', overridesRouter, 'overrides');
 mount('/api/analytics', analyticsRouter, 'analytics');
 mount('/api/flags', flagsRouter, 'flags');
 mount('/api/tax', taxRouter, 'tax');
