@@ -11,8 +11,10 @@ function getDateParsePreference() {
 }
 
 const MONTHS = new Map([
-  ['JAN', '01'], ['FEB', '02'], ['MAR', '03'], ['APR', '04'], ['MAY', '05'], ['JUN', '06'],
-  ['JUL', '07'], ['AUG', '08'], ['SEP', '09'], ['SEPT', '09'], ['OCT', '10'], ['NOV', '11'], ['DEC', '12'],
+  ['JAN', '01'], ['JANUARY', '01'], ['FEB', '02'], ['FEBRUARY', '02'], ['MAR', '03'], ['MARCH', '03'],
+  ['APR', '04'], ['APRIL', '04'], ['MAY', '05'], ['JUN', '06'], ['JUNE', '06'], ['JUL', '07'], ['JULY', '07'],
+  ['AUG', '08'], ['AUGUST', '08'], ['SEP', '09'], ['SEPT', '09'], ['SEPTEMBER', '09'], ['OCT', '10'],
+  ['OCTOBER', '10'], ['NOV', '11'], ['NOVEMBER', '11'], ['DEC', '12'], ['DECEMBER', '12'],
 ]);
 
 function normaliseYear(token) {
