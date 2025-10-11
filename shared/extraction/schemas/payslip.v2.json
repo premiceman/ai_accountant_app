@@ -1,0 +1,47 @@
+{
+  "name": "payslip_extraction_v2",
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "employer": { "type": ["string","null"] },
+      "employee_name": { "type": ["string","null"] },
+      "pay_date": { "type": ["string","null"] },
+      "pay_frequency": { "type": ["string","null"] },
+      "tax_code": { "type": ["string","null"] },
+      "ni_letter": { "type": ["string","null"] },
+      "gross": { "type": ["number","string","null"] },
+      "net": { "type": ["number","string","null"] },
+      "tax": { "type": ["number","string","null"] },
+      "national_insurance": { "type": ["number","string","null"] },
+      "student_loan": { "type": ["number","string","null"] },
+      "pension_employee": { "type": ["number","string","null"] },
+      "pension_employer": { "type": ["number","string","null"] },
+      "ytd": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gross": { "type": ["number","string","null"] },
+          "net": { "type": ["number","string","null"] },
+          "tax": { "type": ["number","string","null"] },
+          "national_insurance": { "type": ["number","string","null"] },
+          "student_loan": { "type": ["number","string","null"] },
+          "pension_employee": { "type": ["number","string","null"] },
+          "pension_employer": { "type": ["number","string","null"] }
+        },
+        "required": []
+      },
+      "gross_pay": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "period": { "type": ["number","null"] },
+          "ytd": { "type": ["number","null"] }
+        },
+        "required": ["period"]
+      }
+    },
+    "required": ["pay_date","gross","net"]
+  },
+  "strict": true
+}

@@ -21,7 +21,8 @@
     'scenario-lab.html': 'Test tax and cashflow outcomes before you commit.',
     'tax-lab.html': 'Summarise HMRC balances, allowances, and filing tasks.',
     'document-vault.html': 'Secure repository for statements and evidence.',
-    'gifts.html': 'Track gifting, IHT allowances, and beneficiaries.',
+    'loan-management.html': 'Stress-test borrowing costs and cashflow impact.',
+    'contract-management.html': 'Summarise contract terms and query obligations.',
     'profile.html': 'Edit contact details, preferences, and security.'
   };
 

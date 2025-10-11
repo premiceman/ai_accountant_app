@@ -248,13 +248,42 @@
     if (g && name) g.textContent = name;
   }
 
-  function signOut({ next } = {}) {
+  function signOut({ next, redirect, reason = 'user-initiated' } = {}) {
+    try {
+      performance.mark?.('phloat:auth:signout:start');
+    } catch { /* no-op */ }
+
+    const defaultLanding = '/index.html';
+    const redirectTarget = typeof redirect === 'string' && redirect.trim().length
+      ? redirect.trim()
+      : null;
+    const nextTarget = typeof next === 'string' && next.trim().length ? next.trim() : null;
+    const context = {
+      reason,
+      from: location.pathname,
+      redirect: redirectTarget || defaultLanding,
+      next: nextTarget,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      console.info?.('[instrumentation] auth:signout:init', context);
+    } catch { /* no-op */ }
+
     clearTokens();
-    const url = buildWorkOSUrl({
-      intent: 'login',
-      next: next || (location.pathname + location.search) || '/index.html',
-    });
-    window.location.assign(url);
+
+    let destination = redirectTarget || defaultLanding;
+    if (!destination) {
+      destination = buildWorkOSUrl({ intent: 'login', next: nextTarget || defaultLanding });
+    }
+
+    try {
+      console.info?.('[instrumentation] auth:signout:redirect', { ...context, destination });
+      performance.mark?.('phloat:auth:signout:redirect');
+      performance.measure?.('phloat:auth:signout:duration', 'phloat:auth:signout:start', 'phloat:auth:signout:redirect');
+    } catch { /* no-op */ }
+
+    window.location.assign(destination);
   }
 
   async function getCurrentUser({ force = false } = {}) {

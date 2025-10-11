@@ -1,3 +1,4 @@
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // frontend/js/dashboard.js
 (function () {
   const RANGE_KEY = 'dashboardRangeV2';
@@ -16,6 +17,7 @@
     applyTierLocks(me);
     wireRangePicker();
     wireDeltaButtons(me);
+    wireRefreshButton();
     await reloadDashboard();
   }
 
@@ -115,26 +117,100 @@
     });
   }
 
-  async function reloadDashboard() {
+  async function getAnalyticsFlags() {
+    try {
+      return await AnalyticsClient.getFlags();
+    } catch (err) {
+      console.warn('Failed to load feature flags, using defaults', err);
+      return { ENABLE_STAGED_LOADER_ANALYTICS: true };
+    }
+  }
+
+  async function reloadDashboard(options = {}) {
     // TODO(analytics-cache): Once worker-backed cache is live, detect stale payloads and
     // surface a "refreshing" indicator while background recompute runs.
     setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
     const preset = loadRange();
-    const params = new URLSearchParams();
-    params.set('preset', preset || defaultRange());
-    params.set('t', Date.now());
+    const params = {
+      preset: preset || defaultRange(),
+      t: Date.now(),
+      granularity: 'month',
+    };
 
-    let data = null;
+    const overlay = options.overlay ?? byId('accounting-loading');
+    const showLoader = options.showLoader !== false;
+    const flags = options.flags || (showLoader ? await getAnalyticsFlags() : null);
+
+    const execute = async (stage) => {
+      const data = await AnalyticsClient.loadDashboard(params);
+      if (stage && typeof stage.finalising === 'function') stage.finalising();
+      renderDashboardPayload(data);
+    };
+
     try {
-      const res = await Auth.fetch(`/api/analytics/dashboard?${params.toString()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Analytics ${res.status}`);
-      data = await res.json();
+      if (showLoader) {
+        await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, execute);
+      } else {
+        await execute();
+      }
     } catch (err) {
       console.error('Analytics load error', err);
       softError('Unable to load analytics data.');
-      return;
     }
+  }
 
+  function wireRefreshButton() {
+    const btn = byId('dashboard-refresh');
+    if (!btn) return;
+    const overlay = byId('accounting-loading');
+    const spinner = btn.querySelector('[data-refresh-spinner]');
+    const label = btn.querySelector('[data-refresh-label]');
+
+    btn.addEventListener('click', async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      spinner?.classList.remove('d-none');
+      label?.classList.add('d-none');
+      try {
+        const flags = await getAnalyticsFlags();
+        await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, async (stage) => {
+          await triggerReprocess();
+          stage.finalising();
+          await reloadDashboard({ overlay, showLoader: false, flags });
+        });
+      } catch (error) {
+        console.error('Dashboard refresh failed', error);
+        softError(error?.reason || error?.message || 'Failed to refresh analytics. Please try again.');
+      } finally {
+        spinner?.classList.add('d-none');
+        label?.classList.remove('d-none');
+        btn.disabled = false;
+      }
+    });
+  }
+
+  async function triggerReprocess() {
+    const response = await Auth.fetch('/api/analytics/reprocess', { method: 'POST' });
+    if (!response.ok) {
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (err) {
+        payload = null;
+      }
+      const error = new Error(payload?.error || 'Failed to refresh analytics');
+      error.reason = payload?.error;
+      throw error;
+    }
+    try {
+      return await response.json();
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function renderDashboardPayload(data) {
+    if (!data) return;
     toggleDashboardEmpty(data.hasData);
     updateRangeLabel(data.range);
     renderSuggestions(data);
@@ -185,6 +261,8 @@
     setText('comparison-label', comparatives.label || 'Comparing to previous period');
 
     renderPayslipAnalytics(data.accounting?.payslipAnalytics || null, data.accounting?.rangeStatus || {});
+    renderPayslipCharts(data.accounting?.payslipAnalytics || null);
+    renderTaxPosture(data.accounting?.payslipAnalytics || null);
     renderStatementHighlights(data.accounting?.statementHighlights || null, data.accounting?.rangeStatus || {});
     renderSpendCategory(
       data.accounting?.spendingCanteorgies || data.accounting?.spendByCategory || [],
@@ -327,6 +405,57 @@
     if (notesEl) notesEl.textContent = notes.join(' ');
   }
 
+  function renderPayslipCharts(analytics) {
+    const earnings = Array.isArray(analytics?.earnings) ? analytics.earnings : [];
+    const deductions = Array.isArray(analytics?.deductions) ? analytics.deductions : [];
+    const note = byId('payslip-breakdown-note');
+    const hasData = earnings.length || deductions.length;
+    if (note) {
+      note.textContent = hasData
+        ? 'Aggregated from payslip documents in range.'
+        : 'Upload payslips covering this range to visualise earnings and deductions mix.';
+    }
+    const earningLabels = earnings.map((row) => row.label || row.category || 'Earning');
+    const earningValues = earnings.map((row) => Math.max(0, Number(row.amount || 0)));
+    const deductionLabels = deductions.map((row) => row.label || row.category || 'Deduction');
+    const deductionValues = deductions.map((row) => Math.max(0, Number(row.amount || 0)));
+    renderBar('chart-payslip-earnings', earningLabels, earningValues, { horizontal: true, currency: true });
+    renderBar('chart-payslip-deductions', deductionLabels, deductionValues, { horizontal: true, currency: true });
+  }
+
+  function renderTaxPosture(analytics) {
+    setMoneyOrDash('payslip-tax-total', analytics?.tax);
+    setMoneyOrDash('payslip-ni-total', analytics?.ni);
+    setMoneyOrDash('payslip-pension-total', analytics?.pension);
+    setMoneyOrDash('payslip-student-total', analytics?.studentLoan);
+    const badge = byId('tax-curve-income');
+    const note = byId('tax-curve-note');
+    const annualised = typeof analytics?.annualisedGross === 'number' ? Math.round(analytics.annualisedGross) : null;
+    if (badge) {
+      badge.textContent = annualised != null ? `Annualised £${annualised.toLocaleString()}` : 'Annualised income unavailable';
+    }
+    if (note) {
+      if (analytics && (analytics.tax || analytics.ni || analytics.pension || analytics.studentLoan)) {
+        note.textContent = 'Based on the latest payslip deductions and annualised earnings.';
+      } else {
+        note.textContent = 'Provide a payslip in this range to unlock tax insights.';
+      }
+    }
+    const curve = buildEmtrCurve(analytics?.annualisedGross);
+    const overlays = [];
+    const maxIncome = curve.length ? curve[curve.length - 1].income : Math.max(annualised || 0, 0);
+    const effective = typeof analytics?.effectiveMarginalRate === 'number' ? analytics.effectiveMarginalRate : null;
+    const expected = typeof analytics?.expectedMarginalRate === 'number' ? analytics.expectedMarginalRate : null;
+    const observedIncome = annualised || maxIncome || 0;
+    if (effective != null && observedIncome > 0) {
+      overlays.push({ label: 'Effective marginal rate', rate: effective, income: observedIncome });
+    }
+    if (expected != null && observedIncome > 0 && Math.abs(expected - effective) > 0.001) {
+      overlays.push({ label: 'Expected marginal rate', rate: expected, income: observedIncome, dashed: true });
+    }
+    renderEMTR('chart-tax-emtr', curve, overlays);
+  }
+
   function renderStatementHighlights(highlights, rangeStatus = {}) {
     setMoneyOrDash('statement-income', highlights?.totalIncome);
     setMoneyOrDash('statement-spend', highlights?.totalSpend);
@@ -446,10 +575,24 @@
     const overlay = byId('accounting-loading');
     if (!section || !overlay) return;
     const active = Boolean(processing?.active);
+    const stageState = overlay.dataset.stagedLoader;
+    if (stageState === 'active') {
+      overlay.dataset.pendingProcessing = JSON.stringify({
+        active,
+        message: processing?.message || 'Updating…',
+      });
+      return;
+    }
+    if (stageState === 'error') return;
     section.classList.toggle('is-loading', active);
     overlay.classList.toggle('d-none', !active);
     const msgEl = overlay.querySelector('[data-loading-message]');
     if (msgEl) msgEl.textContent = processing?.message || 'Updating…';
+    const reasonEl = overlay.querySelector('[data-loading-reason]');
+    if (!active && reasonEl) {
+      reasonEl.textContent = '';
+      reasonEl.classList.add('d-none');
+    }
   }
 
   function renderDuplicates(duplicates) {
@@ -555,8 +698,9 @@
 
   function renderFinancialPosture(data) {
     const fp = data.financialPosture || {};
-    setText('fp-networth-date', fp.netWorth?.asOf || '—');
-    setText('fp-networth-total', money(fp.netWorth?.total));
+    const netWorth = fp.netWorth || {};
+    setText('fp-networth-date', netWorth.asOf || '—');
+    setText('fp-networth-total', money(netWorth.total));
     const breakdown = Array.isArray(fp.breakdown) ? fp.breakdown : [];
     const list = byId('fp-networth-breakdown');
     if (list) {
@@ -567,10 +711,36 @@
         list.appendChild(li);
       });
     }
-    toggleEmpty('fp-networth-empty', !breakdown.length);
+    const history = buildNetWorthHistory(fp, data.accounting?.timeseriesV1 || null);
+    if (history.values.length) {
+      renderLine('networth-trend-chart', history.labels, history.values);
+    } else {
+      renderLine('networth-trend-chart', [], []);
+    }
+    const deltaEl = byId('fp-networth-delta');
+    if (deltaEl) {
+      deltaEl.classList.remove('text-success', 'text-danger', 'text-muted');
+      if (history.values.length >= 2) {
+        const first = history.values[0];
+        const last = history.values[history.values.length - 1];
+        const delta = last - first;
+        const pct = first !== 0 ? (delta / Math.abs(first)) * 100 : null;
+        const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '•';
+        const pctLabel = pct != null ? ` (${delta >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%)` : '';
+        deltaEl.textContent = `${arrow} ${money(Math.abs(delta))}${pctLabel}`;
+        deltaEl.classList.add(delta > 0 ? 'text-success' : delta < 0 ? 'text-danger' : 'text-muted');
+      } else {
+        deltaEl.textContent = '—';
+        deltaEl.classList.add('text-muted');
+      }
+    }
+    toggleEmpty('fp-networth-empty', !breakdown.length && !history.values.length);
     renderDonut('fp-networth-chart', breakdown.map((b) => b.value), breakdown.map((b) => b.label));
+    renderAssetDistribution(fp);
     renderDonut('fp-allocation-chart', (fp.assetMix || []).map((a) => a.value), (fp.assetMix || []).map((a) => a.label));
     setText('liquidity-note', fp.liquidity?.label || '—');
+
+    renderNetCashflow(data.accounting?.timeseriesV1 || null);
 
     setMoneyOrDash('savings-monthly', fp.savings?.monthlyCapacity);
     const note = byId('savings-note');
@@ -580,7 +750,8 @@
     setMoneyOrDash('savings-contributions', fp.savings?.contributions);
     const rateEl = byId('savings-rate');
     if (rateEl) rateEl.textContent = fp.savings?.savingsRate != null ? `${(fp.savings.savingsRate * 100).toFixed(1)}%` : '—%';
-    toggleEmpty('savings-empty', !data.hasData);
+    const hasSavingsData = fp.savings && (fp.savings.monthlyCapacity != null || fp.savings.essentials != null || fp.savings.discretionary != null);
+    toggleEmpty('savings-empty', !hasSavingsData);
 
     const topCostsBody = byId('fp-top-costs-body');
     if (topCostsBody) {
@@ -597,6 +768,154 @@
         topCostsBody.appendChild(tr);
       });
     }
+  }
+
+  function renderNetCashflow(timeseries) {
+    const chartId = 'chart-net-cashflow';
+    const summary = byId('net-cashflow-summary');
+    if (!timeseries || !Array.isArray(timeseries.series) || !timeseries.series.length) {
+      renderLine(chartId, [], []);
+      if (summary) {
+        summary.textContent = 'No transactions captured in this range yet.';
+        summary.classList.add('text-muted');
+        summary.classList.remove('text-success', 'text-danger');
+      }
+      return;
+    }
+    const granularity = timeseries.granularity || 'month';
+    const labels = timeseries.series.map((point) => formatTimeseriesLabel(point.ts, granularity));
+    const values = timeseries.series.map((point) => AnalyticsClient.minorToMajor(point.valueMinor || 0));
+    renderLine(chartId, labels, values);
+    if (summary) {
+      const first = values[0];
+      const last = values[values.length - 1];
+      const delta = last - first;
+      const pct = first !== 0 ? (delta / Math.abs(first)) * 100 : null;
+      if (delta === 0) {
+        summary.textContent = 'No change in net cashflow across the selected range.';
+        summary.classList.add('text-muted');
+        summary.classList.remove('text-success', 'text-danger');
+      } else {
+        const arrow = delta > 0 ? '▲' : '▼';
+        const pctLabel = pct != null ? ` (${delta >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%)` : '';
+        summary.textContent = `${arrow} ${money(Math.abs(delta))}${pctLabel} change across the selected range.`;
+        summary.classList.toggle('text-success', delta > 0);
+        summary.classList.toggle('text-danger', delta < 0);
+        summary.classList.remove('text-muted');
+      }
+    }
+  }
+
+  function renderAssetDistribution(fp) {
+    const data = computeAssetDistribution(fp);
+    const note = byId('asset-distribution-note');
+    const empty = byId('asset-distribution-empty');
+    if (!data.length) {
+      renderDonut('asset-distribution-chart', [], []);
+      if (note) note.classList.add('d-none');
+      if (empty) empty.classList.remove('d-none');
+      return;
+    }
+    note?.classList.remove('d-none');
+    empty?.classList.add('d-none');
+    renderDonut('asset-distribution-chart', data.map(([, value]) => value), data.map(([label]) => label));
+  }
+
+  function computeAssetDistribution(fp) {
+    const buckets = new Map([
+      ['Current accounts', 0],
+      ['Savings accounts', 0],
+      ['Investments', 0],
+    ]);
+    const push = (key, value) => {
+      if (value == null) return;
+      const num = Number(value);
+      if (!Number.isFinite(num) || num === 0) return;
+      buckets.set(key, (buckets.get(key) || 0) + num);
+    };
+    const net = fp.netWorth || {};
+    push('Current accounts', net.cash);
+    push('Current accounts', net.currentAccounts);
+    push('Savings accounts', net.savings);
+    push('Savings accounts', net.deposits);
+    push('Investments', net.investments);
+    if (Array.isArray(fp.assetMix)) {
+      fp.assetMix.forEach((item) => {
+        const label = String(item.label || '').toLowerCase();
+        const value = Number(item.value || 0);
+        if (!Number.isFinite(value) || value === 0) return;
+        if (label.includes('current') || label.includes('cash') || label.includes('checking')) {
+          push('Current accounts', value);
+        } else if (label.includes('savings') || label.includes('deposit')) {
+          push('Savings accounts', value);
+        } else if (label.includes('investment') || label.includes('isa') || label.includes('pension') || label.includes('equity')) {
+          push('Investments', value);
+        }
+      });
+    }
+    return Array.from(buckets.entries()).filter(([, value]) => Math.abs(value) > 1);
+  }
+
+  function buildNetWorthHistory(fp, timeseries) {
+    const candidates = [];
+    if (Array.isArray(fp.netWorthHistory)) {
+      candidates.push(mapHistoryPoints(fp.netWorthHistory));
+    }
+    if (Array.isArray(fp.trends)) {
+      candidates.push(mapHistoryPoints(fp.trends, { valueKeys: ['netWorth', 'value', 'amount'] }));
+    }
+    if (Array.isArray(fp.investments?.history)) {
+      candidates.push(mapHistoryPoints(fp.investments.history, { valueKeys: ['value', 'real'] }));
+    }
+    const direct = candidates.find((arr) => arr.length);
+    if (direct) {
+      return { labels: direct.map((p) => p.label), values: direct.map((p) => p.value) };
+    }
+    const netTotal = typeof fp.netWorth?.total === 'number' ? Number(fp.netWorth.total) : null;
+    const series = Array.isArray(timeseries?.series) ? timeseries.series : [];
+    if (netTotal != null && series.length) {
+      const granularity = timeseries.granularity || 'month';
+      const labels = series.map((point) => formatTimeseriesLabel(point.ts, granularity));
+      const values = new Array(series.length);
+      let running = netTotal;
+      for (let i = series.length - 1; i >= 0; i--) {
+        values[i] = running;
+        running -= AnalyticsClient.minorToMajor(series[i].valueMinor || 0);
+      }
+      return { labels, values };
+    }
+    return { labels: [], values: [] };
+  }
+
+  function mapHistoryPoints(points, opts = {}) {
+    const valueKeys = Array.isArray(opts.valueKeys) ? opts.valueKeys : ['value', 'netWorth', 'amount', 'total'];
+    const labelKeys = Array.isArray(opts.labelKeys) ? opts.labelKeys : ['label', 'period', 'date', 'ts', 'month', 'year'];
+    return points
+      .map((point) => {
+        let value = null;
+        for (const key of valueKeys) {
+          const candidate = point?.[key];
+          if (candidate == null) continue;
+          const num = Number(candidate);
+          if (Number.isFinite(num)) {
+            value = num;
+            break;
+          }
+        }
+        if (value == null) return null;
+        let label = null;
+        for (const key of labelKeys) {
+          if (point?.[key]) {
+            label = point[key];
+            break;
+          }
+        }
+        if (!label && point?.period?.start) label = point.period.start;
+        if (!label && point?.period?.label) label = point.period.label;
+        if (!label) label = '';
+        return { label: formatTimeseriesLabel(label, 'month'), value };
+      })
+      .filter(Boolean);
   }
 
   function toggleDashboardEmpty(hasData) {
@@ -631,7 +950,32 @@
     });
   }
 
-  function renderEMTR(canvasId, points) {
+  function buildEmtrCurve(annualisedGross) {
+    const base = Number(annualisedGross || 0);
+    const maxIncome = Math.max(60000, Math.ceil((base || 60000) * 1.3 / 1000) * 1000);
+    const step = Math.max(1000, Math.round(maxIncome / 40 / 500) * 500 || 1000);
+    const curve = [];
+    for (let income = 0; income <= maxIncome; income += step) {
+      curve.push({ income, rate: marginalRateAt(income) });
+    }
+    if (!curve.length || curve[curve.length - 1].income !== maxIncome) {
+      curve.push({ income: maxIncome, rate: marginalRateAt(maxIncome) });
+    }
+    return curve;
+  }
+
+  function marginalRateAt(income) {
+    const PA = 12570;
+    const BASIC_END = 50270;
+    const ADDL_START = 125140;
+    if (income > 100000 && income <= ADDL_START) return 0.60;
+    if (income > ADDL_START) return 0.45;
+    if (income > BASIC_END) return 0.40;
+    if (income > PA) return 0.20;
+    return 0;
+  }
+
+  function renderEMTR(canvasId, points, overlays = []) {
     const el = byId(canvasId);
     if (!el || !window.Chart) return;
     if (el._chart) el._chart.destroy();
@@ -639,19 +983,63 @@
       el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
       return;
     }
-    const xs = points.map((p) => p.income || 0);
-    const ys = points.map((p) => (p.rate || 0) * 100);
+    const baseColor = themeColors(Math.max(2, overlays.length + 1));
+    const datasets = [
+      {
+        label: 'EMTR curve',
+        data: points.map((p) => ({ x: Number(p.income || 0), y: Number(p.rate || 0) * 100 })),
+        borderColor: baseColor[0],
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        tension: 0.25,
+        pointRadius: 0,
+        fill: false,
+      },
+    ];
+    overlays.forEach((overlay, idx) => {
+      if (typeof overlay?.rate !== 'number') return;
+      const income = Number(overlay.income || points[points.length - 1].income || 0);
+      if (!(income > 0)) return;
+      const color = overlay.color || baseColor[(idx + 1) % baseColor.length];
+      const ratePct = overlay.rate * 100;
+      datasets.push({
+        label: overlay.label || 'Observed rate',
+        data: [
+          { x: 0, y: ratePct },
+          { x: income, y: ratePct },
+        ],
+        borderColor: color,
+        backgroundColor: color,
+        borderWidth: 2,
+        borderDash: overlay.dashed ? [6, 4] : undefined,
+        pointRadius: 0,
+        tension: 0,
+        fill: false,
+      });
+    });
     el._chart = new Chart(el, {
       type: 'line',
-      data: { labels: xs, datasets: [{ data: ys, borderWidth: 2, fill: false, tension: 0.2 }] },
+      data: { datasets },
       options: {
         responsive: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.parsed.y.toFixed(1)}%` } } },
+        parsing: false,
+        plugins: {
+          legend: { display: true, position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const income = ctx.parsed.x ?? 0;
+                const rate = ctx.parsed.y ?? 0;
+                return `${ctx.dataset.label}: ${rate.toFixed(1)}% at ${money(income)}`;
+              },
+            },
+          },
+        },
         scales: {
-          x: { title: { display: true, text: 'Annualised income (£)' }, ticks: { callback: (v, i) => money(xs[i]) } },
-          y: { title: { display: true, text: 'Rate (%)' }, min: 0, max: 70 }
-        }
-      }
+          x: { type: 'linear', title: { display: true, text: 'Annualised income (£)' }, ticks: { callback: (v) => money(v) } },
+          y: { title: { display: true, text: 'Rate (%)' }, min: 0, max: 75 },
+        },
+      },
     });
   }
 
@@ -698,7 +1086,7 @@
     });
   }
 
-  function renderBar(id, labels, values) {
+  function renderBar(id, labels, values, opts = {}) {
     const el = byId(id);
     if (!el || !window.Chart) return;
     if (el._chart) el._chart.destroy();
@@ -706,10 +1094,33 @@
       el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
       return;
     }
+    const horizontal = Boolean(opts.horizontal);
+    const useCurrency = Boolean(opts.currency);
     el._chart = new Chart(el, {
       type: 'bar',
       data: { labels, datasets: [{ data: values, backgroundColor: themeColors(values.length) }] },
-      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { callback: (v) => money(v) } } } }
+      options: {
+        indexAxis: horizontal ? 'y' : 'x',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const value = horizontal ? ctx.parsed.x : ctx.parsed.y;
+                return useCurrency ? money(value) : value;
+              },
+            },
+          },
+        },
+        scales: horizontal
+          ? {
+              x: { beginAtZero: true, ticks: { callback: (v) => (useCurrency ? money(v) : v) } },
+              y: { ticks: { autoSkip: false } },
+            }
+          : {
+              y: { beginAtZero: true, ticks: { callback: (v) => (useCurrency ? money(v) : v) } },
+            },
+      }
     });
   }
 
@@ -817,6 +1228,28 @@
     const el = byId(id);
     if (!el) return;
     el.textContent = value == null ? '£—' : money(value);
+  }
+  function formatTimeseriesLabel(value, granularity) {
+    if (value == null) return '—';
+    const str = String(value);
+    if (granularity === 'month' && /^\d{4}-\d{2}/.test(str)) {
+      const [year, month] = str.split('-');
+      const date = new Date(Number(year), Number(month) - 1, 1);
+      return Number.isNaN(date.getTime())
+        ? str
+        : date.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+    }
+    const parsed = new Date(str);
+    if (!Number.isNaN(parsed.getTime())) {
+      if (granularity === 'day') {
+        return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      }
+      if (granularity === 'week') {
+        return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      }
+      return parsed.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+    }
+    return str;
   }
   function toggleEmpty(id, show) {
     const el = byId(id);

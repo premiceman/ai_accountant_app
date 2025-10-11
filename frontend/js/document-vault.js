@@ -102,6 +102,31 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
   }
+  function animateAndRemove(element, className = 'is-deleting', duration = 360) {
+    return new Promise((resolve) => {
+      if (!element) return resolve();
+      let resolved = false;
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        element.removeEventListener('animationend', onEnd);
+        element.removeEventListener('transitionend', onEnd);
+        clearTimeout(timer);
+        if (element.isConnected) {
+          element.remove();
+        }
+        resolve();
+      };
+      const onEnd = (event) => {
+        if (event.target !== element) return;
+        cleanup();
+      };
+      const timer = setTimeout(cleanup, duration);
+      element.addEventListener('animationend', onEnd);
+      element.addEventListener('transitionend', onEnd);
+      element.classList.add(className);
+    });
+  }
   function fmtBytes(bytes) {
     const b = Number(bytes || 0);
     if (b <= 0) return '0 B';
@@ -748,14 +773,27 @@
           if (!url) return alert('No download URL available.');
           downloadFile(url, f.name);
         });
-        on(row.querySelector('[data-action="delete"]'), 'click', async () => {
+        const deleteBtn = row.querySelector('[data-action="delete"]');
+        on(deleteBtn, 'click', async () => {
           if (!confirm('Delete this file?')) return;
-          const del = await Auth.fetch(`/api/vault/files/${f.id}`, { method: 'DELETE' });
-          if (!del.ok) { const t = await del.text().catch(()=> ''); alert(t || 'Delete failed'); return; }
-          await Promise.all([loadFiles(), loadStats(), loadCollections(), loadCatalogue()]);
-          await ensureMetricsAndStats();
-          if (activeDocKey) renderCatalogueFiles(activeDocKey);
-          setPreviewSrc('about:blank');
+          if (deleteBtn) deleteBtn.disabled = true;
+          try {
+            const del = await Auth.fetch(`/api/vault/files/${f.id}`, { method: 'DELETE' });
+            if (!del.ok) {
+              const t = await del.text().catch(() => '');
+              throw new Error(t || 'Delete failed');
+            }
+            await animateAndRemove(row);
+            await Promise.all([loadFiles(), loadStats(), loadCollections(), loadCatalogue()]);
+            await ensureMetricsAndStats();
+            if (activeDocKey) renderCatalogueFiles(activeDocKey);
+            setPreviewSrc('about:blank');
+          } catch (error) {
+            console.error(error);
+            alert(error.message || 'Delete failed');
+          } finally {
+            if (deleteBtn?.isConnected) deleteBtn.disabled = false;
+          }
         });
 
         // dbl-click rename (kept as before)

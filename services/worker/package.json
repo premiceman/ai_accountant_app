@@ -1,21 +1,28 @@
 {
+  "__comment": "## Intent (Phase-1 only — additive, no breaking changes) Fix inconsistent dashboards by introducing a tiny, normalised v1 data layer alongside today’s legacy fields while keeping external contracts unchanged.",
   "name": "ai-accountant-worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run copy-shared && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "echo \"No worker-specific tests yet\""
+    "test": "npm run build && node dist/tests/rawInstitutionNames.test.js && node dist/tests/v1Dashboard.test.js",
+    "copy-shared": "node ../../scripts/copy-shared.js ./shared",
+    "postinstall": "npm run copy-shared"
   },
   "dependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.9",
+    "ajv": "^8.17.1",
+    "@aws-sdk/client-s3": "^3.637.0",
+    "dayjs": "^1.11.13",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mongoose": "^8.5.1",
+    "pdf-parse": "^1.1.1",
     "pino": "^9.1.0",
     "typescript": "^5.4.5"
   },

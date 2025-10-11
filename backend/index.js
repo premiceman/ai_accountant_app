@@ -1,3 +1,4 @@
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // backend/index.js
 require('dotenv').config();
 
@@ -14,7 +15,6 @@ function safeRequire(modPath) { try { return require(modPath); } catch { return 
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
 const userRouter    = safeRequire('./routes/user')                  || safeRequire('./src/routes/user') || safeRequire('./src/routes/user.routes');
 const aiRouter     = safeRequire('./routes/ai')                   || safeRequire('./src/routes/ai');
-const plaidRouter  = safeRequire('./routes/plaid')                || safeRequire('./src/routes/plaid');
 
 
 const docsRouter =
@@ -29,10 +29,12 @@ const billingRouter = safeRequire('./routes/billing')               || safeRequi
 const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
+const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
-const truelayerRouter  = safeRequire('./routes/truelayer')          || safeRequire('./src/routes/truelayer');
-
-const plaidSyncWorker = safeRequire('./services/plaidSyncWorker');
+const truelayerRouter  = null;
+const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
+const jsonTestRouter = safeRequire('./src/routes/jsonTest.routes');
+const adminRequeueRouter = safeRequire('./src/routes/admin.requeue.routes.js') || safeRequire('./routes/admin.requeue.routes');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -89,9 +91,14 @@ mount('/api/summary', summaryRouter, 'summary');
 mount('/api/billing', billingRouter, 'billing');
 mount('/api/ai', aiRouter, 'ai');
 mount('/api/vault', vaultRouter, 'vault');
-mount('/api/plaid', plaidRouter, 'plaid');
 mount('/api/analytics', analyticsRouter, 'analytics');
+mount('/api/flags', flagsRouter, 'flags');
 mount('/api/tax', taxRouter, 'tax');
+mount('/api/json-test', jsonTestRouter, 'json-test');
+mount('/', adminRequeueRouter, 'admin-requeue');
+if (qaDevRouter) {
+  mount('/__qa__', qaDevRouter, 'qa-dev');
+}
 
 
 
@@ -126,9 +133,6 @@ mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
     app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
-    if (plaidSyncWorker?.startPlaidSyncWorker) {
-      plaidSyncWorker.startPlaidSyncWorker({ force: true });
-    }
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err);
