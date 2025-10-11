@@ -1,7 +1,7 @@
-import { extractPdfText } from './extractPdfText';
+import { extractPdfText } from './extractPdfText.js';
 import { harvestStatementCandidates, derivePeriodFromTxIso } from './heuristics/statement';
 import statementSchemaV2 from './schemas/statement.v2.json';
-import { normaliseWithSchema } from './llm';
+import { normaliseWithSchema } from './llm.js';
 import { parseDateString } from '../config/dateParsing';
 
 const toISO = (value: unknown) => {

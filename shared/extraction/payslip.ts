@@ -1,7 +1,7 @@
-import { extractPdfText } from './extractPdfText';
+import { extractPdfText } from './extractPdfText.js';
 import { harvestPayslipCandidates } from './heuristics/payslip';
 import payslipSchemaV2 from './schemas/payslip.v2.json';
-import { normaliseWithSchema } from './llm';
+import { normaliseWithSchema } from './llm.js';
 import { parseDateString } from '../config/dateParsing';
 
 const toISO = (value?: string | null) => parseDateString(value ?? null);

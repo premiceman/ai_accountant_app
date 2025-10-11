@@ -42,6 +42,8 @@ const {
 } = require('../services/documents/catalogue');
 const { analyseDocument } = require('../services/documents/ingest');
 const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
+const { lpush: kvLpush } = require('../lib/kv');
+const DocumentSchematic = require('../../models/DocumentSchematic');
 
 const REQUIRED_KEYS = getKeysByCategory('required');
 const HELPFUL_KEYS = getKeysByCategory('helpful');
@@ -706,6 +708,18 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     active: true,
     message: `Analysing ${entryForCatalogue?.label || 'document'}…`,
   });
+  const schematicsEnabled = String(process.env.ENABLE_SCHEMATICS || 'false').toLowerCase() === 'true';
+  let activeRulesVersion = null;
+  if (schematicsEnabled) {
+    const activeDoc = await DocumentSchematic.findOne({
+      userId: u.id,
+      docType: normalizedCatalogueKey,
+      status: 'active',
+    })
+      .sort({ updatedAt: -1 })
+      .lean();
+    activeRulesVersion = activeDoc?.version || null;
+  }
   try {
     for (const f of files) {
       const ok = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
@@ -742,6 +756,26 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         fileId: id,
         fileName: safeBase,
       });
+      if (schematicsEnabled) {
+        try {
+          await kvLpush('parse:jobs', {
+            docId: id,
+            userId: u.id,
+            storagePath: key,
+            docType: normalizedCatalogueKey,
+            userRulesVersion: activeRulesVersion || undefined,
+            source: 'vault-upload',
+          });
+          console.log({
+            name: 'ingest',
+            msg: 'Enqueued parse job to Redis',
+            docId: id,
+            docType: normalizedCatalogueKey,
+          });
+        } catch (queueErr) {
+          console.warn('[ingest] Failed to enqueue schematics parse job', queueErr);
+        }
+      }
       uploaded.push({
         id,
         name: safeBase,
