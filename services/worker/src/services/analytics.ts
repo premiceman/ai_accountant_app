@@ -32,6 +32,18 @@ const STATEMENT_TYPES = new Set<DocumentInsight['catalogueKey']>([
 
 type ValidationError = { instancePath?: string; schemaPath?: string; message?: string };
 
+type RebuildAnalyticsInput = {
+  userId: Types.ObjectId;
+  periodMonth?: string | null;
+  periodYear?: string | number | null;
+  payDate?: string | Date | null;
+  fileId?: string | null;
+};
+
+type RebuildAnalyticsResult =
+  | { status: 'success'; period: string }
+  | { status: 'failed'; reason: string; period: null };
+
 function buildSchemaError(path: string, errors: ValidationError[] | null | undefined): Error {
   const error = new Error('Schema validation failed');
   (error as Error & { statusCode?: number; details?: unknown }).statusCode = 422;
@@ -196,6 +208,65 @@ function assertValidMonth(month: string): void {
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`Invalid period month ${month}`);
   }
+}
+
+function derivePeriodMonth(
+  periodMonth?: string | null,
+  periodYear?: string | number | null,
+  payDate?: string | Date | null,
+): string | null {
+  const trimmedMonth = typeof periodMonth === 'string' ? periodMonth.trim() : '';
+  if (/^\d{4}-\d{2}$/.test(trimmedMonth)) {
+    return trimmedMonth;
+  }
+
+  const monthValue =
+    trimmedMonth && /^\d{1,2}$/.test(trimmedMonth) ? Number.parseInt(trimmedMonth, 10) : Number.NaN;
+  const yearValueRaw =
+    typeof periodYear === 'number'
+      ? periodYear
+      : typeof periodYear === 'string' && periodYear.trim()
+      ? Number.parseInt(periodYear.trim(), 10)
+      : Number.NaN;
+
+  if (!Number.isNaN(monthValue) && !Number.isNaN(yearValueRaw) && monthValue >= 1 && monthValue <= 12) {
+    return `${String(yearValueRaw).padStart(4, '0')}-${String(monthValue).padStart(2, '0')}`;
+  }
+
+  if (payDate) {
+    const date = payDate instanceof Date ? payDate : new Date(payDate);
+    if (!Number.isNaN(date.getTime())) {
+      const year = date.getUTCFullYear();
+      const month = date.getUTCMonth() + 1;
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
+
+function deriveFailurePeriod(periodMonth?: string | null, periodYear?: string | number | null): string {
+  const trimmedMonth = typeof periodMonth === 'string' ? periodMonth.trim() : '';
+  if (/^\d{4}-\d{2}$/.test(trimmedMonth)) {
+    return trimmedMonth;
+  }
+
+  const yearValue =
+    typeof periodYear === 'number'
+      ? periodYear
+      : typeof periodYear === 'string' && periodYear.trim()
+      ? Number.parseInt(periodYear.trim(), 10)
+      : Number.NaN;
+
+  if (!Number.isNaN(yearValue)) {
+    const monthSegment =
+      trimmedMonth && /^\d{1,2}$/.test(trimmedMonth)
+        ? String(Number.parseInt(trimmedMonth, 10)).padStart(2, '0')
+        : 'unknown';
+    return `${String(yearValue).padStart(4, '0')}-${monthSegment}`;
+  }
+
+  return 'unknown-unknown';
 }
 
 type PreferredInsight = {
@@ -374,15 +445,53 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
 
 export async function rebuildMonthlyAnalytics({
   userId,
-  month,
-}: {
-  userId: Types.ObjectId;
-  month: string;
-}): Promise<void> {
-  assertValidMonth(month);
+  periodMonth,
+  periodYear,
+  payDate,
+  fileId,
+}: RebuildAnalyticsInput): Promise<RebuildAnalyticsResult> {
+  const resolvedMonth = derivePeriodMonth(periodMonth, periodYear, payDate);
+  if (!resolvedMonth) {
+    const failurePeriod = deriveFailurePeriod(periodMonth, periodYear);
+    await UserAnalyticsModel.findOneAndUpdate(
+      { userId, period: failurePeriod },
+      {
+        $set: {
+          builtAt: new Date(),
+          status: 'failed',
+          statusReason: 'missing required fields for analytics',
+        },
+      },
+      { upsert: true }
+    ).exec();
 
-  const insights = await DocumentInsightModel.find({ userId, documentMonth: month }).lean<DocumentInsight[]>().exec();
-  const overrides = await UserOverrideModel.find({ userId, appliesFrom: { $lte: `${month}-31` } })
+    if (fileId) {
+      await DocumentInsightModel.updateOne(
+        { userId, fileId },
+        { $set: { status: 'failed', statusReason: 'missing required fields for analytics' } }
+      )
+        .exec()
+        .catch(() => undefined);
+    }
+
+    return { status: 'failed', reason: 'missing required fields for analytics', period: null };
+  }
+
+  assertValidMonth(resolvedMonth);
+
+  if (fileId) {
+    await DocumentInsightModel.updateOne(
+      { userId, fileId },
+      { $set: { documentMonth: resolvedMonth } }
+    )
+      .exec()
+      .catch(() => undefined);
+  }
+
+  const insights = await DocumentInsightModel.find({ userId, documentMonth: resolvedMonth })
+    .lean<DocumentInsight[]>()
+    .exec();
+  const overrides = await UserOverrideModel.find({ userId, appliesFrom: { $lte: `${resolvedMonth}-31` } })
     .lean<UserOverride[]>()
     .exec();
 
@@ -503,7 +612,7 @@ export async function rebuildMonthlyAnalytics({
   const analyticsDoc = applyMetricOverrides(
     {
       userId,
-      period: month,
+      period: resolvedMonth,
       builtAt: new Date(),
       sources,
       income: {
@@ -538,8 +647,16 @@ export async function rebuildMonthlyAnalytics({
   );
 
   await UserAnalyticsModel.findOneAndUpdate(
-    { userId, period: month },
-    { $set: analyticsDoc },
+    { userId, period: resolvedMonth },
+    {
+      $set: {
+        ...analyticsDoc,
+        status: 'success',
+        statusReason: null,
+      },
+    },
     { upsert: true, new: true }
   ).exec();
+
+  return { status: 'success', period: resolvedMonth };
 }

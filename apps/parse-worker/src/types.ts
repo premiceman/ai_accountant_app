@@ -8,6 +8,7 @@ export interface ParseJob {
   userRulesVersion?: string | null;
   dedupeKey?: string | null;
   attempts?: number;
+  source?: string | null;
 }
 
 export interface RuleBase {

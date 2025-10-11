@@ -1,10 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.extractPayslip = extractPayslip;
-exports.analysePayslip = analysePayslip;
-const openaiClient_js_1 = require("./openaiClient.js");
-const extractPdfText_js_1 = require("./extractPdfText.js");
-const dateParsing_js_1 = require("../config/dateParsing.js");
+import { callStructuredExtraction } from './openaiClient.js';
+import { extractPdfText } from './extractPdfText.js';
+import { parseDateString } from '../config/dateParsing.js';
 function normalise(str) {
     return String(str || '').replace(/\r\n?/g, '\n');
 }
@@ -123,7 +119,7 @@ function parseTaxCode(text) {
     return match ? match[1].trim() : null;
 }
 function parseDate(value) {
-    return (0, dateParsing_js_1.parseDateString)(value);
+    return parseDateString(value);
 }
 async function llmPayslipExtraction(text) {
     const schema = {
@@ -212,7 +208,7 @@ async function llmPayslipExtraction(text) {
     const prompt = `Extract the key payroll metrics from the following UK payslip. Return period values (this pay cycle) and year-to-date values when available.
 
 ${text.slice(0, 6000)}`;
-    const response = await (0, openaiClient_js_1.callStructuredExtraction)(prompt, schema);
+    const response = await callStructuredExtraction(prompt, schema);
     if (!response)
         return null;
     return {
@@ -381,7 +377,7 @@ function mergeExtraction(base, fallback) {
     merged.notes = Array.from(new Set([...(fallback.notes || []), ...(base.notes || [])])).filter(Boolean);
     return merged;
 }
-async function analysePayslip(text) {
+export async function analysePayslip(text) {
     const heuristic = heuristicPayslipExtraction(text || '');
     const llm = await llmPayslipExtraction(text || '');
     const merged = mergeExtraction(llm, heuristic);
@@ -425,8 +421,8 @@ async function analysePayslip(text) {
     };
     return breakdown;
 }
-async function extractPayslip(buffer) {
-    const { fullText } = await (0, extractPdfText_js_1.extractPdfText)(buffer);
+export async function extractPayslip(buffer) {
+    const { fullText } = await extractPdfText(buffer);
     const breakdown = await analysePayslip(fullText || '');
     const payDate = breakdown.payDate || breakdown.periodEnd || breakdown.periodStart || null;
     const periodStart = breakdown.periodStart || breakdown.payDate || null;

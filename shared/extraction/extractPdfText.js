@@ -1,5 +1,3 @@
-'use strict';
-
 let pdfParsePromise = null;
 let fallbackWarned = false;
 let testOverrides = null;
@@ -70,7 +68,7 @@ function normalisePages(text) {
     .filter(Boolean);
 }
 
-async function extractPdfText(buffer) {
+export async function extractPdfText(buffer) {
   if (!buffer || !buffer.length) {
     return { pages: [], fullText: '' };
   }
@@ -121,18 +119,19 @@ async function extractPdfText(buffer) {
   return { pages, fullText };
 }
 
-module.exports = {
-  extractPdfText,
-  __private__: {
-    setTestOverrides(overrides) {
-      testOverrides = overrides || null;
-      pdfParsePromise = null;
-      fallbackWarned = false;
-    },
-    resetTestState() {
-      testOverrides = null;
-      pdfParsePromise = null;
-      fallbackWarned = false;
-    },
-  },
+function setTestOverrides(overrides) {
+  testOverrides = overrides || null;
+  pdfParsePromise = null;
+  fallbackWarned = false;
+}
+
+function resetTestState() {
+  testOverrides = null;
+  pdfParsePromise = null;
+  fallbackWarned = false;
+}
+
+export const __private__ = {
+  setTestOverrides,
+  resetTestState,
 };

@@ -9,7 +9,7 @@
     "build": "npm run copy-shared && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "npm run build && node dist/tests/rawInstitutionNames.test.js && node dist/tests/v1Dashboard.test.js",
+    "test": "npm run build && node dist/tests/rawInstitutionNames.test.js && node dist/tests/v1Dashboard.test.js && node dist/tests/analyticsGuard.test.js && node dist/tests/idempotencySkip.test.js",
     "copy-shared": "node ../../scripts/copy-shared.js ./shared",
     "postinstall": "npm run copy-shared"
   },
@@ -21,6 +21,7 @@
     "dayjs": "^1.11.13",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "ioredis": "^5.4.1",
     "mongoose": "^8.5.1",
     "pdf-parse": "^1.1.1",
     "pino": "^9.1.0",

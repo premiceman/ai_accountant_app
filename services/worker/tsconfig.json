@@ -2,8 +2,8 @@
 {
   "compilerOptions": {
     "target": "ES2021",
-    "module": "NodeNext",
-    "moduleResolution": "nodenext",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
     "outDir": "dist",
     "rootDir": "src",
     "esModuleInterop": true,
@@ -11,8 +11,7 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "allowJs": true,
-    "typeRoots": ["./src/types", "./node_modules/@types"]
+    "allowJs": false
   },
   "include": ["src/**/*", "../../shared/extraction/*.d.ts"],
   "exclude": ["node_modules", "dist"]

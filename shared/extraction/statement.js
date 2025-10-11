@@ -1,12 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.extractStatement = extractStatement;
-exports.analyseCurrentAccountStatement = analyseCurrentAccountStatement;
-exports.normaliseCategory = normaliseCategory;
-exports.summariseStatement = summariseStatement;
-const openaiClient_js_1 = require("./openaiClient.js");
-const extractPdfText_js_1 = require("./extractPdfText.js");
-const dateParsing_js_1 = require("../config/dateParsing.js");
+import { callStructuredExtraction } from './openaiClient.js';
+import { extractPdfText } from './extractPdfText.js';
+import { parseDateString } from '../config/dateParsing.js';
 const CATEGORY_CANONICAL = new Map([
     ['income', 'Income'],
     ['salary', 'Income'],
@@ -63,7 +57,7 @@ const CATEGORY_LIST = [
     'Fees',
     'Other',
 ];
-function normaliseCategory(raw) {
+export function normaliseCategory(raw) {
     if (!raw)
         return 'Other';
     const key = String(raw).toLowerCase().trim();
@@ -120,7 +114,7 @@ function parseDate(value) {
             const iso = new Date(value);
             return Number.isNaN(iso.getTime()) ? null : iso.toISOString().slice(0, 10);
         }
-        const parsed = (0, dateParsing_js_1.parseDateString)(value);
+        const parsed = parseDateString(value);
         if (parsed)
             return parsed;
     }
@@ -128,7 +122,7 @@ function parseDate(value) {
     if (!Number.isNaN(direct.getTime()))
         return direct.toISOString().slice(0, 10);
     if (typeof value === 'string')
-        return (0, dateParsing_js_1.parseDateString)(value);
+        return parseDateString(value);
     return null;
 }
 function normaliseIsoDate(value) {
@@ -228,7 +222,7 @@ async function llmCategoriseTransactions(transactions) {
         'Transactions to classify:',
         lines,
     ].join('\n');
-    const response = await (0, openaiClient_js_1.callStructuredExtraction)(prompt, schema, {
+    const response = await callStructuredExtraction(prompt, schema, {
         systemPrompt: 'You are a meticulous accountant categorising bank statement transactions for analytics.',
         maxTokens: 1200,
     });
@@ -300,7 +294,7 @@ async function llmStatementExtraction(text) {
         '',
         text.slice(0, 6000),
     ].join('\n');
-    return (0, openaiClient_js_1.callStructuredExtraction)(prompt, schema, {
+    return callStructuredExtraction(prompt, schema, {
         systemPrompt: 'You are a meticulous forensic accountant that extracts structured banking transactions for analytics.',
         maxTokens: 2000,
     });
@@ -363,7 +357,7 @@ function heuristicStatementParsing(text) {
     }
     return transactions;
 }
-function summariseStatement(transactions) {
+export function summariseStatement(transactions) {
     const totals = transactions.reduce((acc, tx) => {
         if (tx.direction === 'inflow')
             acc.income += tx.amount;
@@ -400,7 +394,7 @@ function summariseStatement(transactions) {
     }));
     return { totals, categories, topCategories, largestExpenses, spendingCanteorgies };
 }
-async function analyseCurrentAccountStatement(text) {
+export async function analyseCurrentAccountStatement(text) {
     const llm = await llmStatementExtraction(text || '');
     const metadata = {
         bankName: llm?.bank_name || null,
@@ -442,8 +436,8 @@ async function analyseCurrentAccountStatement(text) {
         extractionSource: llmTransactions.length ? 'openai' : 'heuristic',
     };
 }
-async function extractStatement(buffer) {
-    const { fullText } = await (0, extractPdfText_js_1.extractPdfText)(buffer);
+export async function extractStatement(buffer) {
+    const { fullText } = await extractPdfText(buffer);
     const analysed = await analyseCurrentAccountStatement(fullText || '');
     const metadata = analysed.metadata || {};
     const transactions = Array.isArray(analysed.transactions) ? analysed.transactions : [];

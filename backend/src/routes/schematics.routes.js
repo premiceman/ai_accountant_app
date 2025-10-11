@@ -116,6 +116,13 @@ async function enqueueJobs(req, res, docIds, version, docType) {
       storagePath: '',
       docType: docType || req.body.docType || 'document',
       userRulesVersion: version || null,
+      source: 'schematics-apply',
+    });
+    console.log({
+      name: 'ingest',
+      msg: 'Enqueued parse job to Redis',
+      docId: id,
+      docType: docType || req.body.docType || 'document',
     });
     queued += 1;
   }

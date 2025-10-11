@@ -1,4 +1,4 @@
-import { callOpenAIJson } from './openaiClient'; // existing client
+import { callOpenAIJson } from './openaiClient.js'; // existing client
 export async function normaliseWithSchema(
   fullText: string,
   candidates: any,

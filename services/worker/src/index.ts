@@ -8,10 +8,12 @@ import { URL } from 'node:url';
 import { createHealthRouter } from './http/health.js';
 import { startDocumentJobLoop, stopDocumentJobLoop } from './documentJobLoop.js';
 import { featureFlags } from './config/featureFlags.js';
+import { getHealthSnapshot } from './state/runtimeMetrics.js';
 
 dotenv.config();
 
 const logger = pino({ name: 'worker', level: process.env.LOG_LEVEL ?? 'info' });
+logger.info({ name: 'worker', msg: 'Worker using ESM modules' });
 
 async function bootstrap() {
   const port = Number(process.env.WORKER_PORT ?? 8081);
@@ -21,6 +23,7 @@ async function bootstrap() {
   app.use(
     createHealthRouter({
       readinessCheck: async () => mongoose.connection.readyState === 1,
+      healthInfoProvider: getHealthSnapshot,
     })
   );
 
