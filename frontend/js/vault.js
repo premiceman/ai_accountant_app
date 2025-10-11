@@ -2657,7 +2657,15 @@
   }
 
   function setupDropzone() {
-    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('click', (event) => {
+      if (!fileInput) return;
+      const target = event.target;
+      if (target === fileInput) return;
+      if (target && typeof target.closest === 'function' && target.closest('input[type="file"]')) {
+        return;
+      }
+      fileInput.click();
+    });
     dropzone.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
