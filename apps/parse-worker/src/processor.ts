@@ -14,27 +14,35 @@ function isJsonPayload(value: string): boolean {
   return trimmed.startsWith('{') || trimmed.startsWith('[');
 }
 
-async function resolveUserRules(
+export async function loadActiveUserRules(
   redis: Redis,
   job: ParseJob
 ): Promise<{ rules: unknown; version: string | null; raw: string | null }> {
   const docType = job.docType || 'unknown';
   const userId = job.userId;
-  let activeRaw: string | null = null;
   let version: string | null = job.userRulesVersion ?? null;
+  let activeRaw: string | null = null;
+
   if (version) {
     activeRaw = await redis.get(`map:${userId}:${docType}:${version}`);
   } else {
-    const rawActive = await redis.get(`map:${userId}:${docType}:active`);
-    if (rawActive) {
-      if (isJsonPayload(rawActive)) {
-        activeRaw = rawActive;
+    const pointer = await redis.get(`map:${userId}:${docType}:active`);
+    if (pointer) {
+      if (isJsonPayload(pointer)) {
+        activeRaw = pointer;
       } else {
-        version = rawActive.trim();
-        activeRaw = version ? await redis.get(`map:${userId}:${docType}:${version}`) : null;
+        version = pointer.trim();
+        if (version) {
+          activeRaw = await redis.get(`map:${userId}:${docType}:${version}`);
+        }
       }
     }
   }
+
+  if (!activeRaw) {
+    return { rules: null, version: version ?? null, raw: null };
+  }
+
   return { rules: parseUserRules(activeRaw), version: version ?? null, raw: activeRaw };
 }
 
@@ -53,7 +61,7 @@ export async function processParseJob(redis: Redis, job: ParseJob): Promise<Pars
   const dateExtraction = extractDates(normalisedText);
 
   const ruleTimerStart = Date.now();
-  const { rules, version, raw } = await resolveUserRules(redis, job);
+  const { rules, version, raw } = await loadActiveUserRules(redis, job);
   const fields = extractFields(normalisedText, job.docType, rules);
   const ruleLatencyMs = Date.now() - ruleTimerStart;
 
@@ -82,6 +90,7 @@ export async function processParseJob(redis: Redis, job: ParseJob): Promise<Pars
       confidence: dateExtraction.confidence,
       anchors: dateExtraction.anchors,
     },
+    fieldValues: fields.values,
     insights: { metrics },
     narrative: [],
     metadata,
@@ -119,8 +128,45 @@ export async function handleJobFailure(redis: Redis, job: ParseJob, error: unkno
   }
 }
 
+const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'http://localhost:3000';
+const PARSE_WORKER_TOKEN = process.env.PARSE_WORKER_TOKEN || '';
+
+async function postToBackend(job: ParseJob, payload: ParseResultPayload): Promise<void> {
+  const endpoint = new URL('/api/parse-result', BACKEND_BASE_URL);
+  const body = {
+    docId: job.docId,
+    userId: job.userId,
+    docType: job.docType,
+    storagePath: job.storagePath,
+    result: payload,
+  };
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (PARSE_WORKER_TOKEN) {
+    headers.Authorization = `Bearer ${PARSE_WORKER_TOKEN}`;
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+  } catch (err) {
+    console.error('[parse-worker] failed to POST result', err);
+    throw err;
+  }
+}
+
 export async function writeResult(redis: Redis, job: ParseJob, payload: ParseResultPayload): Promise<void> {
   const key = `parse:result:${job.docId}`;
   await redis.set(key, JSON.stringify(payload));
   await redis.publish('parse:done', job.docId);
+  await postToBackend(job, payload);
 }
