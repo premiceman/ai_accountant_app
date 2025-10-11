@@ -49,6 +49,15 @@ function isValidMonth(month) {
   return Number.isInteger(num) && num >= 1 && num <= 12;
 }
 
+function getDefaultDay() {
+  const raw = process.env.DATE_PARSE_DEFAULT_DAY;
+  const trimmed = raw == null ? '' : String(raw).trim();
+  if (!trimmed) return '01';
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isInteger(parsed) || !isValidDay(parsed)) return '01';
+  return String(parsed).padStart(2, '0');
+}
+
 function buildIso(year, month, day) {
   if (!year || !month || !day) return null;
   if (!isValidMonth(month) || !isValidDay(day)) return null;
