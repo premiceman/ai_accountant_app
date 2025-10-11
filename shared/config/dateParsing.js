@@ -11,10 +11,30 @@ function getDateParsePreference() {
 }
 
 const MONTHS = new Map([
-  ['JAN', '01'], ['JANUARY', '01'], ['FEB', '02'], ['FEBRUARY', '02'], ['MAR', '03'], ['MARCH', '03'],
-  ['APR', '04'], ['APRIL', '04'], ['MAY', '05'], ['JUN', '06'], ['JUNE', '06'], ['JUL', '07'], ['JULY', '07'],
-  ['AUG', '08'], ['AUGUST', '08'], ['SEP', '09'], ['SEPT', '09'], ['SEPTEMBER', '09'], ['OCT', '10'],
-  ['OCTOBER', '10'], ['NOV', '11'], ['NOVEMBER', '11'], ['DEC', '12'], ['DECEMBER', '12'],
+  ['JAN', '01'],
+  ['JANUARY', '01'],
+  ['FEB', '02'],
+  ['FEBRUARY', '02'],
+  ['MAR', '03'],
+  ['MARCH', '03'],
+  ['APR', '04'],
+  ['APRIL', '04'],
+  ['MAY', '05'],
+  ['JUN', '06'],
+  ['JUNE', '06'],
+  ['JUL', '07'],
+  ['JULY', '07'],
+  ['AUG', '08'],
+  ['AUGUST', '08'],
+  ['SEP', '09'],
+  ['SEPT', '09'],
+  ['SEPTEMBER', '09'],
+  ['OCT', '10'],
+  ['OCTOBER', '10'],
+  ['NOV', '11'],
+  ['NOVEMBER', '11'],
+  ['DEC', '12'],
+  ['DECEMBER', '12'],
 ]);
 
 function normaliseYear(token) {
@@ -89,13 +109,18 @@ function parseNumericDate(tokens, preference) {
 }
 
 function parseTextualDate(parts) {
-  const cleaned = parts.map((token) => token.replace(/(st|nd|rd|th)$/i, ''));
-  if (cleaned.length < 2 || cleaned.length > 3) return null;
-  const upperParts = cleaned.map((token) => token.toUpperCase());
-  let monthIndex = upperParts.findIndex((token) => MONTHS.has(token));
+  const tokens = parts
+    .map((token) => (token == null ? '' : String(token).trim()))
+    .filter(Boolean)
+    .map((token) => token.replace(/(st|nd|rd|th)$/i, ''))
+    .map((token) => token.replace(/[.]/g, ''))
+    .map((token) => token.toUpperCase());
+
+  if (tokens.length < 2 || tokens.length > 3) return null;
+  let monthIndex = tokens.findIndex((token) => MONTHS.has(token));
   if (monthIndex === -1) return null;
-  const month = MONTHS.get(upperParts[monthIndex]);
-  const remaining = cleaned.filter((_, idx) => idx !== monthIndex);
+  const month = MONTHS.get(tokens[monthIndex]);
+  const remaining = tokens.filter((_, idx) => idx !== monthIndex);
   if (remaining.length < 1) return null;
   if (remaining.length === 1) {
     const [candidate] = remaining;
