@@ -4,8 +4,17 @@
   const POLL_INTERVAL_UPLOAD = 3000;
   const POLL_INTERVAL_TILES = 10000;
   const POLL_INTERVAL_LISTS = 15000;
-  const LIGHT_LABELS = { red: 'Waiting', amber: 'Processing', green: 'Complete' };
   const STORAGE_KEY = 'vault.uploadSessions.v1';
+
+  const SESSION_STATUS_META = {
+    uploading: { label: 'Uploading', variant: 'accent', description: 'Files are uploading.' },
+    processing: { label: 'Processing', variant: 'progress', description: 'Documents are being processed.' },
+    complete: { label: 'Processed', variant: 'success', description: 'Documents processed successfully.' },
+    attention: { label: 'Needs attention', variant: 'warning', description: 'Some files include notes that require review.' },
+    rejected: { label: 'Rejected', variant: 'danger', description: 'Files were rejected and need new uploads.' },
+  };
+
+  const SESSION_STATUS_ORDER = ['attention', 'rejected', 'processing', 'uploading', 'complete'];
 
   const BRAND_THEMES = [
     { className: 'grid-card--brand-monzo', tokens: ['monzo'] },
@@ -102,6 +111,8 @@
   let jsonModalClose = null;
   let jsonModalReturnFocus = null;
   let jsonModalStylesInjected = false;
+  let sessionDetailReturnFocus = null;
+  let sessionModalKeydownBound = false;
 
   const MANUAL_SCHEMA_OPTIONS = [
     { value: 'payslip', label: 'Payslip' },
@@ -175,12 +186,29 @@
   const viewerTitle = document.getElementById('file-viewer-title');
   const viewerSubtitle = document.getElementById('file-viewer-subtitle');
   const viewerClose = document.getElementById('file-viewer-close');
+  const sessionModal = document.getElementById('session-detail-modal');
+  const sessionModalDialog = sessionModal ? sessionModal.querySelector('.session-modal__dialog') : null;
+  const sessionModalTitle = document.getElementById('session-detail-title');
+  const sessionModalSubtitle = document.getElementById('session-detail-subtitle');
+  const sessionModalList = document.getElementById('session-detail-list');
+  const sessionModalClose = document.getElementById('session-detail-close');
 
   function formatDate(value) {
     if (!value) return '—';
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '—';
     return date.toLocaleDateString();
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '—';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    try {
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    } catch (error) {
+      return date.toLocaleString();
+    }
   }
 
   function toNumberLike(value) {
@@ -1595,6 +1623,8 @@
       const payload = {
         sessions: Array.from(state.sessions.entries()).map(([sessionId, session]) => ({
           sessionId,
+          createdAt: session.createdAt || Date.now(),
+          displayName: session.displayName || null,
           files: Array.from(session.files.values()).map((file) => ({
             fileId: file.fileId,
             originalName: file.originalName,
@@ -1623,6 +1653,13 @@
       data.sessions.forEach((entry) => {
         if (!entry || !entry.sessionId) return;
         const session = upsertSession(entry.sessionId);
+        const createdAtValue = Number(entry.createdAt);
+        if (Number.isFinite(createdAtValue)) {
+          session.createdAt = createdAtValue;
+        }
+        if (entry.displayName) {
+          session.displayName = entry.displayName;
+        }
         session.rejected = Array.isArray(entry.rejected)
           ? entry.rejected.map((item) => ({ originalName: item.originalName, reason: item.reason }))
           : [];
@@ -1727,78 +1764,385 @@
   function renderSessionPanel() {
     if (!(sessionRows && sessionEmpty)) return;
     sessionRows.innerHTML = '';
-    let rowCount = 0;
-    for (const session of state.sessions.values()) {
-      for (const file of session.files.values()) {
-        rowCount += 1;
-        sessionRows.appendChild(renderFileRow(file));
-      }
-      for (const rejected of session.rejected) {
-        rowCount += 1;
-        sessionRows.appendChild(renderRejectedRow(rejected));
-      }
-    }
-    if (rowCount === 0) {
+    const sessionEntries = Array.from(state.sessions.entries());
+    if (sessionEntries.length === 0) {
       sessionEmpty.style.display = '';
-    } else {
-      sessionEmpty.style.display = 'none';
+      closeSessionDetail();
+      updateProgressUI();
+      persistState();
+      return;
+    }
+
+    sessionEmpty.style.display = 'none';
+    let hasCards = false;
+    sessionEntries.forEach(([sessionId, session], index) => {
+      const summary = summariseSession(sessionId, session);
+      const card = buildSessionCard(sessionId, session, index, summary);
+      sessionRows.appendChild(card);
+      hasCards = true;
+    });
+
+    if (!hasCards) {
+      sessionEmpty.style.display = '';
     }
     updateProgressUI();
     persistState();
+    refreshSessionDetailModal();
   }
 
-  function renderFileRow(file) {
-    const row = document.createElement('div');
-    row.className = 'session-row';
-    const name = document.createElement('div');
-    name.className = 'filename';
-    name.textContent = file.originalName;
-    row.appendChild(name);
-
-    const uploadLight = createLight('Upload', file.upload || 'amber');
-    const processingLight = createLight('Processing', file.processing || 'red');
-
-    const lights = document.createElement('div');
-    lights.className = 'lights';
-    lights.append(uploadLight, processingLight);
-    row.appendChild(lights);
-
-    const message = document.createElement('div');
-    message.className = 'message muted';
-    message.textContent = file.message || '';
-    row.appendChild(message);
-    return row;
+  function getStatusMeta(statusKey) {
+    if (SESSION_STATUS_META[statusKey]) return SESSION_STATUS_META[statusKey];
+    const label = typeof statusKey === 'string' && statusKey
+      ? statusKey.charAt(0).toUpperCase() + statusKey.slice(1)
+      : 'Status';
+    return { label, variant: 'accent', description: '' };
   }
 
-  function renderRejectedRow(entry) {
-    const row = document.createElement('div');
-    row.className = 'session-row';
-    const name = document.createElement('div');
-    name.className = 'filename';
-    name.textContent = entry.originalName;
-    row.appendChild(name);
-
-    const lights = document.createElement('div');
-    lights.className = 'lights';
-    lights.appendChild(createLight('Upload', 'red'));
-    lights.appendChild(createLight('Processing', 'red'));
-    row.appendChild(lights);
-
-    const message = document.createElement('div');
-    message.className = 'message muted';
-    message.textContent = entry.reason || 'Rejected';
-    row.appendChild(message);
-    return row;
+  function getSessionDisplayLabel(sessionId, session, index) {
+    if (session && session.displayName) return session.displayName;
+    let resolvedIndex = typeof index === 'number' ? index : -1;
+    if (resolvedIndex < 0) {
+      const keys = Array.from(state.sessions.keys());
+      resolvedIndex = keys.indexOf(sessionId);
+    }
+    if (resolvedIndex >= 0) {
+      return `Upload batch ${resolvedIndex + 1}`;
+    }
+    return 'Upload batch';
   }
 
-  function createLight(label, stateValue) {
-    const light = document.createElement('span');
-    light.className = 'light';
-    light.dataset.state = stateValue;
-    light.setAttribute('role', 'status');
-    light.setAttribute('tabindex', '0');
-    light.setAttribute('aria-label', `${label}: ${LIGHT_LABELS[stateValue] || stateValue}`);
-    return light;
+  function deriveFileStatus(file) {
+    if (!file) return 'uploading';
+    const message = typeof file.message === 'string' ? file.message.trim() : '';
+    if (file.processing === 'green') return 'complete';
+    if (file.processing === 'amber') return 'processing';
+    if (message && file.processing !== 'green') return 'attention';
+    if (file.upload === 'green') return 'processing';
+    if (file.upload === 'red') return message ? 'attention' : 'uploading';
+    return 'uploading';
+  }
+
+  function summariseSession(sessionId, session) {
+    const summary = { entries: [], statusCounts: new Map(), noteCount: 0, total: 0 };
+    if (!session) return summary;
+    for (const file of session.files.values()) {
+      const statusKey = deriveFileStatus(file);
+      const message = typeof file.message === 'string' ? file.message.trim() : '';
+      if (message) summary.noteCount += 1;
+      summary.entries.push({
+        type: 'file',
+        id: file.fileId,
+        name: file.originalName || 'Document',
+        statusKey,
+        message,
+      });
+      summary.statusCounts.set(statusKey, (summary.statusCounts.get(statusKey) || 0) + 1);
+    }
+    if (Array.isArray(session.rejected)) {
+      session.rejected.forEach((entry, index) => {
+        const reason = typeof entry.reason === 'string' ? entry.reason.trim() : '';
+        const message = reason || 'Rejected';
+        if (reason) summary.noteCount += 1;
+        summary.entries.push({
+          type: 'rejected',
+          id: `rejected-${sessionId}-${index}`,
+          name: entry.originalName || 'Document',
+          statusKey: 'rejected',
+          message,
+        });
+        summary.statusCounts.set('rejected', (summary.statusCounts.get('rejected') || 0) + 1);
+      });
+    }
+    summary.total = summary.entries.length;
+    return summary;
+  }
+
+  function createSessionChip(statusKey, count) {
+    const meta = getStatusMeta(statusKey);
+    const chip = document.createElement('span');
+    chip.className = 'session-chip';
+    chip.dataset.variant = meta.variant || 'accent';
+    chip.setAttribute('role', 'listitem');
+    chip.setAttribute('aria-label', `${meta.label}: ${count}`);
+    chip.title = meta.description || meta.label;
+
+    const dot = document.createElement('span');
+    dot.className = 'session-chip__dot';
+    chip.appendChild(dot);
+
+    const label = document.createElement('span');
+    label.className = 'session-chip__label';
+    label.textContent = meta.label;
+    chip.appendChild(label);
+
+    const countEl = document.createElement('span');
+    countEl.className = 'session-chip__count';
+    countEl.textContent = count;
+    chip.appendChild(countEl);
+    return chip;
+  }
+
+  function createSessionBadge(statusKey) {
+    const meta = getStatusMeta(statusKey);
+    const badge = document.createElement('span');
+    badge.className = 'session-badge';
+    badge.dataset.variant = meta.variant || 'accent';
+    badge.textContent = meta.label;
+    if (meta.description) {
+      badge.title = meta.description;
+    }
+    return badge;
+  }
+
+  function buildSessionCard(sessionId, session, index, summary) {
+    const card = document.createElement('article');
+    card.className = 'session-card';
+    card.dataset.sessionId = sessionId;
+    card.setAttribute('role', 'listitem');
+
+    const attentionCount = (summary.statusCounts.get('attention') || 0)
+      + (summary.statusCounts.get('rejected') || 0);
+    const completedCount = summary.statusCounts.get('complete') || 0;
+    if (attentionCount > 0) {
+      card.classList.add('session-card--alert');
+    } else if (summary.total > 0 && completedCount === summary.total) {
+      card.classList.add('session-card--complete');
+    }
+
+    const titleText = getSessionDisplayLabel(sessionId, session, index);
+    const header = document.createElement('header');
+    header.className = 'session-card__header';
+
+    const heading = document.createElement('div');
+    heading.className = 'session-card__heading';
+
+    const title = document.createElement('h3');
+    title.className = 'session-card__title';
+    const titleId = `session-card-title-${index}`;
+    title.id = titleId;
+    title.textContent = titleText;
+    card.setAttribute('aria-labelledby', titleId);
+    heading.appendChild(title);
+
+    const started = session && session.createdAt ? formatDateTime(session.createdAt) : null;
+    if (started && started !== '—') {
+      const meta = document.createElement('p');
+      meta.className = 'session-card__meta muted';
+      meta.textContent = `Started ${started}`;
+      heading.appendChild(meta);
+    }
+
+    header.appendChild(heading);
+
+    const count = document.createElement('span');
+    count.className = 'session-card__count';
+    count.textContent = summary.total
+      ? `${summary.total} document${summary.total === 1 ? '' : 's'}`
+      : 'Waiting for files';
+    header.appendChild(count);
+
+    card.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'session-card__body';
+
+    const progress = document.createElement('p');
+    progress.className = 'session-card__progress muted';
+    progress.textContent = summary.total
+      ? `${completedCount} of ${summary.total} processed`
+      : 'Waiting for files';
+    body.appendChild(progress);
+
+    const chips = document.createElement('div');
+    chips.className = 'session-card__chips';
+    chips.setAttribute('role', 'list');
+    chips.setAttribute('aria-label', 'Session status overview');
+
+    const renderedStatuses = new Set();
+    SESSION_STATUS_ORDER.forEach((statusKey) => {
+      const countValue = summary.statusCounts.get(statusKey);
+      if (!countValue) return;
+      renderedStatuses.add(statusKey);
+      chips.appendChild(createSessionChip(statusKey, countValue));
+    });
+    summary.statusCounts.forEach((countValue, statusKey) => {
+      if (renderedStatuses.has(statusKey)) return;
+      chips.appendChild(createSessionChip(statusKey, countValue));
+    });
+    if (chips.childElementCount > 0) {
+      body.appendChild(chips);
+    }
+
+    card.appendChild(body);
+
+    const footer = document.createElement('div');
+    footer.className = 'session-card__footer';
+
+    const detailBtn = document.createElement('button');
+    detailBtn.type = 'button';
+    detailBtn.className = 'session-card__details';
+    detailBtn.dataset.sessionId = sessionId;
+    detailBtn.dataset.sessionLabel = titleText;
+    detailBtn.textContent = summary.noteCount
+      ? `View files (${summary.noteCount} notes)`
+      : 'View files';
+    detailBtn.setAttribute(
+      'aria-label',
+      summary.noteCount
+        ? `${titleText}. View files. ${summary.noteCount} file${summary.noteCount === 1 ? '' : 's'} include notes.`
+        : `${titleText}. View files.`,
+    );
+    detailBtn.addEventListener('click', handleSessionDetailButton);
+    footer.appendChild(detailBtn);
+
+    if (summary.noteCount > 0) {
+      const notes = document.createElement('span');
+      notes.className = 'session-card__notes';
+      notes.textContent = `${summary.noteCount} note${summary.noteCount === 1 ? '' : 's'}`;
+      footer.appendChild(notes);
+    }
+
+    card.appendChild(footer);
+    return card;
+  }
+
+  function handleSessionDetailButton(event) {
+    const button = event.currentTarget;
+    if (!(button && button.dataset)) return;
+    const { sessionId } = button.dataset;
+    if (!sessionId) return;
+    sessionDetailReturnFocus = button;
+    openSessionDetail(sessionId, { label: button.dataset.sessionLabel });
+  }
+
+  function populateSessionDetailModal(sessionId, { label } = {}) {
+    if (!(sessionModal && sessionModalList)) return false;
+    const session = state.sessions.get(sessionId);
+    if (!session) return false;
+
+    const summary = summariseSession(sessionId, session);
+    const entries = Array.from(state.sessions.entries());
+    const index = entries.findIndex(([id]) => id === sessionId);
+    const sessionLabel = label || getSessionDisplayLabel(sessionId, session, index);
+
+    if (sessionModalTitle) {
+      sessionModalTitle.textContent = sessionLabel;
+    }
+
+    if (sessionModalSubtitle) {
+      const started = session.createdAt ? formatDateTime(session.createdAt) : '';
+      const docSummary = summary.total
+        ? `${summary.total} document${summary.total === 1 ? '' : 's'}`
+        : 'No documents yet';
+      sessionModalSubtitle.textContent = started && started !== '—'
+        ? `${docSummary} • Started ${started}`
+        : docSummary;
+    }
+
+    sessionModalList.innerHTML = '';
+
+    if (summary.entries.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'session-modal__empty muted';
+      empty.textContent = 'No files uploaded yet.';
+      sessionModalList.appendChild(empty);
+    } else {
+      summary.entries.forEach((entry) => {
+        const item = document.createElement('li');
+        item.className = 'session-modal__item';
+        item.setAttribute('role', 'listitem');
+
+        const name = document.createElement('div');
+        name.className = 'session-modal__name';
+        name.textContent = entry.name || 'Document';
+        item.appendChild(name);
+
+        const status = createSessionBadge(entry.statusKey);
+        status.classList.add('session-modal__status');
+        item.appendChild(status);
+
+        if (entry.message) {
+          const note = document.createElement('p');
+          note.className = 'session-modal__note';
+          note.textContent = entry.message;
+          item.appendChild(note);
+        }
+
+        sessionModalList.appendChild(item);
+      });
+    }
+
+    sessionModal.dataset.sessionId = sessionId;
+    sessionModal.dataset.sessionLabel = sessionLabel;
+    sessionModal.dataset.noteCount = String(summary.noteCount || 0);
+    return true;
+  }
+
+  function openSessionDetail(sessionId, { label } = {}) {
+    if (!sessionModal) return;
+    const populated = populateSessionDetailModal(sessionId, { label });
+    if (!populated) return;
+    if (!sessionDetailReturnFocus && document.activeElement instanceof HTMLElement) {
+      sessionDetailReturnFocus = document.activeElement;
+    }
+    sessionModal.removeAttribute('hidden');
+    sessionModal.setAttribute('aria-hidden', 'false');
+    if (document.body) {
+      document.body.classList.add('session-modal-open');
+    }
+    if (sessionModalDialog) {
+      sessionModalDialog.focus();
+    }
+    if (!sessionModalKeydownBound) {
+      document.addEventListener('keydown', handleSessionModalKeydown);
+      sessionModalKeydownBound = true;
+    }
+  }
+
+  function closeSessionDetail() {
+    if (!sessionModal) return;
+    if (sessionModal.getAttribute('aria-hidden') === 'true') return;
+    sessionModal.setAttribute('aria-hidden', 'true');
+    sessionModal.setAttribute('hidden', '');
+    sessionModal.dataset.sessionId = '';
+    sessionModal.dataset.sessionLabel = '';
+    sessionModal.dataset.noteCount = '';
+    if (sessionModalList) {
+      sessionModalList.innerHTML = '';
+    }
+    if (document.body) {
+      document.body.classList.remove('session-modal-open');
+    }
+    if (sessionModalKeydownBound) {
+      document.removeEventListener('keydown', handleSessionModalKeydown);
+      sessionModalKeydownBound = false;
+    }
+    if (sessionDetailReturnFocus && typeof sessionDetailReturnFocus.focus === 'function') {
+      sessionDetailReturnFocus.focus();
+    }
+    sessionDetailReturnFocus = null;
+  }
+
+  function refreshSessionDetailModal() {
+    if (!(sessionModal && sessionModal.getAttribute('aria-hidden') === 'false')) return;
+    const sessionId = sessionModal.dataset.sessionId;
+    if (!sessionId) {
+      closeSessionDetail();
+      return;
+    }
+    const populated = populateSessionDetailModal(sessionId, {
+      label: sessionModal.dataset.sessionLabel,
+    });
+    if (!populated) {
+      closeSessionDetail();
+    }
+  }
+
+  function handleSessionModalKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeSessionDetail();
+    }
   }
 
   function normaliseFileRecord(sessionId, file) {
@@ -1833,9 +2177,23 @@
 
   function upsertSession(sessionId) {
     if (!state.sessions.has(sessionId)) {
-      state.sessions.set(sessionId, { files: new Map(), rejected: [] });
+      const nextIndex = state.sessions.size + 1;
+      state.sessions.set(sessionId, {
+        files: new Map(),
+        rejected: [],
+        createdAt: Date.now(),
+        displayName: `Upload batch ${nextIndex}`,
+      });
     }
-    return state.sessions.get(sessionId);
+    const session = state.sessions.get(sessionId);
+    if (session && !session.createdAt) {
+      session.createdAt = Date.now();
+    }
+    if (session && !session.displayName) {
+      const index = Array.from(state.sessions.keys()).indexOf(sessionId);
+      session.displayName = index >= 0 ? `Upload batch ${index + 1}` : 'Upload batch';
+    }
+    return session;
   }
 
   function handleUploadResponse(payload) {
@@ -1866,6 +2224,7 @@
     sessionRows.innerHTML = '';
     sessionEmpty.style.display = '';
     sessionEmpty.textContent = message;
+    closeSessionDetail();
     hideProgress();
   }
 
@@ -2641,6 +3000,20 @@
     });
   }
 
+  if (sessionModalClose) {
+    sessionModalClose.addEventListener('click', () => {
+      closeSessionDetail();
+    });
+  }
+
+  if (sessionModal) {
+    sessionModal.addEventListener('click', (event) => {
+      if (event.target === sessionModal) {
+        closeSessionDetail();
+      }
+    });
+  }
+
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (manualModal && manualModal.classList.contains('is-visible')) {
@@ -2649,6 +3022,10 @@
     }
     if (jsonModal && jsonModal.classList.contains('is-visible')) {
       hideJsonModal();
+      return;
+    }
+    if (sessionModal && sessionModal.getAttribute('aria-hidden') === 'false') {
+      closeSessionDetail();
       return;
     }
     if (viewerRoot && viewerRoot.getAttribute('aria-hidden') === 'false') {
