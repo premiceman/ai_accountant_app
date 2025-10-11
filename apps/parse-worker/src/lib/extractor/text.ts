@@ -1,7 +1,7 @@
 import { Readable } from 'stream';
-import { fileIdToKey, getObject } from '../../../../../backend/src/lib/r2';
 import { extractPdfText } from '../../../../../shared/extraction/extractPdfText';
 import logger from '../logger';
+import { fileIdToKey, getObjectStream } from '../storage';
 
 type ExtractResult = { text: string; pages: string[] };
 
@@ -18,11 +18,11 @@ export async function extractText({ fileId, text }: { fileId: string; text?: str
     return { text, pages: text.split(/\n+/).map((line) => line.trim()).filter(Boolean) };
   }
   const key = fileIdToKey(fileId);
-  const object = await getObject(key);
-  if (!object.Body || !(object.Body instanceof Readable)) {
+  const stream = await getObjectStream(key);
+  if (!(stream instanceof Readable)) {
     throw new Error('Document body missing from storage response');
   }
-  const buffer = await streamToBuffer(object.Body);
+  const buffer = await streamToBuffer(stream);
   const parsed = await extractPdfText(buffer);
   const finalText = parsed.fullText || buffer.toString('utf8');
   if (!finalText.trim()) {

@@ -9,7 +9,7 @@ import connectMongo from './lib/mongo';
 import { loadOverrides, applyOverrides } from './lib/overrides';
 import { extractText } from './lib/extractor/text';
 import routeExtraction from './lib/extractor/router';
-import { payslipSchema } from './lib/types';
+import { validatePayslipMetrics, ValidationError } from './lib/types';
 import { DocumentInsights } from './lib/models';
 
 const queueName = process.env.DOC_INSIGHTS_QUEUE || 'doc-insights';
@@ -49,7 +49,12 @@ async function processJob(job: Job) {
 
   const extraction = await routeExtraction(docType, resolvedText, overrideApplication.applied);
   if (docType === 'payslip') {
-    payslipSchema.parse(extraction.metrics.payslip);
+    try {
+      extraction.metrics.payslip = validatePayslipMetrics(extraction.metrics.payslip);
+    } catch (err) {
+      const error = err instanceof ValidationError ? err : new Error('Payslip validation failed');
+      throw error;
+    }
   }
 
   const metrics = extraction.metrics;
