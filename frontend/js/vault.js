@@ -103,6 +103,54 @@
   let jsonModalReturnFocus = null;
   let jsonModalStylesInjected = false;
 
+  const MANUAL_SCHEMA_OPTIONS = [
+    { value: 'payslip', label: 'Payslip' },
+    { value: 'statement', label: 'Statement' },
+  ];
+
+  const MANUAL_FIELD_DEFS = {
+    payslip: [
+      { name: 'payDate', label: 'Pay date', type: 'date' },
+      { name: 'payFrequency', label: 'Pay frequency', type: 'text', placeholder: 'e.g. Monthly' },
+      { name: 'currency', label: 'Currency', type: 'text', maxLength: 3, transform: (value) => value.toUpperCase() },
+      { name: 'totalEarnings', label: 'Total earnings', type: 'number', inputMode: 'decimal' },
+      { name: 'totalDeductions', label: 'Total deductibles', type: 'number', inputMode: 'decimal' },
+      { name: 'netPay', label: 'Net pay', type: 'number', inputMode: 'decimal' },
+      { name: 'periodStart', label: 'Period start', type: 'date' },
+      { name: 'periodEnd', label: 'Period end', type: 'date' },
+      { name: 'taxCode', label: 'Tax code', type: 'text' },
+      { name: 'tax', label: 'Income tax', type: 'number', inputMode: 'decimal' },
+      { name: 'ni', label: 'National Insurance', type: 'number', inputMode: 'decimal' },
+      { name: 'pension', label: 'Pension', type: 'number', inputMode: 'decimal' },
+      { name: 'studentLoan', label: 'Student loan', type: 'number', inputMode: 'decimal' },
+    ],
+    statement: [
+      { name: 'accountName', label: 'Account name', type: 'text' },
+      { name: 'accountNumber', label: 'Account number', type: 'text' },
+      { name: 'accountType', label: 'Account type', type: 'text', placeholder: 'e.g. Current account' },
+      { name: 'currency', label: 'Currency', type: 'text', maxLength: 3, transform: (value) => value.toUpperCase() },
+      { name: 'periodStart', label: 'Period start', type: 'date' },
+      { name: 'periodEnd', label: 'Period end', type: 'date' },
+      { name: 'openingBalance', label: 'Opening balance', type: 'number', inputMode: 'decimal' },
+      { name: 'closingBalance', label: 'Closing balance', type: 'number', inputMode: 'decimal' },
+      { name: 'totalIn', label: 'Total in', type: 'number', inputMode: 'decimal' },
+      { name: 'totalOut', label: 'Total out', type: 'number', inputMode: 'decimal' },
+    ],
+  };
+
+  let manualModal = null;
+  let manualModalDialog = null;
+  let manualModalTitle = null;
+  let manualModalForm = null;
+  let manualModalSchema = null;
+  let manualModalFields = null;
+  let manualModalError = null;
+  let manualModalSave = null;
+  let manualModalCancel = null;
+  let manualModalReturnFocus = null;
+  let manualModalStylesInjected = false;
+  const manualModalState = { file: null, schema: 'payslip', valuesBySchema: new Map() };
+
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
   const sessionRows = document.getElementById('session-rows');
@@ -509,6 +557,822 @@
     }
   }
 
+  function injectManualModalStyles() {
+    if (manualModalStylesInjected) return;
+    manualModalStylesInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .vault-manual-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.55); z-index: 1325; }
+      .vault-manual-modal.is-visible { display: flex; }
+      .vault-manual-modal__dialog { position: relative; width: min(720px, 100%); max-height: min(85vh, 720px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid var(--vault-border, rgba(15, 23, 42, 0.08)); box-shadow: var(--vault-shadow, 0 18px 50px rgba(15, 23, 42, 0.15)); display: flex; flex-direction: column; overflow: hidden; }
+      .vault-manual-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      .vault-manual-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
+      .vault-manual-modal__close { border: none; background: transparent; font-size: 1.35rem; line-height: 1; padding: 4px; cursor: pointer; color: inherit; }
+      .vault-manual-modal__body { flex: 1; overflow: auto; padding: 18px 22px 6px; }
+      .vault-manual-modal__form { display: flex; flex-direction: column; gap: 16px; }
+      .vault-manual-modal__schema { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
+      .vault-manual-modal__schema select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(15, 23, 42, 0.12); background: rgba(248, 250, 255, 0.9); color: inherit; }
+      .vault-manual-modal__grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+      .vault-manual-modal__field { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; }
+      .vault-manual-modal__field label { font-weight: 600; font-size: 0.85rem; color: rgba(15, 23, 42, 0.75); }
+      .vault-manual-modal__field input,
+      .vault-manual-modal__field select,
+      .vault-manual-modal__field textarea { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(15, 23, 42, 0.12); background: rgba(248, 250, 255, 0.9); color: inherit; }
+      .vault-manual-modal__field input:focus,
+      .vault-manual-modal__field select:focus,
+      .vault-manual-modal__field textarea:focus { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 1px; }
+      .vault-manual-modal__error { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #b91c1c; padding: 10px 12px; border-radius: 12px; font-size: 0.85rem; }
+      .vault-manual-modal__footer { display: flex; justify-content: flex-end; gap: 12px; padding: 12px 22px 20px; border-top: 1px solid rgba(15, 23, 42, 0.08); background: rgba(248, 250, 255, 0.6); }
+      .vault-manual-modal__footer button { border-radius: 999px; padding: 8px 18px; font-size: 0.9rem; border: 1px solid rgba(103, 89, 255, 0.22); background: #fff; color: rgba(103, 89, 255, 0.9); cursor: pointer; transition: background 0.18s ease, color 0.18s ease; }
+      .vault-manual-modal__footer button:hover:not(:disabled) { background: rgba(103, 89, 255, 0.16); }
+      .vault-manual-modal__footer button:disabled { opacity: 0.6; cursor: not-allowed; }
+      .vault-manual-modal__cancel { border-color: rgba(15, 23, 42, 0.18); color: rgba(15, 23, 42, 0.75); }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureManualModal() {
+    if (manualModal) return manualModal;
+    injectManualModalStyles();
+
+    const modal = document.createElement('div');
+    modal.className = 'vault-manual-modal';
+    modal.setAttribute('aria-hidden', 'true');
+
+    const dialog = document.createElement('div');
+    dialog.className = 'vault-manual-modal__dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'vault-manual-modal-title');
+    dialog.tabIndex = -1;
+
+    const header = document.createElement('header');
+    header.className = 'vault-manual-modal__header';
+
+    const title = document.createElement('h2');
+    title.className = 'vault-manual-modal__title';
+    title.id = 'vault-manual-modal-title';
+    title.textContent = 'Edit document details';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'vault-manual-modal__close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '&times;';
+
+    header.append(title, closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'vault-manual-modal__body';
+
+    const form = document.createElement('form');
+    form.className = 'vault-manual-modal__form';
+
+    const schemaField = document.createElement('div');
+    schemaField.className = 'vault-manual-modal__schema';
+
+    const schemaLabel = document.createElement('label');
+    schemaLabel.textContent = 'Document schema';
+
+    const schemaSelect = document.createElement('select');
+    schemaSelect.name = 'manual-schema';
+    MANUAL_SCHEMA_OPTIONS.forEach((option) => {
+      const opt = document.createElement('option');
+      opt.value = option.value;
+      opt.textContent = option.label;
+      schemaSelect.appendChild(opt);
+    });
+    schemaField.append(schemaLabel, schemaSelect);
+
+    const fieldsGrid = document.createElement('div');
+    fieldsGrid.className = 'vault-manual-modal__grid';
+
+    const errorBox = document.createElement('div');
+    errorBox.className = 'vault-manual-modal__error';
+    errorBox.hidden = true;
+
+    const footer = document.createElement('div');
+    footer.className = 'vault-manual-modal__footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'vault-manual-modal__cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.textContent = 'Save changes';
+
+    footer.append(cancelBtn, saveBtn);
+
+    form.append(schemaField, fieldsGrid, errorBox, footer);
+    body.appendChild(form);
+    dialog.append(header, body);
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    manualModal = modal;
+    manualModalDialog = dialog;
+    manualModalTitle = title;
+    manualModalForm = form;
+    manualModalSchema = schemaSelect;
+    manualModalFields = fieldsGrid;
+    manualModalError = errorBox;
+    manualModalSave = saveBtn;
+    manualModalCancel = cancelBtn;
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        closeManualModal();
+      }
+    });
+    closeBtn.addEventListener('click', () => {
+      closeManualModal();
+    });
+    cancelBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeManualModal();
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitManualInsight();
+    });
+    schemaSelect.addEventListener('change', () => {
+      handleManualSchemaChange(schemaSelect.value);
+    });
+
+    return modal;
+  }
+
+  function closeManualModal({ restoreFocus = true } = {}) {
+    if (!manualModal) return;
+    manualModal.classList.remove('is-visible');
+    manualModal.setAttribute('aria-hidden', 'true');
+    manualModalState.file = null;
+    if (restoreFocus && manualModalReturnFocus) {
+      try {
+        manualModalReturnFocus.focus();
+      } catch (error) {
+        console.warn('Failed to restore focus after closing manual modal', error);
+      }
+    }
+    manualModalReturnFocus = null;
+  }
+
+  function getFieldLabel(schema, name) {
+    const defs = MANUAL_FIELD_DEFS[schema] || [];
+    const match = defs.find((field) => field.name === name);
+    return match ? match.label : name;
+  }
+
+  function toInputDateValue(value) {
+    if (!value) return '';
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
+  }
+
+  function formatInputNumber(value) {
+    if (value === '' || value == null) return '';
+    const number = toNumberLike(value);
+    if (number == null) {
+      return String(value);
+    }
+    return String(number);
+  }
+
+  function safeStringValue(value) {
+    if (value == null) return '';
+    return String(value);
+  }
+
+  function getDetailValue(details, label) {
+    if (!Array.isArray(details)) return null;
+    const entry = details.find((item) => item && item.label === label);
+    return entry ? entry.value : null;
+  }
+
+  function getSummaryValue(summary, label) {
+    if (!Array.isArray(summary)) return null;
+    const entry = summary.find((item) => item && item.label === label);
+    return entry ? entry.value : null;
+  }
+
+  function extractManualValues(file, schema) {
+    const metrics = file?.metrics || {};
+    const details = Array.isArray(file?.details) ? file.details : [];
+    const values = {};
+    if (schema === 'payslip') {
+      const payDate = metrics.payDate || metrics.documentDate || metrics.documentMonth || file?.raw?.documentDate || null;
+      values.payDate = toInputDateValue(payDate);
+      values.payFrequency = metrics.payFrequency || getDetailValue(details, 'Pay frequency') || '';
+      const currency = metrics.currency || metrics.currencyCode || file.currency || getDetailValue(details, 'Currency') || '';
+      values.currency = safeStringValue(currency).toUpperCase();
+      values.totalEarnings = formatInputNumber(
+        pickMetric(metrics, ['totalEarnings', 'gross', 'grossPay']) || getSummaryValue(file?.summary, 'Total earnings')
+      );
+      values.totalDeductions = formatInputNumber(
+        pickMetric(metrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']) ||
+          getSummaryValue(file?.summary, 'Total deductibles')
+      );
+      values.netPay = formatInputNumber(
+        pickMetric(metrics, ['net', 'netPay', 'takeHome']) || getSummaryValue(file?.summary, 'Net pay')
+      );
+      const periodStart = metrics.periodStart || metrics.period?.start || metrics.periodStartDate || metrics.period?.from;
+      const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.periodEndDate || metrics.period?.to;
+      values.periodStart = toInputDateValue(periodStart || getDetailValue(details, 'Period start'));
+      values.periodEnd = toInputDateValue(periodEnd || getDetailValue(details, 'Period end'));
+      values.taxCode = metrics.taxCode || getDetailValue(details, 'Tax code') || '';
+      values.tax = formatInputNumber(metrics.tax ?? getDetailValue(details, 'Income tax'));
+      values.ni = formatInputNumber(metrics.ni ?? getDetailValue(details, 'National Insurance'));
+      values.pension = formatInputNumber(metrics.pension ?? getDetailValue(details, 'Pension'));
+      values.studentLoan = formatInputNumber(metrics.studentLoan ?? getDetailValue(details, 'Student loan'));
+    } else if (schema === 'statement') {
+      const currency = metrics.currency || metrics.currencyCode || file.currency || getDetailValue(details, 'Currency') || '';
+      const periodStart = metrics.periodStart || metrics.period?.start || metrics.period?.from || metrics.statementPeriod?.start;
+      const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.period?.to || metrics.statementPeriod?.end;
+      values.accountName = metrics.accountName || file.title || getDetailValue(details, 'Account name') || '';
+      values.accountNumber = metrics.accountNumber || getSummaryValue(file?.summary, 'Account number') || '';
+      values.accountType = metrics.accountType || getDetailValue(details, 'Account type') || '';
+      values.currency = safeStringValue(currency).toUpperCase();
+      values.periodStart = toInputDateValue(periodStart || getDetailValue(details, 'Period start'));
+      values.periodEnd = toInputDateValue(periodEnd || getDetailValue(details, 'Period end'));
+      values.openingBalance = formatInputNumber(
+        pickMetric(metrics, ['openingBalance', 'startingBalance']) || getDetailValue(details, 'Opening balance')
+      );
+      values.closingBalance = formatInputNumber(
+        pickMetric(metrics, ['closingBalance', 'endingBalance']) || getDetailValue(details, 'Closing balance')
+      );
+      values.totalIn = formatInputNumber(
+        pickMetric(metrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']) ||
+          getSummaryValue(file?.summary, 'Total in')
+      );
+      values.totalOut = formatInputNumber(
+        pickMetric(metrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']) ||
+          getSummaryValue(file?.summary, 'Total out')
+      );
+    }
+    return values;
+  }
+
+  function renderManualFields(schema, values = {}) {
+    if (!manualModalFields) return;
+    manualModalFields.innerHTML = '';
+    const defs = MANUAL_FIELD_DEFS[schema] || [];
+    defs.forEach((field) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'vault-manual-modal__field';
+
+      const label = document.createElement('label');
+      label.setAttribute('for', `manual-${field.name}`);
+      label.textContent = field.label;
+
+      let control = null;
+      if (field.type === 'textarea') {
+        control = document.createElement('textarea');
+      } else if (field.type === 'select') {
+        control = document.createElement('select');
+      } else {
+        control = document.createElement('input');
+        control.type = field.type === 'date' ? 'date' : 'text';
+        if (field.type === 'number') {
+          control.inputMode = field.inputMode || 'decimal';
+          control.setAttribute('step', 'any');
+        }
+      }
+      control.id = `manual-${field.name}`;
+      control.name = `manual-${field.name}`;
+      control.autocomplete = 'off';
+      if (field.placeholder) control.placeholder = field.placeholder;
+      if (field.maxLength) control.maxLength = field.maxLength;
+      if (field.inputMode && field.type !== 'number') control.inputMode = field.inputMode;
+      if (field.type === 'date') control.max = '9999-12-31';
+      control.value = values[field.name] != null ? values[field.name] : '';
+
+      wrapper.append(label, control);
+      manualModalFields.appendChild(wrapper);
+    });
+    const firstField = manualModalFields.querySelector('input, select, textarea');
+    if (firstField) {
+      firstField.focus({ preventScroll: true });
+    }
+  }
+
+  function initialiseManualValues(file) {
+    manualModalState.valuesBySchema.clear();
+    MANUAL_SCHEMA_OPTIONS.forEach((option) => {
+      manualModalState.valuesBySchema.set(option.value, extractManualValues(file, option.value));
+    });
+  }
+
+  function handleManualSchemaChange(nextSchema) {
+    if (!manualModalSchema) return;
+    const schemaKey = MANUAL_FIELD_DEFS[nextSchema] ? nextSchema : MANUAL_SCHEMA_OPTIONS[0].value;
+    if (manualModalState.schema && manualModalState.schema !== schemaKey) {
+      const currentValues = readManualInputs(manualModalState.schema);
+      manualModalState.valuesBySchema.set(manualModalState.schema, currentValues);
+    }
+    manualModalState.schema = schemaKey;
+    manualModalSchema.value = schemaKey;
+    const values = manualModalState.valuesBySchema.get(schemaKey) || {};
+    renderManualFields(schemaKey, values);
+  }
+
+  function readManualInputs(schema) {
+    const values = {};
+    const defs = MANUAL_FIELD_DEFS[schema] || [];
+    defs.forEach((field) => {
+      const input = manualModalForm?.elements[`manual-${field.name}`];
+      if (!input) {
+        values[field.name] = '';
+        return;
+      }
+      if (
+        input instanceof HTMLInputElement ||
+        input instanceof HTMLTextAreaElement ||
+        input instanceof HTMLSelectElement
+      ) {
+        values[field.name] = input.value;
+      } else {
+        values[field.name] = '';
+      }
+    });
+    return values;
+  }
+
+  function pruneUndefined(source) {
+    if (!source) return {};
+    const result = {};
+    Object.entries(source).forEach(([key, value]) => {
+      if (value !== undefined) {
+        result[key] = value;
+      }
+    });
+    return result;
+  }
+
+  function readNumberField(schema, rawValues, name, cleanedRaw, errors) {
+    const label = getFieldLabel(schema, name);
+    const rawValue = rawValues[name] == null ? '' : String(rawValues[name]).trim();
+    cleanedRaw[name] = rawValue;
+    if (!rawValue) {
+      return { shouldApply: true, value: null };
+    }
+    const parsed = toNumberLike(rawValue);
+    if (parsed == null || !Number.isFinite(parsed)) {
+      errors.push(`${label} must be a number`);
+      return { shouldApply: false, value: null };
+    }
+    return { shouldApply: true, value: parsed };
+  }
+
+  function readStringField(schema, rawValues, name, cleanedRaw, { uppercase = false } = {}) {
+    let rawValue = rawValues[name] == null ? '' : String(rawValues[name]).trim();
+    if (uppercase) rawValue = rawValue.toUpperCase();
+    cleanedRaw[name] = rawValue;
+    if (!rawValue) {
+      return { shouldApply: true, value: null };
+    }
+    return { shouldApply: true, value: rawValue };
+  }
+
+  function readDateField(schema, rawValues, name, cleanedRaw, errors) {
+    const label = getFieldLabel(schema, name);
+    const rawValue = rawValues[name] == null ? '' : String(rawValues[name]).trim();
+    cleanedRaw[name] = rawValue;
+    if (!rawValue) {
+      return { shouldApply: true, value: null };
+    }
+    const date = new Date(rawValue);
+    if (Number.isNaN(date.getTime())) {
+      errors.push(`${label} must be a valid date`);
+      return { shouldApply: false, value: null };
+    }
+    return { shouldApply: true, value: rawValue };
+  }
+
+  function transformManualValues(schema, rawValues, file) {
+    if (!schema || !MANUAL_FIELD_DEFS[schema]) {
+      return { error: 'Unsupported document schema selected.' };
+    }
+    const cleanedRaw = {};
+    const errors = [];
+    const patch = {};
+    const metadataPatch = {};
+    const existingMetrics = { ...(file?.metrics || {}) };
+
+    if (schema === 'payslip') {
+      const payDate = readDateField(schema, rawValues, 'payDate', cleanedRaw, errors);
+      if (payDate.shouldApply) {
+        patch.payDate = payDate.value;
+        metadataPatch.documentDate = payDate.value;
+      }
+      const payFrequency = readStringField(schema, rawValues, 'payFrequency', cleanedRaw);
+      if (payFrequency.shouldApply) {
+        patch.payFrequency = payFrequency.value;
+      }
+      const currency = readStringField(schema, rawValues, 'currency', cleanedRaw, { uppercase: true });
+      if (currency.shouldApply) {
+        patch.currency = currency.value;
+      }
+      const totalEarnings = readNumberField(schema, rawValues, 'totalEarnings', cleanedRaw, errors);
+      if (totalEarnings.shouldApply) {
+        patch.totalEarnings = totalEarnings.value;
+      }
+      const totalDeductions = readNumberField(schema, rawValues, 'totalDeductions', cleanedRaw, errors);
+      if (totalDeductions.shouldApply) {
+        patch.totalDeductions = totalDeductions.value;
+      }
+      const netPay = readNumberField(schema, rawValues, 'netPay', cleanedRaw, errors);
+      if (netPay.shouldApply) {
+        patch.netPay = netPay.value;
+      }
+      const periodStart = readDateField(schema, rawValues, 'periodStart', cleanedRaw, errors);
+      const periodEnd = readDateField(schema, rawValues, 'periodEnd', cleanedRaw, errors);
+      if (periodStart.shouldApply || periodEnd.shouldApply) {
+        patch.periodStart = periodStart.shouldApply ? periodStart.value : undefined;
+        patch.periodEnd = periodEnd.shouldApply ? periodEnd.value : undefined;
+        metadataPatch.period = {
+          start: periodStart.shouldApply ? periodStart.value : existingMetrics.period?.start || existingMetrics.periodStart || null,
+          end: periodEnd.shouldApply ? periodEnd.value : existingMetrics.period?.end || existingMetrics.periodEnd || null,
+        };
+      }
+      const taxCode = readStringField(schema, rawValues, 'taxCode', cleanedRaw);
+      if (taxCode.shouldApply) {
+        patch.taxCode = taxCode.value;
+      }
+      const tax = readNumberField(schema, rawValues, 'tax', cleanedRaw, errors);
+      if (tax.shouldApply) {
+        patch.tax = tax.value;
+      }
+      const ni = readNumberField(schema, rawValues, 'ni', cleanedRaw, errors);
+      if (ni.shouldApply) {
+        patch.ni = ni.value;
+      }
+      const pension = readNumberField(schema, rawValues, 'pension', cleanedRaw, errors);
+      if (pension.shouldApply) {
+        patch.pension = pension.value;
+      }
+      const studentLoan = readNumberField(schema, rawValues, 'studentLoan', cleanedRaw, errors);
+      if (studentLoan.shouldApply) {
+        patch.studentLoan = studentLoan.value;
+      }
+
+      if (errors.length) {
+        return { error: errors.join(' ') };
+      }
+
+      const mergedMetrics = { ...existingMetrics };
+      Object.entries(patch).forEach(([key, value]) => {
+        if (value === undefined) return;
+        if (value === null) {
+          delete mergedMetrics[key];
+        } else {
+          mergedMetrics[key] = value;
+        }
+      });
+
+      const currencyCode = patch.currency || mergedMetrics.currency || file.currency || 'GBP';
+      mergedMetrics.currency = currencyCode || 'GBP';
+
+      const mergedPeriodStart =
+        (patch.periodStart !== undefined ? patch.periodStart : mergedMetrics.periodStart || mergedMetrics.period?.start) || null;
+      const mergedPeriodEnd =
+        (patch.periodEnd !== undefined ? patch.periodEnd : mergedMetrics.periodEnd || mergedMetrics.period?.end) || null;
+
+      if (mergedPeriodStart || mergedPeriodEnd) {
+        mergedMetrics.period = { ...(mergedMetrics.period || {}) };
+        if (mergedPeriodStart) {
+          mergedMetrics.period.start = mergedPeriodStart;
+        } else {
+          delete mergedMetrics.period.start;
+        }
+        if (mergedPeriodEnd) {
+          mergedMetrics.period.end = mergedPeriodEnd;
+        } else {
+          delete mergedMetrics.period.end;
+        }
+      }
+
+      const payDateValue =
+        (patch.payDate !== undefined ? patch.payDate : mergedMetrics.payDate || mergedMetrics.documentDate || mergedMetrics.documentMonth) ||
+        null;
+      if (payDateValue) {
+        mergedMetrics.payDate = payDateValue;
+      } else {
+        delete mergedMetrics.payDate;
+      }
+
+      const totalEarningsValue = pickMetric(mergedMetrics, ['totalEarnings', 'gross', 'grossPay']);
+      const totalDeductionsValue = pickMetric(mergedMetrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']);
+      const netPayValue = pickMetric(mergedMetrics, ['net', 'netPay', 'takeHome']);
+
+      const summary = [
+        { label: 'Date of payslip', value: formatDate(payDateValue) },
+        { label: 'Total earnings', value: formatMoney(totalEarningsValue, mergedMetrics.currency) },
+        { label: 'Total deductibles', value: formatMoney(totalDeductionsValue, mergedMetrics.currency) },
+        { label: 'Net pay', value: formatMoney(netPayValue, mergedMetrics.currency) },
+      ];
+
+      const details = [];
+      if (mergedPeriodStart) details.push({ label: 'Period start', value: formatDate(mergedPeriodStart) });
+      if (mergedPeriodEnd) details.push({ label: 'Period end', value: formatDate(mergedPeriodEnd) });
+      if (mergedMetrics.payFrequency) details.push({ label: 'Pay frequency', value: mergedMetrics.payFrequency });
+      if (mergedMetrics.taxCode) details.push({ label: 'Tax code', value: mergedMetrics.taxCode });
+      if (mergedMetrics.tax != null) details.push({ label: 'Income tax', value: formatMoney(mergedMetrics.tax, mergedMetrics.currency) });
+      if (mergedMetrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(mergedMetrics.ni, mergedMetrics.currency) });
+      if (mergedMetrics.pension != null)
+        details.push({ label: 'Pension', value: formatMoney(mergedMetrics.pension, mergedMetrics.currency) });
+      if (mergedMetrics.studentLoan != null)
+        details.push({ label: 'Student loan', value: formatMoney(mergedMetrics.studentLoan, mergedMetrics.currency) });
+
+      const subtitle = mergedMetrics.payFrequency ? `${mergedMetrics.payFrequency} payslip` : file.subtitle || 'Payslip';
+      const title = formatDate(payDateValue) || file.title || 'Payslip';
+
+      return {
+        payload: { metrics: pruneUndefined(patch), metadata: pruneUndefined(metadataPatch) },
+        display: {
+          metrics: mergedMetrics,
+          metadata: metadataPatch,
+          currency: mergedMetrics.currency,
+          title,
+          subtitle,
+          summary,
+          details,
+        },
+        rawValues: cleanedRaw,
+      };
+    }
+
+    if (schema === 'statement') {
+      const accountName = readStringField(schema, rawValues, 'accountName', cleanedRaw);
+      if (accountName.shouldApply) {
+        metadataPatch.accountName = accountName.value;
+        patch.accountName = accountName.value;
+      }
+      const accountNumber = readStringField(schema, rawValues, 'accountNumber', cleanedRaw);
+      if (accountNumber.shouldApply) {
+        patch.accountNumber = accountNumber.value;
+      }
+      const accountType = readStringField(schema, rawValues, 'accountType', cleanedRaw);
+      if (accountType.shouldApply) {
+        patch.accountType = accountType.value;
+      }
+      const currency = readStringField(schema, rawValues, 'currency', cleanedRaw, { uppercase: true });
+      if (currency.shouldApply) {
+        patch.currency = currency.value;
+      }
+      const periodStart = readDateField(schema, rawValues, 'periodStart', cleanedRaw, errors);
+      const periodEnd = readDateField(schema, rawValues, 'periodEnd', cleanedRaw, errors);
+      if (periodStart.shouldApply || periodEnd.shouldApply) {
+        patch.periodStart = periodStart.shouldApply ? periodStart.value : undefined;
+        patch.periodEnd = periodEnd.shouldApply ? periodEnd.value : undefined;
+        metadataPatch.statementPeriod = {
+          start: periodStart.shouldApply
+            ? periodStart.value
+            : existingMetrics.statementPeriod?.start || existingMetrics.periodStart || null,
+          end: periodEnd.shouldApply
+            ? periodEnd.value
+            : existingMetrics.statementPeriod?.end || existingMetrics.periodEnd || null,
+        };
+      }
+      const openingBalance = readNumberField(schema, rawValues, 'openingBalance', cleanedRaw, errors);
+      if (openingBalance.shouldApply) {
+        patch.openingBalance = openingBalance.value;
+      }
+      const closingBalance = readNumberField(schema, rawValues, 'closingBalance', cleanedRaw, errors);
+      if (closingBalance.shouldApply) {
+        patch.closingBalance = closingBalance.value;
+      }
+      const totalIn = readNumberField(schema, rawValues, 'totalIn', cleanedRaw, errors);
+      if (totalIn.shouldApply) {
+        patch.totalIn = totalIn.value;
+      }
+      const totalOut = readNumberField(schema, rawValues, 'totalOut', cleanedRaw, errors);
+      if (totalOut.shouldApply) {
+        patch.totalOut = totalOut.value;
+      }
+
+      if (errors.length) {
+        return { error: errors.join(' ') };
+      }
+
+      const mergedMetrics = { ...existingMetrics };
+      Object.entries(patch).forEach(([key, value]) => {
+        if (value === undefined) return;
+        if (value === null) {
+          delete mergedMetrics[key];
+        } else {
+          mergedMetrics[key] = value;
+        }
+      });
+
+      const currencyCode = patch.currency || mergedMetrics.currency || file.currency || 'GBP';
+      mergedMetrics.currency = currencyCode || 'GBP';
+
+      const mergedPeriodStart =
+        (patch.periodStart !== undefined
+          ? patch.periodStart
+          : mergedMetrics.periodStart || mergedMetrics.period?.start || mergedMetrics.statementPeriod?.start) || null;
+      const mergedPeriodEnd =
+        (patch.periodEnd !== undefined
+          ? patch.periodEnd
+          : mergedMetrics.periodEnd || mergedMetrics.period?.end || mergedMetrics.statementPeriod?.end) || null;
+
+      if (mergedPeriodStart || mergedPeriodEnd) {
+        mergedMetrics.period = { ...(mergedMetrics.period || {}) };
+        mergedMetrics.statementPeriod = { ...(mergedMetrics.statementPeriod || {}) };
+        if (mergedPeriodStart) {
+          mergedMetrics.period.start = mergedPeriodStart;
+          mergedMetrics.statementPeriod.start = mergedPeriodStart;
+        } else {
+          delete mergedMetrics.period.start;
+          delete mergedMetrics.statementPeriod.start;
+        }
+        if (mergedPeriodEnd) {
+          mergedMetrics.period.end = mergedPeriodEnd;
+          mergedMetrics.statementPeriod.end = mergedPeriodEnd;
+        } else {
+          delete mergedMetrics.period.end;
+          delete mergedMetrics.statementPeriod.end;
+        }
+      }
+
+      const totalInValue = pickMetric(mergedMetrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']);
+      const totalOutValue = pickMetric(mergedMetrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']);
+      const openingBalanceValue = pickMetric(mergedMetrics, ['openingBalance', 'startingBalance']);
+      const closingBalanceValue = pickMetric(mergedMetrics, ['closingBalance', 'endingBalance']);
+
+      const accountNumberValue =
+        patch.accountNumber !== undefined
+          ? patch.accountNumber
+          : mergedMetrics.accountNumber || getSummaryValue(file?.summary, 'Account number') || '—';
+      const accountNameValue =
+        patch.accountName !== undefined ? patch.accountName : mergedMetrics.accountName || file.title || 'Statement';
+
+      const summary = [
+        { label: 'Account number', value: accountNumberValue || '—' },
+        { label: 'Total in', value: formatMoney(totalInValue, mergedMetrics.currency) },
+        { label: 'Total out', value: formatMoney(totalOutValue, mergedMetrics.currency) },
+      ];
+
+      const details = [];
+      if (mergedPeriodStart) details.push({ label: 'Period start', value: formatDate(mergedPeriodStart) });
+      if (mergedPeriodEnd) details.push({ label: 'Period end', value: formatDate(mergedPeriodEnd) });
+      if (openingBalanceValue != null)
+        details.push({ label: 'Opening balance', value: formatMoney(openingBalanceValue, mergedMetrics.currency) });
+      if (closingBalanceValue != null)
+        details.push({ label: 'Closing balance', value: formatMoney(closingBalanceValue, mergedMetrics.currency) });
+      if (mergedMetrics.currency) details.push({ label: 'Currency', value: mergedMetrics.currency });
+      if (patch.accountType !== undefined || mergedMetrics.accountType)
+        details.push({
+          label: 'Account type',
+          value: patch.accountType !== undefined ? patch.accountType || '—' : mergedMetrics.accountType || '—',
+        });
+
+      const subtitle = mergedPeriodEnd
+        ? `Statement ending ${formatDate(mergedPeriodEnd)}`
+        : mergedMetrics.documentDate
+        ? `Statement ${formatDate(mergedMetrics.documentDate)}`
+        : file.subtitle || 'Statement';
+
+      const title = accountNameValue || file.title || 'Statement';
+
+      return {
+        payload: { metrics: pruneUndefined(patch), metadata: pruneUndefined(metadataPatch) },
+        display: {
+          metrics: mergedMetrics,
+          metadata: metadataPatch,
+          currency: mergedMetrics.currency,
+          title,
+          subtitle,
+          summary,
+          details,
+        },
+        rawValues: cleanedRaw,
+      };
+    }
+
+    return { error: 'Unsupported document schema selected.' };
+  }
+
+  function openManualModal(file, { schema, trigger } = {}) {
+    if (!file) return;
+    const modal = ensureManualModal();
+    if (!modal || !manualModalSchema) return;
+    manualModalState.file = file;
+    const initialSchema = schema && MANUAL_FIELD_DEFS[schema] ? schema : state.viewer.type || MANUAL_SCHEMA_OPTIONS[0].value;
+    manualModalState.schema = MANUAL_FIELD_DEFS[initialSchema] ? initialSchema : MANUAL_SCHEMA_OPTIONS[0].value;
+    manualModalReturnFocus = trigger || null;
+    manualModalTitle.textContent = `Edit document details — ${file.title || 'Document'}`;
+    initialiseManualValues(file);
+    manualModalSchema.value = manualModalState.schema;
+    const values = manualModalState.valuesBySchema.get(manualModalState.schema) || {};
+    renderManualFields(manualModalState.schema, values);
+    if (manualModalError) {
+      manualModalError.hidden = true;
+      manualModalError.textContent = '';
+    }
+    manualModal.classList.add('is-visible');
+    manualModal.setAttribute('aria-hidden', 'false');
+    manualModalDialog?.focus({ preventScroll: true });
+  }
+
+  async function submitManualInsight() {
+    if (!manualModalState.file || !manualModalSchema) return;
+    const schema = manualModalSchema.value && MANUAL_FIELD_DEFS[manualModalSchema.value] ? manualModalSchema.value : MANUAL_SCHEMA_OPTIONS[0].value;
+    const rawValues = readManualInputs(schema);
+    const transform = transformManualValues(schema, rawValues, manualModalState.file);
+    if (transform?.error) {
+      if (manualModalError) {
+        manualModalError.hidden = false;
+        manualModalError.textContent = transform.error;
+      }
+      return;
+    }
+    if (!transform) return;
+
+    manualModalState.valuesBySchema.set(schema, transform.rawValues || rawValues);
+
+    const payload = {
+      fileId: manualModalState.file.fileId,
+      schema,
+      metrics: transform.payload.metrics || {},
+      metadata: transform.payload.metadata || {},
+    };
+
+    if (manualModalError) {
+      manualModalError.hidden = true;
+      manualModalError.textContent = '';
+    }
+
+    const originalLabel = manualModalSave ? manualModalSave.textContent : '';
+    if (manualModalSave) {
+      manualModalSave.disabled = true;
+      manualModalSave.textContent = 'Saving…';
+    }
+    if (manualModalSchema) manualModalSchema.disabled = true;
+
+    try {
+      const response = await apiFetch('/manual-insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to update this document.');
+        if (manualModalError) {
+          manualModalError.hidden = false;
+          manualModalError.textContent = 'Session expired. Please sign in and try again.';
+        }
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Unable to save manual insight');
+      }
+      await response.json().catch(() => null);
+      applyManualUpdateToViewerFile(manualModalState.file, schema, transform.display);
+      renderViewerFiles();
+      if (manualModalState.file && state.viewer.selectedFileId === manualModalState.file.fileId) {
+        renderViewerSelection();
+      }
+      closeManualModal();
+    } catch (error) {
+      console.error('Failed to persist manual insight', error);
+      if (manualModalError) {
+        manualModalError.hidden = false;
+        manualModalError.textContent = error.message || 'Unable to save changes right now.';
+      }
+      return;
+    } finally {
+      if (manualModalSave) {
+        manualModalSave.disabled = false;
+        manualModalSave.textContent = originalLabel || 'Save changes';
+      }
+      if (manualModalSchema) manualModalSchema.disabled = false;
+    }
+  }
+
+  function applyManualUpdateToViewerFile(file, schema, display) {
+    if (!file || !display) return;
+    if (display.metrics) {
+      file.metrics = { ...(file.metrics || {}), ...display.metrics };
+    }
+    if (display.metadata) {
+      file.metadata = { ...(file.metadata || {}), ...display.metadata };
+    }
+    if (file.raw) {
+      file.raw.metrics = { ...(file.raw.metrics || {}), ...(display.metrics || {}) };
+      file.raw.metadata = { ...(file.raw.metadata || {}), ...(display.metadata || {}) };
+    }
+    file.currency = display.currency || file.currency;
+    file.title = display.title || file.title;
+    file.subtitle = display.subtitle || file.subtitle;
+    file.summary = Array.isArray(display.summary) ? display.summary : file.summary;
+    file.details = Array.isArray(display.details) ? display.details : file.details;
+  }
+
   async function deleteViewerFile(fileId) {
     if (!fileId) return;
     const confirmed = window.confirm('Are you sure you want to delete this document? This action cannot be undone.');
@@ -622,6 +1486,18 @@
     });
     actions.appendChild(downloadButton);
 
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'viewer__file-edit';
+    editButton.setAttribute('aria-label', 'Edit document details');
+    editButton.innerHTML = '<i class="bi bi-pencil"></i>';
+    editButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openManualModal(file, { schema: state.viewer.type, trigger: editButton });
+    });
+    actions.appendChild(editButton);
+
     let jsonButton = null;
     if (jsonTestEnabled) {
       jsonButton = document.createElement('button');
@@ -674,6 +1550,7 @@
 
   function renderViewerFiles() {
     if (!viewerList) return;
+    const previousScrollTop = viewerList.scrollTop;
     viewerList.innerHTML = '';
     const files = Array.isArray(state.viewer.files) ? state.viewer.files : [];
     if (!files.length) {
@@ -691,6 +1568,7 @@
       viewerList.appendChild(buildViewerFileCard(file));
     });
     renderViewerSelection();
+    viewerList.scrollTop = previousScrollTop;
     if (viewerEmpty) {
       viewerEmpty.style.display = state.viewer.selectedFileId ? 'none' : '';
       if (!state.viewer.selectedFileId) {
@@ -1765,6 +2643,10 @@
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (manualModal && manualModal.classList.contains('is-visible')) {
+      closeManualModal();
+      return;
+    }
     if (jsonModal && jsonModal.classList.contains('is-visible')) {
       hideJsonModal();
       return;
