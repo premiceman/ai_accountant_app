@@ -40,7 +40,6 @@ import {
   type UserDocumentJob,
 } from './models/index.js';
 import { rebuildMonthlyAnalytics } from './services/analytics.js';
-import { markJobProcessed } from './state/runtimeMetrics.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 const TRIAGE_AREA = 'statement-triage';
@@ -153,32 +152,6 @@ type Classification = {
 
 function isStatementClassification(type: Classification['type']): boolean {
   return type.endsWith('_statement');
-}
-
-function hasRequiredInsightFields(insight: DocumentInsight): boolean {
-  const hasContentHash = typeof insight.contentHash === 'string' && insight.contentHash.length > 0;
-  const hasDocumentMonth = typeof insight.documentMonth === 'string' && insight.documentMonth.length >= 7;
-
-  let typeSpecific = true;
-  if (insight.catalogueKey === 'payslip') {
-    const metrics = (insight.metrics ?? {}) as Record<string, unknown>;
-    const metricsV1 = (insight.metricsV1 ?? {}) as Record<string, unknown>;
-    const grossPresent = typeof metrics.gross === 'number' || typeof metricsV1?.grossMinor === 'number';
-    const netPresent = typeof metrics.net === 'number' || typeof metricsV1?.netMinor === 'number';
-    const documentDateValid = insight.documentDate instanceof Date && !Number.isNaN(insight.documentDate.getTime());
-    const hasMetadataPayDate = typeof (insight.metadata as Record<string, unknown> | undefined)?.payDate === 'string';
-    const hasDocumentDateV1 = typeof insight.documentDateV1 === 'string' && insight.documentDateV1.length >= 10;
-    typeSpecific = grossPresent && netPresent && (documentDateValid || hasMetadataPayDate || hasDocumentDateV1);
-  } else if (isStatementClassification(insight.catalogueKey)) {
-    const transactions = Array.isArray(insight.transactionsV1)
-      ? insight.transactionsV1
-      : Array.isArray(insight.transactions)
-      ? insight.transactions
-      : [];
-    typeSpecific = Array.isArray(transactions);
-  }
-
-  return hasContentHash && hasDocumentMonth && typeSpecific;
 }
 
 function coerceMinorUnits(value: unknown): number | null {
@@ -881,8 +854,6 @@ function buildInsightPayload(
     transactionsV1: [],
     narrative: [`classification=${classification.type}`, `confidence=${classification.confidence}`],
     extractedAt: new Date(),
-    status: 'pending',
-    statusReason: null as unknown as DocumentInsight['statusReason'],
   };
 
   switch (classification.type) {
@@ -986,15 +957,6 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     .lean<DocumentInsight | null>()
     .exec();
   if (existing) {
-    const existingStatus = (existing.status ?? 'success') as DocumentInsight['status'];
-    const requiredFieldsOk = hasRequiredInsightFields(existing);
-    const shouldSkipJob = existingStatus === 'success' && requiredFieldsOk;
-    const reason = shouldSkipJob
-      ? 'insight-success-required-fields'
-      : existingStatus !== 'success'
-      ? `insight-status-${existingStatus}`
-      : 'missing-required-fields';
-
     if (shouldLogTriage) {
       logger.info(
         {
@@ -1005,30 +967,16 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
           contentHash: existing.contentHash ?? null,
           parserVersion: job.parserVersion,
           promptVersion: job.promptVersion,
-          decision: shouldSkipJob ? 'skip' : 'reprocess',
-          reason,
+          decision: 'skip',
+          reason: 'insight-exists',
         },
         'statement triage'
       );
     }
-
-    logger.info(
-      {
-        jobId: job.jobId,
-        fileId: job.fileId,
-        status: existingStatus,
-        requiredFieldsOk,
-        decision: shouldSkipJob ? 'skip' : 'reprocess',
-        reason,
-      },
-      'Existing insight check'
-    );
-
-    if (shouldSkipJob) {
-      await finalizeJob(job, 'succeeded');
-      await setSessionStatus(job.userId, job.fileId, 'done');
-      return;
-    }
+    logger.info({ jobId: job.jobId }, 'Insight already exists; skipping');
+    await finalizeJob(job, 'succeeded');
+    await setSessionStatus(job.userId, job.fileId, 'done');
+    return;
   }
 
   if (!isSupportedClassification(classification) || classification.confidence < 0.6) {
@@ -1095,16 +1043,8 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     }
   } else if (isStatementClassification(classification.type)) {
     try {
-      const builderTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
-      const schematicTransactions = builderTransactions.length
-        ? (builderTransactions as Array<{ date?: string; description?: string; amount?: number }>)
-        : undefined;
-      const extraction = await extractStatement(buffer, {
-        schematicTransactions,
-      });
-      const extractedTransactions: Array<{ date?: string; description?: string; amount?: number }> | undefined =
-        Array.isArray(extraction.transactions) ? extraction.transactions : undefined;
-      payload.transactions = extractedTransactions ?? [];
+      const extraction = await extractStatement(buffer);
+      payload.transactions = Array.isArray(extraction.transactions) ? extraction.transactions : [];
       const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
       payload.metrics = {
         ...metrics,
@@ -1187,15 +1127,11 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
   payload.transactions = legacyTransactions;
   payload.transactionsV1 = normalisedTransactions;
 
-  const insightFilter = { userId: job.userId, fileId: job.fileId, schemaVersion: job.schemaVersion };
-
   const updateDoc = {
     $set: {
       ...payload,
       transactions: legacyTransactions,
       transactionsV1: normalisedTransactions,
-      status: 'pending' as DocumentInsight['status'],
-      statusReason: null,
       updatedAt: new Date(),
     },
     $setOnInsert: { createdAt: new Date() },
@@ -1219,47 +1155,13 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     );
   }
 
-  await DocumentInsightModel.findOneAndUpdate(insightFilter, updateDoc, { upsert: true }).exec();
+  await DocumentInsightModel.findOneAndUpdate(
+    { userId: job.userId, fileId: job.fileId, schemaVersion: job.schemaVersion },
+    updateDoc,
+    { upsert: true }
+  ).exec();
 
-  const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
-  const periodMeta = (metadata.period as { month?: string | null; year?: string | number | null } | undefined) ?? {};
-
-  const analyticsResult = await rebuildMonthlyAnalytics({
-    userId: job.userId,
-    periodMonth:
-      payload.documentMonth ?? (typeof periodMeta.month === 'string' ? periodMeta.month : null),
-    periodYear:
-      typeof periodMeta.year === 'string' || typeof periodMeta.year === 'number'
-        ? periodMeta.year
-        : null,
-    payDate:
-      payload.documentDate instanceof Date && !Number.isNaN(payload.documentDate.getTime())
-        ? payload.documentDate.toISOString()
-        : typeof metadata.payDate === 'string'
-        ? metadata.payDate
-        : null,
-    fileId: job.fileId,
-  });
-
-  if (analyticsResult.status === 'failed') {
-    await DocumentInsightModel.updateOne(insightFilter, {
-      $set: { status: 'failed' as DocumentInsight['status'], statusReason: analyticsResult.reason },
-    }).exec();
-    logger.warn(
-      { jobId: job.jobId, reason: analyticsResult.reason, fileId: job.fileId },
-      'Analytics rebuild flagged missing fields'
-    );
-  } else {
-    const statusUpdate: Record<string, unknown> = {
-      status: 'success',
-      statusReason: null,
-    };
-    if (!payload.documentMonth && analyticsResult.period) {
-      statusUpdate.documentMonth = analyticsResult.period;
-      payload.documentMonth = analyticsResult.period;
-    }
-    await DocumentInsightModel.updateOne(insightFilter, { $set: statusUpdate }).exec();
-  }
+  await rebuildMonthlyAnalytics({ userId: job.userId, month: payload.documentMonth });
 
   await finalizeJob(job, 'succeeded', {
     lastUpdatePlanSummary: lastPlanSummaryString,
@@ -1284,7 +1186,6 @@ async function finalizeJob(
     baseSet.retryAt = new Date();
   }
   await UserDocumentJobModel.updateOne({ _id: job._id }, { $set: baseSet }).exec();
-  markJobProcessed();
 }
 
 async function rejectJob(job: UserDocumentJobDoc, reason: string): Promise<void> {
@@ -1301,7 +1202,6 @@ async function rejectJob(job: UserDocumentJobDoc, reason: string): Promise<void>
   ).exec();
   await setSessionStatus(job.userId, job.fileId, 'rejected', reason);
   logger.warn({ jobId: job.jobId, reason }, 'Job rejected');
-  markJobProcessed();
 }
 
 export async function startDocumentJobLoop(): Promise<void> {
@@ -1369,7 +1269,3 @@ export async function startDocumentJobLoop(): Promise<void> {
 export async function stopDocumentJobLoop(): Promise<void> {
   running = false;
 }
-
-export const __internal__ = {
-  hasRequiredInsightFields,
-};

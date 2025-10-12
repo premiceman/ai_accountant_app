@@ -31,12 +31,6 @@ const UserAnalyticsSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: 'User', index: true, required: true },
     period: { type: String, required: true },
     builtAt: { type: Date, default: () => new Date() },
-    status: {
-      type: String,
-      enum: ['pending', 'success', 'failed'],
-      default: 'pending',
-    },
-    statusReason: { type: String, default: null },
     sources: {
       payslips: { type: Number, default: 0 },
       statements: { type: Number, default: 0 },

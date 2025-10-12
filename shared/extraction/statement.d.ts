@@ -24,8 +24,5 @@ export interface StatementExtractionResult {
   transactions: StatementTransaction[];
 }
 
-export function extractStatement(
-  buffer: Buffer,
-  meta?: { originalName?: string; schematicTransactions?: Array<{ date?: string; description?: string; amount?: number }> }
-): Promise<StatementExtractionResult>;
+export function extractStatement(buffer: Buffer): Promise<StatementExtractionResult>;
 export function analyseCurrentAccountStatement(text: string): Promise<any>;

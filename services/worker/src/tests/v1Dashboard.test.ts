@@ -174,7 +174,7 @@ function run(): void {
     },
   });
 
-  rebuildMonthlyAnalytics({ userId, periodMonth: '2024-04' })
+  rebuildMonthlyAnalytics({ userId, month: '2024-04' })
     .then(() => {
       assert.ok(capturedAnalytics, 'expected analytics document to be written');
       assert.equal(capturedAnalytics.income.gross, 2500);
@@ -182,7 +182,6 @@ function run(): void {
       assert.equal(capturedAnalytics.income.other, 2000);
       assert.equal(capturedAnalytics.spend.total, 150);
       assert.equal(capturedAnalytics.cashflow.net, 1850);
-      assert.equal(capturedAnalytics.status, 'success');
       const topCategories = capturedAnalytics.spend.byCategory.map((entry: any) => entry.category);
       assert.ok(topCategories.includes('Groceries'));
       console.log('V1 dashboard smoke test passed');

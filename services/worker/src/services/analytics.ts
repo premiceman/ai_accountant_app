@@ -32,22 +32,6 @@ const STATEMENT_TYPES = new Set<DocumentInsight['catalogueKey']>([
 
 type ValidationError = { instancePath?: string; schemaPath?: string; message?: string };
 
-type RebuildAnalyticsInput = {
-  userId: Types.ObjectId;
-  periodMonth?: string | null;
-  periodYear?: string | number | null;
-  payDate?: string | Date | null;
-  fileId?: string | null;
-};
-
-type RebuildAnalyticsResult =
-  | { status: 'success'; period: string }
-  | { status: 'failed'; reason: string; period: null };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
 function buildSchemaError(path: string, errors: ValidationError[] | null | undefined): Error {
   const error = new Error('Schema validation failed');
   (error as Error & { statusCode?: number; details?: unknown }).statusCode = 422;
@@ -214,65 +198,6 @@ function assertValidMonth(month: string): void {
   }
 }
 
-function derivePeriodMonth(
-  periodMonth?: string | null,
-  periodYear?: string | number | null,
-  payDate?: string | Date | null,
-): string | null {
-  const trimmedMonth = typeof periodMonth === 'string' ? periodMonth.trim() : '';
-  if (/^\d{4}-\d{2}$/.test(trimmedMonth)) {
-    return trimmedMonth;
-  }
-
-  const monthValue =
-    trimmedMonth && /^\d{1,2}$/.test(trimmedMonth) ? Number.parseInt(trimmedMonth, 10) : Number.NaN;
-  const yearValueRaw =
-    typeof periodYear === 'number'
-      ? periodYear
-      : typeof periodYear === 'string' && periodYear.trim()
-      ? Number.parseInt(periodYear.trim(), 10)
-      : Number.NaN;
-
-  if (!Number.isNaN(monthValue) && !Number.isNaN(yearValueRaw) && monthValue >= 1 && monthValue <= 12) {
-    return `${String(yearValueRaw).padStart(4, '0')}-${String(monthValue).padStart(2, '0')}`;
-  }
-
-  if (payDate) {
-    const date = payDate instanceof Date ? payDate : new Date(payDate);
-    if (!Number.isNaN(date.getTime())) {
-      const year = date.getUTCFullYear();
-      const month = date.getUTCMonth() + 1;
-      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
-    }
-  }
-
-  return null;
-}
-
-function deriveFailurePeriod(periodMonth?: string | null, periodYear?: string | number | null): string {
-  const trimmedMonth = typeof periodMonth === 'string' ? periodMonth.trim() : '';
-  if (/^\d{4}-\d{2}$/.test(trimmedMonth)) {
-    return trimmedMonth;
-  }
-
-  const yearValue =
-    typeof periodYear === 'number'
-      ? periodYear
-      : typeof periodYear === 'string' && periodYear.trim()
-      ? Number.parseInt(periodYear.trim(), 10)
-      : Number.NaN;
-
-  if (!Number.isNaN(yearValue)) {
-    const monthSegment =
-      trimmedMonth && /^\d{1,2}$/.test(trimmedMonth)
-        ? String(Number.parseInt(trimmedMonth, 10)).padStart(2, '0')
-        : 'unknown';
-    return `${String(yearValue).padStart(4, '0')}-${monthSegment}`;
-  }
-
-  return 'unknown-unknown';
-}
-
 type PreferredInsight = {
   metricsV1: v1.PayslipMetricsV1 | v1.StatementMetricsV1 | null;
   transactionsV1: v1.TransactionV1[];
@@ -286,19 +211,12 @@ type PreferredInsight = {
 
 function preferV1(insight: DocumentInsight): PreferredInsight {
   const metadata = (insight.metadata ?? {}) as Record<string, unknown>;
-  const extractedFields = isRecord(metadata.extractedFields)
-    ? (metadata.extractedFields as Record<string, unknown>)
-    : {};
-  const preferredFields = isRecord(extractedFields.preferred)
-    ? (extractedFields.preferred as Record<string, unknown>)
-    : {};
   const legacyMetrics = (insight.metrics ?? {}) as Record<string, unknown>;
   const legacyTransactions = Array.isArray(insight.transactions) ? insight.transactions : [];
   const currency = v1.normaliseCurrency(insight.currency ?? metadata.currency ?? 'GBP');
   const fallbackDate =
     insight.documentDateV1 ??
     v1.ensureIsoDate(insight.documentDate ?? metadata.documentDate) ??
-    v1.ensureIsoDate(metadata.payDate ?? (preferredFields.payDate as string | undefined)) ??
     new Date().toISOString().slice(0, 10);
   const documentMonth = insight.documentMonth ?? v1.ensureIsoMonth(metadata.documentMonth ?? fallbackDate);
 
@@ -327,41 +245,22 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
     if (!metricsV1) {
       const periodMeta = (legacyMetrics.period ?? metadata.period ?? {}) as Record<string, unknown>;
       const payDate =
-        v1.ensureIsoDate(
-          legacyMetrics.payDate ??
-            metadata.payDate ??
-            (preferredFields.payDate as string | undefined) ??
-            fallbackDate
-        ) ?? fallbackDate;
+        v1.ensureIsoDate(legacyMetrics.payDate ?? metadata.payDate ?? fallbackDate) ?? fallbackDate;
       metricsV1 = {
         payDate,
         period: {
-          start:
-            v1.ensureIsoDate(periodMeta.start ?? (preferredFields.periodStart as string | undefined)) ?? payDate,
-          end:
-            v1.ensureIsoDate(periodMeta.end ?? (preferredFields.periodEnd as string | undefined)) ?? payDate,
+          start: v1.ensureIsoDate(periodMeta.start) ?? payDate,
+          end: v1.ensureIsoDate(periodMeta.end) ?? payDate,
           month: v1.ensureIsoMonth(periodMeta.month ?? documentMonth) ?? payDate.slice(0, 7),
         },
-        employer:
-          typeof metadata.employerName === 'string'
-            ? metadata.employerName
-            : typeof preferredFields.employerName === 'string'
-            ? (preferredFields.employerName as string)
-            : null,
-        grossMinor: v1.toMinorUnits(legacyMetrics.gross ?? preferredFields.grossPay ?? preferredFields.gross),
-        netMinor: v1.toMinorUnits(legacyMetrics.net ?? preferredFields.netPay ?? preferredFields.net),
-        taxMinor: v1.toMinorUnits(legacyMetrics.tax ?? preferredFields.tax ?? preferredFields.incomeTax),
-        nationalInsuranceMinor: v1.toMinorUnits(
-          legacyMetrics.ni ?? legacyMetrics.nationalInsurance ?? preferredFields.nationalInsurance
-        ),
-        pensionMinor: v1.toMinorUnits(legacyMetrics.pension ?? preferredFields.pension),
-        studentLoanMinor: v1.toMinorUnits(legacyMetrics.studentLoan ?? preferredFields.studentLoan),
-        taxCode:
-          typeof legacyMetrics.taxCode === 'string'
-            ? (legacyMetrics.taxCode as string)
-            : typeof preferredFields.taxCode === 'string'
-            ? (preferredFields.taxCode as string)
-            : null,
+        employer: typeof metadata.employerName === 'string' ? metadata.employerName : null,
+        grossMinor: v1.toMinorUnits(legacyMetrics.gross),
+        netMinor: v1.toMinorUnits(legacyMetrics.net),
+        taxMinor: v1.toMinorUnits(legacyMetrics.tax),
+        nationalInsuranceMinor: v1.toMinorUnits(legacyMetrics.ni ?? legacyMetrics.nationalInsurance),
+        pensionMinor: v1.toMinorUnits(legacyMetrics.pension),
+        studentLoanMinor: v1.toMinorUnits(legacyMetrics.studentLoan),
+        taxCode: typeof legacyMetrics.taxCode === 'string' ? legacyMetrics.taxCode : null,
       } satisfies v1.PayslipMetricsV1;
       if (!v1.validatePayslipMetricsV1(metricsV1)) {
         const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
@@ -437,10 +336,8 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
       const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
       metricsV1 = {
         period: {
-          start:
-            v1.ensureIsoDate(periodMeta.start ?? (preferredFields.periodStart as string | undefined)) ?? fallbackDate,
-          end:
-            v1.ensureIsoDate(periodMeta.end ?? (preferredFields.periodEnd as string | undefined)) ?? fallbackDate,
+          start: v1.ensureIsoDate(periodMeta.start) ?? fallbackDate,
+          end: v1.ensureIsoDate(periodMeta.end) ?? fallbackDate,
           month: v1.ensureIsoMonth(periodMeta.month ?? documentMonth) ?? fallbackDate.slice(0, 7),
         },
         inflowsMinor,
@@ -477,53 +374,15 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
 
 export async function rebuildMonthlyAnalytics({
   userId,
-  periodMonth,
-  periodYear,
-  payDate,
-  fileId,
-}: RebuildAnalyticsInput): Promise<RebuildAnalyticsResult> {
-  const resolvedMonth = derivePeriodMonth(periodMonth, periodYear, payDate);
-  if (!resolvedMonth) {
-    const failurePeriod = deriveFailurePeriod(periodMonth, periodYear);
-    await UserAnalyticsModel.findOneAndUpdate(
-      { userId, period: failurePeriod },
-      {
-        $set: {
-          builtAt: new Date(),
-          status: 'failed',
-          statusReason: 'missing required fields for analytics',
-        },
-      },
-      { upsert: true }
-    ).exec();
+  month,
+}: {
+  userId: Types.ObjectId;
+  month: string;
+}): Promise<void> {
+  assertValidMonth(month);
 
-    if (fileId) {
-      await DocumentInsightModel.updateOne(
-        { userId, fileId },
-        { $set: { status: 'failed', statusReason: 'missing required fields for analytics' } }
-      )
-        .exec()
-        .catch(() => undefined);
-    }
-
-    return { status: 'failed', reason: 'missing required fields for analytics', period: null };
-  }
-
-  assertValidMonth(resolvedMonth);
-
-  if (fileId) {
-    await DocumentInsightModel.updateOne(
-      { userId, fileId },
-      { $set: { documentMonth: resolvedMonth } }
-    )
-      .exec()
-      .catch(() => undefined);
-  }
-
-  const insights = await DocumentInsightModel.find({ userId, documentMonth: resolvedMonth })
-    .lean<DocumentInsight[]>()
-    .exec();
-  const overrides = await UserOverrideModel.find({ userId, appliesFrom: { $lte: `${resolvedMonth}-31` } })
+  const insights = await DocumentInsightModel.find({ userId, documentMonth: month }).lean<DocumentInsight[]>().exec();
+  const overrides = await UserOverrideModel.find({ userId, appliesFrom: { $lte: `${month}-31` } })
     .lean<UserOverride[]>()
     .exec();
 
@@ -644,7 +503,7 @@ export async function rebuildMonthlyAnalytics({
   const analyticsDoc = applyMetricOverrides(
     {
       userId,
-      period: resolvedMonth,
+      period: month,
       builtAt: new Date(),
       sources,
       income: {
@@ -679,16 +538,8 @@ export async function rebuildMonthlyAnalytics({
   );
 
   await UserAnalyticsModel.findOneAndUpdate(
-    { userId, period: resolvedMonth },
-    {
-      $set: {
-        ...analyticsDoc,
-        status: 'success',
-        statusReason: null,
-      },
-    },
+    { userId, period: month },
+    { $set: analyticsDoc },
     { upsert: true, new: true }
   ).exec();
-
-  return { status: 'success', period: resolvedMonth };
 }
