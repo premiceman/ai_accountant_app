@@ -9,7 +9,20 @@ let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,
 const mongoose = require('mongoose');
 
 // Helper to require modules without crashing if missing
-function safeRequire(modPath) { try { return require(modPath); } catch { return null; } }
+function safeRequire(modPath) {
+  try {
+    return require(modPath);
+  } catch (err) {
+    const message = err?.message || err;
+    const code = err?.code;
+    const isModuleMissing = code === 'MODULE_NOT_FOUND';
+    // Only surface unexpected load errors; missing optional modules remain silent.
+    if (!isModuleMissing || !String(message).includes(modPath.replace('./', ''))) {
+      console.warn(`⚠️  Failed to load optional module "${modPath}"`, message);
+    }
+    return null;
+  }
+}
 
 // ---- Routers (mount only if found) ----
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
