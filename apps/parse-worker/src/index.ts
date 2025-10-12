@@ -60,7 +60,7 @@ class ParseWorker {
       queueDepth = null;
     }
     const payload = {
-      schematicsEnabled: String(process.env.ENABLE_SCHEMATICS || 'false').toLowerCase() === 'true',
+      schematicsEnabled: String(process.env.ENABLE_SCHEMATICS || 'true').toLowerCase() === 'true',
       redis: {
         connected: this.redisConnected,
         queueDepth,
