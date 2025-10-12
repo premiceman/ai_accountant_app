@@ -17,8 +17,7 @@ const {
 const {
   DocumentProcessingError,
 } = require('../services/documents/pipeline/errors');
-const { postDocument } = require('../services/docupipe.client');
-const { waitForJob: waitStdJob, standardizeWithSchema, getStandardization } = require('../services/docupipe.standardize');
+const { postDocument, waitForJob, standardize, getStandardization } = require('../services/docupipe.standardize');
 
 const JSON_TEST_ENABLED = toBoolean(process.env.JSON_TEST);
 
@@ -71,33 +70,21 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
 
     if (useDocuPipe) {
       try {
+        const file = req.file;
         if (!file?.buffer) throw new Error('No file uploaded');
 
-        const { documentId, jobId } = await postDocument({
-          buffer: file.buffer,
-          filename: file.originalname || 'document.pdf',
-        });
+        // Map docType -> schemaId (server-side; do not accept raw schemaId from client)
+        const allowed = {
+          bank:    process.env.DOCUPIPE_BANK_SCHEMA_ID,
+          payslip: process.env.DOCUPIPE_PAYSLIP_SCHEMA_ID
+        };
+        const defaultType = (process.env.JSON_TEST_DEFAULT_DOC_TYPE || 'bank').toLowerCase();
+        const docType = (req.body?.docType || defaultType).toLowerCase();
+        const schemaId = allowed[docType];
+        if (!schemaId) throw new Error(`Unsupported docType '${docType}' or missing schema env`);
 
-        await waitStdJob(jobId, { timeoutMs: 60000 });
-
-        const schemaId = process.env.DOCUPIPE_PAYSLIP_SCHEMA_ID;
-        if (!schemaId) throw new Error('Missing DOCUPIPE_PAYSLIP_SCHEMA_ID');
-
-        const { jobId: stdJobId, standardizationIds } = await standardizeWithSchema({
-          documentId,
-          schemaId,
-          stdVersion: process.env.DOCUPIPE_STD_VERSION,
-        });
-
-        if (!stdJobId) throw new Error('DocuPipe standardization job missing');
-        await waitStdJob(stdJobId, { timeoutMs: 60000 });
-
-        const stdId = Array.isArray(standardizationIds) ? standardizationIds[0] : null;
-        if (!stdId) throw new Error('DocuPipe standardization missing ID');
-
-        const std = await getStandardization(stdId);
-        if (!std || typeof std.data === 'undefined') throw new Error('DocuPipe standardization missing data');
-
+        // (1) Save ORIGINAL file to R2 exactly as current code (do not change keys/ids/metadata)
+        // existing R2 code here -> yields { key, fileId }
         const key = buildObjectKey({
           userId,
           userPrefix: 'json-test',
@@ -109,25 +96,33 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
         await putObject({ key, body: file.buffer, contentType: 'application/pdf' });
         const fileId = keyToFileId(key);
 
+        // (2) Upload file to DocuPipe and wait for parse
+        const { documentId, jobId } = await postDocument({ buffer: file.buffer, filename: file.originalname || 'document.pdf' });
+        await waitForJob(jobId, { timeoutMs: 60000 });
+
+        // (3) Standardize with selected schema and wait for completion
+        const { jobId: stdJobId, standardizationIds } = await standardize({ documentId, schemaId, stdVersion: process.env.DOCUPIPE_STD_VERSION });
+        await waitForJob(stdJobId, { timeoutMs: 60000 });
+
+        // (4) Fetch standardized JSON
+        const stdId = Array.isArray(standardizationIds) ? standardizationIds[0] : null;
+        if (!stdId) throw new Error('DocuPipe standardization missing ID');
+        const std = await getStandardization(stdId);
+        if (!std || typeof std.data === 'undefined') throw new Error('DocuPipe standardization missing data');
+
+        // (5) Return standardized result (bench pretty-prints)
         return res.json({
           ok: true,
           provider: 'docupipe',
-          mode: 'standardized',
+          mode: 'direct-standardize',
+          docType,
           schemaId,
           data: std.data,
-          storage: {
-            key,
-            fileId,
-            size: file.size || file.buffer.length,
-          },
+          storage: { key, fileId, size: file.size || file.buffer.length }
         });
       } catch (err) {
         console.warn('[json-test] DocuPipe failed', err);
-        return res.status(200).json({
-          ok: false,
-          code: err.code || 'DOCUPIPE_ERROR',
-          error: err.message || 'DocuPipe error',
-        });
+        return res.json({ ok:false, code: err.code || 'DOCUPIPE_ERROR', error: err.message || 'DocuPipe error' });
       }
     }
 
