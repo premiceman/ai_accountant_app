@@ -73,6 +73,8 @@
     try {
       const form = new FormData();
       form.append('file', file);
+      const docTypeEl = document.getElementById('docType');
+      if (docTypeEl) form.append('docType', docTypeEl.value); // 'bank' | 'payslip'
       const res = await Auth.fetch('/api/json-test/upload', {
         method: 'POST',
         body: form,
