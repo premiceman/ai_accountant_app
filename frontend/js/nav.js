@@ -20,6 +20,7 @@
         console.info?.('[instrumentation] nav:sidebar:injected', { navItemCount, timestamp: new Date().toISOString() });
       } catch { /* no-op */ }
       await applySidebarFeatureFlags(host);
+      initializeSidebarCollapsibles(host);
     }
   } catch (e) { console.warn('nav inject failed', e); }
 })();
@@ -38,6 +39,40 @@ async function applySidebarFeatureFlags(host) {
   } catch (err) {
     console.warn('Failed to apply sidebar feature flags', err);
   }
+}
+
+function initializeSidebarCollapsibles(host) {
+  if (!host) return;
+  const sections = host.querySelectorAll('.app-nav-section');
+  sections.forEach((section) => {
+    if (!(section instanceof HTMLElement)) return;
+    const toggle = section.querySelector('.app-nav-toggle');
+    const items = section.querySelector('.app-nav-items');
+    if (!toggle || !items) return;
+
+    const hasExplicitState = section.hasAttribute('data-expanded');
+    let expanded = hasExplicitState ? section.getAttribute('data-expanded') !== 'false' : true;
+    const hasActiveItem = !!section.querySelector('.app-nav-item.active');
+    if (!hasExplicitState) {
+      expanded = hasActiveItem || expanded;
+    } else if (hasActiveItem) {
+      expanded = true;
+    }
+
+    const applyState = (next) => {
+      const isExpanded = !!next;
+      section.setAttribute('data-expanded', isExpanded ? 'true' : 'false');
+      toggle.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+      items.hidden = !isExpanded;
+    };
+
+    applyState(expanded);
+
+    toggle.addEventListener('click', () => {
+      const next = toggle.getAttribute('aria-expanded') !== 'true';
+      applyState(next);
+    });
+  });
 }
 
 async function hydrateTopbarMeta() {
