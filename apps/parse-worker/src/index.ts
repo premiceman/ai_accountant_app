@@ -107,9 +107,9 @@ class ParseWorker {
           await writeResult(this.redis, job, payload);
           console.log('[parse-worker] processed job', job.docId, {
             latencyMs: payload.metrics.latencyMs,
-            ruleLatencyMs: payload.metrics.ruleLatencyMs,
-            dateConfidence: payload.metadata.dateConfidence,
-            rulesVersion: payload.metadata.rulesVersion,
+            providerLatencyMs: payload.metrics.providerLatencyMs,
+            docupipeStatus: payload.docupipe.status,
+            docupipeId: payload.docupipe.id,
             source: job.source ?? 'unknown',
             docType: job.docType,
             userRulesVersion: job.userRulesVersion ?? null,
@@ -161,5 +161,4 @@ main().catch((err) => {
   process.exit(1);
 });
 
-export { extractFields, suggestAnchors } from './fields';
-export { extractText } from './text-extraction';
+export {};
