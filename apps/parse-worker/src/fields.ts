@@ -1,16 +1,15 @@
 import * as chrono from 'chrono-node';
 import { z } from 'zod';
-import { chunkLines, dedupe, parseNumberStrict, formatMonthYear, normaliseWhitespace } from './utils';
+import { chunkLines, dedupe, normaliseWhitespace, parseNumberStrict, formatMonthYear } from './utils';
 import {
-  BoundingBox,
   ExtractedFieldValue,
-  ExtractedTextContent,
   ExtractFieldsResult,
-  FieldPosition,
-  LineGeometry,
+  StatementColumnRule,
+  StatementRowTemplate,
+  StatementRules,
   UserFieldRule,
   UserRuleSet,
-  BoxRule,
+  UserSchematicRules,
 } from './types';
 
 const BaseRuleSchema = z.object({
@@ -42,14 +41,47 @@ const RuleSchema = z.discriminatedUnion('strategy', [AnchorRegexRuleSchema, Line
 
 const RuleSetSchema = z.record(RuleSchema);
 
-function validateRules(rules: unknown): UserRuleSet | null {
+const StatementColumnSchema = z.object({
+  key: z.enum(['date', 'description', 'amount', 'ignore']).default('description'),
+  regex: z.string().optional(),
+  start: z.number().int().min(0).optional(),
+  end: z.number().int().min(0).optional(),
+});
+
+const StatementTemplateSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().optional(),
+  startLine: z.number().int().min(0),
+  lineStride: z.number().int().min(1).optional(),
+  maxRows: z.number().int().min(1).optional(),
+  stopRegex: z.string().optional(),
+  columns: z.array(StatementColumnSchema).min(1),
+});
+
+const StatementRulesSchema = z.object({
+  templates: z.array(StatementTemplateSchema).min(1),
+});
+
+const CompositeRuleSchema = z.object({
+  fields: RuleSetSchema.optional(),
+  statement: StatementRulesSchema.optional(),
+});
+
+function validateRules(rules: unknown): UserSchematicRules | null {
   if (!rules) return null;
-  const result = RuleSetSchema.safeParse(rules);
-  if (!result.success) {
-    console.warn('[parse-worker] invalid user rules', result.error.issues);
-    return null;
+  const composite = CompositeRuleSchema.safeParse(rules);
+  if (composite.success) {
+    return {
+      fields: composite.data.fields ?? null,
+      statement: composite.data.statement ?? null,
+    };
   }
-  return result.data as UserRuleSet;
+  const legacy = RuleSetSchema.safeParse(rules);
+  if (legacy.success) {
+    return { fields: legacy.data, statement: null };
+  }
+  console.warn('[parse-worker] invalid user rules', composite.error.issues);
+  return null;
 }
 
 function createCaseInsensitiveRegex(pattern: string): RegExp {
@@ -281,7 +313,7 @@ function applyRule(field: string, rule: UserFieldRule, context: ExtractionContex
   }
 }
 
-function runRuleExtraction(context: ExtractionContext, rules: UserRuleSet | null): ExtractFieldsResult {
+function runRuleExtraction(lines: string[], rules: UserRuleSet | null): Pick<ExtractFieldsResult, 'values' | 'issues' | 'usedRuleFields'> {
   const values: Record<string, ExtractedFieldValue> = {};
   const issues: string[] = [];
   const usedRuleFields: string[] = [];
@@ -301,11 +333,117 @@ function runRuleExtraction(context: ExtractionContext, rules: UserRuleSet | null
   return { values, issues, usedRuleFields };
 }
 
-function locateNumberByKeywords(
-  context: ExtractionContext,
-  keywords: string[]
-): { value: number; lineIndex: number; charStart: number; charEnd: number } | null {
-  const { lines } = context;
+function clampRange(line: string, start?: number, end?: number): { start: number; end: number } {
+  const len = line.length;
+  const safeStart = typeof start === 'number' ? Math.max(0, Math.min(start, len)) : 0;
+  const safeEnd = typeof end === 'number' ? Math.max(safeStart, Math.min(end, len)) : len;
+  return { start: safeStart, end: safeEnd };
+}
+
+function extractColumnValue(line: string, column: StatementColumnRule): { value: string | null; issue?: string } {
+  const { start, end } = clampRange(line, column.start, column.end);
+  const segment = line.slice(start, end).trim() || line.trim();
+  if (!segment) {
+    return { value: null, issue: `No text available for ${column.key}` };
+  }
+  if (column.regex) {
+    const pattern = createCaseInsensitiveRegex(column.regex);
+    const match = pattern.exec(segment);
+    if (!match) {
+      return { value: null, issue: `Regex ${column.regex} did not match for ${column.key}` };
+    }
+    const raw = (match[1] ?? match[0])?.trim() ?? '';
+    return { value: raw || null, issue: raw ? undefined : `Matched ${column.regex} but extracted empty value` };
+  }
+  return { value: segment };
+}
+
+function parseStatementDate(raw: string | null): string | null {
+  if (!raw) return null;
+  const parsed = chrono.parseDate(raw, new Date(), { forwardDate: true });
+  if (!parsed) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+function parseStatementAmount(raw: string | null): number | null {
+  if (!raw) return null;
+  return parseNumberStrict(raw);
+}
+
+function applyStatementTemplate(lines: string[], template: StatementRowTemplate): {
+  transactions: Array<{ date: string; description: string; amount: number }>;
+  issues: string[];
+} {
+  const transactions: Array<{ date: string; description: string; amount: number }> = [];
+  const issues: string[] = [];
+  const stride = template.lineStride && template.lineStride > 0 ? template.lineStride : 1;
+  const limit = template.maxRows && template.maxRows > 0 ? template.maxRows : Number.MAX_SAFE_INTEGER;
+  const stopRegex = template.stopRegex ? createCaseInsensitiveRegex(template.stopRegex) : null;
+  for (let step = 0; step < limit; step += 1) {
+    const lineIndex = template.startLine + step * stride;
+    if (lineIndex < 0 || lineIndex >= lines.length) break;
+    const line = lines[lineIndex];
+    if (!line || !line.trim()) {
+      if (transactions.length === 0) continue;
+      break;
+    }
+    if (stopRegex && stopRegex.test(line)) break;
+    const extracted: Record<string, string | null> = {};
+    let skip = false;
+    for (const column of template.columns) {
+      const { value, issue } = extractColumnValue(line, column);
+      if (issue) {
+        issues.push(`Line ${lineIndex + 1}: ${issue}`);
+        if (transactions.length === 0) {
+          skip = true;
+          break;
+        }
+        skip = true;
+        break;
+      }
+      if (column.key === 'ignore') continue;
+      extracted[column.key] = value;
+    }
+    if (skip) {
+      if (!transactions.length) break;
+      continue;
+    }
+    const date = parseStatementDate(extracted.date ?? null);
+    if (!date) {
+      issues.push(`Line ${lineIndex + 1}: Unable to parse date`);
+      if (!transactions.length) break;
+      continue;
+    }
+    const amount = parseStatementAmount(extracted.amount ?? null);
+    if (amount === null) {
+      issues.push(`Line ${lineIndex + 1}: Unable to parse amount`);
+      if (!transactions.length) break;
+      continue;
+    }
+    const description = normaliseWhitespace(extracted.description ?? '') || 'Transaction';
+    transactions.push({ date, description, amount });
+  }
+  return { transactions, issues };
+}
+
+function applyStatementRules(
+  lines: string[],
+  rules: StatementRules | null
+): { transactions: Array<{ date: string; description: string; amount: number }>; issues: string[] } {
+  if (!rules || !Array.isArray(rules.templates) || !rules.templates.length) {
+    return { transactions: [], issues: [] };
+  }
+  const transactions: Array<{ date: string; description: string; amount: number }> = [];
+  const issues: string[] = [];
+  rules.templates.forEach((template) => {
+    const result = applyStatementTemplate(lines, template);
+    transactions.push(...result.transactions);
+    issues.push(...result.issues.map((issue) => `${template.label ?? template.id ?? 'template'}: ${issue}`));
+  });
+  return { transactions, issues };
+}
+
+function locateNumberByKeywords(lines: string[], keywords: string[]): number | null {
   const keywordRegex = new RegExp(keywords.join('|'), 'i');
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -397,13 +535,17 @@ function buildHeuristicValues(context: ExtractionContext, docType: string): Reco
 export function extractFields(extracted: ExtractedTextContent, docType: string, userRulesRaw?: unknown): ExtractFieldsResult {
   const context = createContext(extracted);
   const rules = validateRules(userRulesRaw);
-  const ruleExtraction = runRuleExtraction(context, rules);
-  const heuristics = buildHeuristicValues(context, docType);
+  const ruleExtraction = runRuleExtraction(lines, rules?.fields ?? null);
+  const heuristics = buildHeuristicValues(lines, docType);
   const mergedValues: Record<string, ExtractedFieldValue> = { ...heuristics, ...ruleExtraction.values };
+  const isStatementDoc = /statement/i.test(docType);
+  const statementResult = isStatementDoc ? applyStatementRules(lines, rules?.statement ?? null) : { transactions: [], issues: [] };
   return {
     values: mergedValues,
     issues: ruleExtraction.issues,
     usedRuleFields: ruleExtraction.usedRuleFields,
+    statementTransactions: statementResult.transactions,
+    statementIssues: statementResult.issues,
   };
 }
 
@@ -431,7 +573,7 @@ export function suggestAnchors(text: string): string[] {
   return dedupe([...COMMON_ANCHORS, ...colonAnchors]).slice(0, 50);
 }
 
-export function parseUserRules(raw: string | null): UserRuleSet | null {
+export function parseUserRules(raw: string | null): UserSchematicRules | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);

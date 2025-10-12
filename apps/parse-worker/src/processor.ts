@@ -108,6 +108,13 @@ export async function processParseJob(redis: Redis, job: ParseJob): Promise<Pars
       ruleLatencyMs,
     },
     softErrors: fields.issues,
+    statement:
+      fields.statementTransactions.length || fields.statementIssues.length
+        ? {
+            transactions: fields.statementTransactions,
+            issues: fields.statementIssues,
+          }
+        : undefined,
   };
 
   if (fields.issues.length && raw) {

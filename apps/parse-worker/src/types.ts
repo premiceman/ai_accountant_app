@@ -40,40 +40,32 @@ export type UserFieldRule = AnchorRegexRule | LineOffsetRule | BoxRule;
 
 export type UserRuleSet = Record<string, UserFieldRule>;
 
-export interface BoundingBox {
-  page: number;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+export type StatementColumnKey = 'date' | 'description' | 'amount' | 'ignore';
+
+export interface StatementColumnRule {
+  key: StatementColumnKey;
+  regex?: string;
+  start?: number;
+  end?: number;
 }
 
-export interface LineSegmentGeometry {
-  charStart: number;
-  charEnd: number;
-  box: BoundingBox;
+export interface StatementRowTemplate {
+  id?: string;
+  label?: string;
+  startLine: number;
+  lineStride?: number;
+  maxRows?: number;
+  stopRegex?: string;
+  columns: StatementColumnRule[];
 }
 
-export interface LineGeometry {
-  lineIndex: number;
-  text: string;
-  pageNumber?: number;
-  segments: LineSegmentGeometry[];
-  bounds?: BoundingBox;
+export interface StatementRules {
+  templates: StatementRowTemplate[];
 }
 
-export interface ExtractedTextContent {
-  text: string;
-  lines: string[];
-  geometry: LineGeometry[];
-}
-
-export interface FieldPosition {
-  lineIndex: number;
-  charStart: number;
-  charEnd: number;
-  pageNumber?: number;
-  boxes?: BoundingBox[];
+export interface UserSchematicRules {
+  fields?: UserRuleSet | null;
+  statement?: StatementRules | null;
 }
 
 export interface ExtractedFieldValue {
@@ -88,6 +80,12 @@ export interface ExtractFieldsResult {
   values: Record<string, ExtractedFieldValue>;
   issues: string[];
   usedRuleFields: string[];
+  statementTransactions: Array<{
+    date: string;
+    description: string;
+    amount: number;
+  }>;
+  statementIssues: string[];
 }
 
 export interface ParseResultPayload {
@@ -123,4 +121,12 @@ export interface ParseResultPayload {
     ruleLatencyMs: number;
   };
   softErrors: string[];
+  statement?: {
+    transactions: Array<{
+      date: string;
+      description: string;
+      amount: number;
+    }>;
+    issues: string[];
+  };
 }
