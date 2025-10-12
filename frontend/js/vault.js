@@ -88,7 +88,15 @@
     placeholders: new Map(),
     collections: [],
     selectedCollectionId: null,
-    viewer: { type: null, context: null, files: [], selectedFileId: null },
+    viewer: {
+      type: null,
+      context: null,
+      files: [],
+      selectedFileId: null,
+      selectedIds: new Set(),
+      status: null,
+      isApplying: false,
+    },
   };
 
   let unauthorised = false;
@@ -127,7 +135,12 @@
   const viewerTitle = document.getElementById('file-viewer-title');
   const viewerSubtitle = document.getElementById('file-viewer-subtitle');
   const viewerClose = document.getElementById('file-viewer-close');
-  const schematicOpenButton = document.getElementById('schematic-open');
+  const viewerToolbar = document.getElementById('viewer-toolbar');
+  const viewerSelectAll = document.getElementById('viewer-select-all');
+  const viewerClearSelection = document.getElementById('viewer-clear-selection');
+  const viewerApplySchematic = document.getElementById('viewer-apply-schematic');
+  const viewerSelectionCount = document.getElementById('viewer-selection-count');
+  const viewerStatus = document.getElementById('viewer-status');
 
   function formatDate(value) {
     if (!value) return '—';
@@ -276,6 +289,22 @@
     setProgress({ phase, completed: totalFiles, total: totalFiles, countLabel: `${totalFiles}/${totalFiles} complete` });
   }
 
+  function resetViewerState() {
+    state.viewer = {
+      type: null,
+      context: null,
+      files: [],
+      selectedFileId: null,
+      selectedIds: new Set(),
+      status: null,
+      isApplying: false,
+    };
+    if (viewerStatus) {
+      viewerStatus.textContent = '';
+      viewerStatus.className = 'viewer__status';
+    }
+  }
+
   function closeViewer() {
     if (!viewerRoot) return;
     viewerPreviewToken += 1;
@@ -291,16 +320,185 @@
       viewerEmpty.style.display = '';
       viewerEmpty.textContent = 'Select a file to see the preview and actions.';
     }
-    state.viewer = { type: null, context: null, files: [], selectedFileId: null };
+    resetViewerState();
+    renderViewerToolbar();
   }
 
   function renderViewerSelection() {
     if (!viewerList) return;
     const cards = viewerList.querySelectorAll('.viewer__file');
     cards.forEach((card) => {
-      const isSelected = card.dataset.fileId === state.viewer.selectedFileId;
-      card.classList.toggle('is-selected', isSelected);
+      const fileId = card.dataset.fileId || null;
+      const isPreviewed = fileId && fileId === state.viewer.selectedFileId;
+      const isMarked = fileId ? state.viewer.selectedIds.has(fileId) : false;
+      card.classList.toggle('is-selected', isPreviewed);
+      card.classList.toggle('is-marked', isMarked);
+      const checkbox = card.querySelector('.viewer__file-checkbox');
+      if (checkbox) {
+        checkbox.checked = isMarked;
+      }
     });
+    renderViewerToolbar();
+  }
+
+  function renderViewerToolbar() {
+    if (!viewerToolbar) return;
+    const total = Array.isArray(state.viewer.files) ? state.viewer.files.length : 0;
+    if (!(state.viewer.selectedIds instanceof Set)) {
+      state.viewer.selectedIds = new Set();
+    }
+    const selectedCount = state.viewer.selectedIds.size;
+    if (viewerSelectionCount) {
+      viewerSelectionCount.textContent = selectedCount
+        ? `${selectedCount} selected`
+        : total
+          ? 'No files selected'
+          : 'No documents available';
+    }
+    if (viewerSelectAll) {
+      viewerSelectAll.disabled = !total || selectedCount === total || state.viewer.isApplying;
+    }
+    if (viewerClearSelection) {
+      viewerClearSelection.disabled = !selectedCount || state.viewer.isApplying;
+    }
+    if (viewerApplySchematic) {
+      viewerApplySchematic.disabled = !selectedCount || state.viewer.isApplying;
+      viewerApplySchematic.classList.toggle('is-busy', state.viewer.isApplying);
+    }
+  }
+
+  function setViewerStatus(message, tone = 'muted') {
+    if (!viewerStatus) return;
+    viewerStatus.textContent = message || '';
+    viewerStatus.className = `viewer__status viewer__status--${tone}`;
+    state.viewer.status = { message, tone };
+  }
+
+  function toggleViewerSelection(fileId, force) {
+    if (!fileId) return;
+    if (!(state.viewer.selectedIds instanceof Set)) {
+      state.viewer.selectedIds = new Set();
+    }
+    const shouldSelect = force != null ? force : !state.viewer.selectedIds.has(fileId);
+    if (shouldSelect) {
+      state.viewer.selectedIds.add(fileId);
+    } else {
+      state.viewer.selectedIds.delete(fileId);
+    }
+    renderViewerSelection();
+  }
+
+  function clearViewerSelection() {
+    state.viewer.selectedIds = new Set();
+    renderViewerSelection();
+  }
+
+  function selectAllViewerFiles() {
+    const ids = Array.isArray(state.viewer.files) ? state.viewer.files.map((file) => file.fileId).filter(Boolean) : [];
+    state.viewer.selectedIds = new Set(ids);
+    renderViewerSelection();
+  }
+
+  function getViewerFileById(fileId) {
+    if (!fileId || !Array.isArray(state.viewer.files)) return null;
+    return state.viewer.files.find((file) => file.fileId === fileId) || null;
+  }
+
+  function inferDocTypeFromViewerType(type) {
+    switch (type) {
+      case 'payslip':
+        return 'payslip';
+      case 'statement':
+        return 'current_account_statement';
+      default:
+        return null;
+    }
+  }
+
+  function getDocTypeForFile(file) {
+    if (!file) return null;
+    return file.catalogueKey || file?.raw?.catalogueKey || inferDocTypeFromViewerType(state.viewer.type);
+  }
+
+  async function postApplySchematics({ docIds, docType }) {
+    if (!Array.isArray(docIds) || !docIds.length) {
+      throw new Error('Select at least one document.');
+    }
+    if (!docType) {
+      throw new Error('Document type is required to apply schematics.');
+    }
+    try {
+      if (window.Auth && typeof Auth.requireAuth === 'function') {
+        await Auth.requireAuth();
+      }
+    } catch (error) {
+      handleUnauthorised('Please sign in again to apply schematics.');
+      throw new Error('Not authorised');
+    }
+    const response = await authFetch('/api/schematics/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docIds, docType }),
+    });
+    if (response.status === 401) {
+      handleUnauthorised('Please sign in again to apply schematics.');
+      throw new Error('Not authorised');
+    }
+    const payload = await safeJson(response);
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Failed to apply schematic');
+    }
+    return payload;
+  }
+
+  async function applySchematicsToSelection() {
+    if (!(state.viewer.selectedIds instanceof Set) || state.viewer.selectedIds.size === 0) {
+      setViewerStatus('Select one or more documents to apply a schematic.', 'muted');
+      return;
+    }
+    const ids = Array.from(state.viewer.selectedIds);
+    const docTypes = new Set();
+    let missingType = false;
+    ids.forEach((id) => {
+      const file = getViewerFileById(id);
+      const docType = getDocTypeForFile(file);
+      if (docType) {
+        docTypes.add(docType);
+      } else {
+        missingType = true;
+      }
+    });
+    if (missingType) {
+      setViewerStatus('Some selected documents do not expose a document type yet.', 'error');
+      return;
+    }
+    if (docTypes.size !== 1) {
+      setViewerStatus('Select documents from the same document type before applying a schematic.', 'error');
+      return;
+    }
+    const [docType] = Array.from(docTypes.values());
+    const label = ids.length === 1 ? 'document' : 'documents';
+    state.viewer.isApplying = true;
+    const originalLabel = viewerApplySchematic ? viewerApplySchematic.textContent : null;
+    if (viewerApplySchematic) {
+      viewerApplySchematic.textContent = 'Applying…';
+    }
+    renderViewerToolbar();
+    setViewerStatus(`Applying schematic to ${ids.length} ${label}…`, 'info');
+    try {
+      await postApplySchematics({ docIds: ids, docType });
+      setViewerStatus(`Schematic applied to ${ids.length} ${label}.`, 'success');
+    } catch (error) {
+      if (error.message === 'Not authorised') return;
+      console.error('Failed to apply schematic selection', error);
+      setViewerStatus(error.message || 'Unable to apply schematic right now.', 'error');
+    } finally {
+      state.viewer.isApplying = false;
+      if (viewerApplySchematic) {
+        viewerApplySchematic.textContent = originalLabel || 'Apply schematic';
+      }
+      renderViewerToolbar();
+    }
   }
 
   async function previewViewerFile(fileId) {
@@ -525,6 +723,9 @@
         throw new Error(text?.error || 'Delete failed');
       }
       state.viewer.files = state.viewer.files.filter((file) => file.fileId !== fileId);
+      if (state.viewer.selectedIds instanceof Set) {
+        state.viewer.selectedIds.delete(fileId);
+      }
       if (state.viewer.selectedFileId === fileId) {
         state.viewer.selectedFileId = null;
         if (viewerFrame) viewerFrame.src = 'about:blank';
@@ -545,22 +746,46 @@
     const card = document.createElement('article');
     card.className = 'viewer__file';
     card.dataset.fileId = file.fileId;
+    const docType = getDocTypeForFile(file);
+    if (docType) {
+      card.dataset.docType = docType;
+    }
     if (state.viewer.selectedFileId === file.fileId) {
       card.classList.add('is-selected');
     }
 
     const header = document.createElement('div');
     header.className = 'viewer__file-header';
+    const selectWrap = document.createElement('label');
+    selectWrap.className = 'viewer__file-select';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'viewer__file-checkbox';
+    checkbox.checked = state.viewer.selectedIds.has(file.fileId);
+    checkbox.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    checkbox.addEventListener('change', (event) => {
+      event.stopPropagation();
+      toggleViewerSelection(file.fileId, event.target.checked);
+    });
+    const faux = document.createElement('span');
+    faux.className = 'viewer__file-checkbox-visual';
+    selectWrap.append(checkbox, faux);
+
+    const heading = document.createElement('div');
+    heading.className = 'viewer__file-heading';
     const title = document.createElement('h4');
     title.className = 'viewer__file-title';
     title.textContent = file.title || 'Document';
-    header.appendChild(title);
+    heading.appendChild(title);
     if (file.subtitle) {
       const subtitle = document.createElement('span');
       subtitle.className = 'viewer__file-subtitle muted';
       subtitle.textContent = file.subtitle;
-      header.appendChild(subtitle);
+      heading.appendChild(subtitle);
     }
+    header.append(selectWrap, heading);
     card.appendChild(header);
 
     if (Array.isArray(file.summary) && file.summary.length) {
@@ -686,6 +911,7 @@
         viewerEmpty.style.display = '';
         viewerEmpty.textContent = 'Upload a document to see it here.';
       }
+      renderViewerToolbar();
       return;
     }
     files.forEach((file) => {
@@ -706,9 +932,16 @@
     state.viewer.context = { title, subtitle };
     state.viewer.files = Array.isArray(files) ? files : [];
     state.viewer.selectedFileId = null;
+    state.viewer.selectedIds = new Set();
+    state.viewer.status = null;
+    state.viewer.isApplying = false;
     viewerRoot.setAttribute('aria-hidden', 'false');
     if (viewerTitle) viewerTitle.textContent = title || 'Documents';
     if (viewerSubtitle) viewerSubtitle.textContent = subtitle || '';
+    if (viewerStatus) {
+      viewerStatus.textContent = '';
+      viewerStatus.className = 'viewer__status';
+    }
     renderViewerFiles();
   }
 
@@ -1326,6 +1559,7 @@
               metrics,
               raw: file,
               currency,
+              catalogueKey: file.catalogueKey || file.docType || 'payslip',
               isExpanded: false,
             };
           })
@@ -1340,6 +1574,65 @@
     } catch (error) {
       console.error('Failed to open payslip viewer', error);
       window.alert(error.message || 'Unable to load payslip documents right now.');
+    }
+  }
+
+  function openSchematicBuilder(docType) {
+    if (!docType) return;
+    const base = new URL('/schematics', window.location.origin);
+    base.searchParams.set('docType', docType);
+    window.open(base.toString(), '_blank', 'noopener');
+  }
+
+  async function applySchematicsForEmployer(employer, button) {
+    if (!employer?.employerId) return;
+    const docTypeFallback = 'payslip';
+    const appliedLabel = employer.name || 'employer';
+    const originalLabel = button ? button.textContent : null;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Applying…';
+    }
+    try {
+      const response = await apiFetch(`/payslips/employers/${encodeURIComponent(employer.employerId)}/files`);
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to apply schematics.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Unable to load payslips for schematics.');
+      }
+      const data = await response.json();
+      const groups = new Map();
+      const files = Array.isArray(data?.files) ? data.files : [];
+      files.forEach((file) => {
+        if (!file?.fileId) return;
+        const docType = file.catalogueKey || docTypeFallback;
+        if (!groups.has(docType)) {
+          groups.set(docType, []);
+        }
+        groups.get(docType).push(file.fileId);
+      });
+      if (!groups.size) {
+        window.alert('No payslips are ready for schematics yet.');
+        return;
+      }
+      let total = 0;
+      for (const [docType, docIds] of groups.entries()) {
+        await postApplySchematics({ docIds, docType });
+        total += docIds.length;
+      }
+      window.alert(`Schematic applied to ${total} payslip${total === 1 ? '' : 's'} for ${appliedLabel}.`);
+    } catch (error) {
+      if (error.message === 'Not authorised') return;
+      console.error('Failed to apply schematics for employer', error);
+      window.alert(error.message || 'Unable to apply schematics right now.');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalLabel || 'Apply schematic';
+      }
     }
   }
 
@@ -1368,6 +1661,28 @@
           open();
         }
       });
+      const actions = document.createElement('div');
+      actions.className = 'grid-card__actions';
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'grid-card__action';
+      applyBtn.textContent = 'Apply schematic';
+      applyBtn.disabled = !(employer.count > 0);
+      applyBtn.title = employer.count ? 'Apply the active schematic to all documents' : 'No documents ready yet';
+      applyBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        applySchematicsForEmployer(employer, applyBtn);
+      });
+      const builderBtn = document.createElement('button');
+      builderBtn.type = 'button';
+      builderBtn.className = 'grid-card__action';
+      builderBtn.textContent = 'Open builder';
+      builderBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openSchematicBuilder('payslip');
+      });
+      actions.append(applyBtn, builderBtn);
+      card.appendChild(actions);
       payslipGrid.appendChild(card);
     });
   }
@@ -1380,6 +1695,60 @@
       renderInstitutionGrid(data?.institutions || []);
     } catch (error) {
       console.warn('Statements fetch failed', error);
+    }
+  }
+
+  async function applySchematicsForInstitution(institution, button) {
+    if (!institution?.institutionId) return;
+    const originalLabel = button ? button.textContent : null;
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Applying…';
+    }
+    try {
+      const response = await apiFetch(`/statements/institutions/${encodeURIComponent(institution.institutionId)}/files`);
+      if (response.status === 401) {
+        handleUnauthorised('Please sign in again to apply schematics.');
+        return;
+      }
+      if (!response.ok) {
+        const text = await safeJson(response);
+        throw new Error(text?.error || 'Unable to load statements for schematics.');
+      }
+      const data = await response.json();
+      const groups = new Map();
+      const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+      accounts.forEach((account) => {
+        const files = Array.isArray(account?.files) ? account.files : [];
+        files.forEach((file) => {
+          if (!file?.fileId) return;
+          const docType = file.catalogueKey || file.docType || inferDocTypeFromViewerType('statement');
+          if (!groups.has(docType)) {
+            groups.set(docType, []);
+          }
+          groups.get(docType).push(file.fileId);
+        });
+      });
+      if (!groups.size) {
+        window.alert('No statements are ready for schematics yet.');
+        return;
+      }
+      let total = 0;
+      for (const [docType, docIds] of groups.entries()) {
+        await postApplySchematics({ docIds, docType });
+        total += docIds.length;
+      }
+      const label = institution.name || 'institution';
+      window.alert(`Schematic applied to ${total} statement${total === 1 ? '' : 's'} for ${label}.`);
+    } catch (error) {
+      if (error.message === 'Not authorised') return;
+      console.error('Failed to apply schematics for institution', error);
+      window.alert(error.message || 'Unable to apply schematics right now.');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalLabel || 'Apply schematic';
+      }
     }
   }
 
@@ -1432,6 +1801,7 @@
             metrics,
             raw: file,
             currency,
+            catalogueKey: file.catalogueKey || file.docType || inferDocTypeFromViewerType('statement'),
             isExpanded: false,
           });
         });
@@ -1473,6 +1843,28 @@
           open();
         }
       });
+      const actions = document.createElement('div');
+      actions.className = 'grid-card__actions';
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.className = 'grid-card__action';
+      applyBtn.textContent = 'Apply schematic';
+      applyBtn.disabled = !(inst.accounts > 0);
+      applyBtn.title = inst.accounts ? 'Apply the active schematic to all documents' : 'No accounts available yet';
+      applyBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        applySchematicsForInstitution(inst, applyBtn);
+      });
+      const builderBtn = document.createElement('button');
+      builderBtn.type = 'button';
+      builderBtn.className = 'grid-card__action';
+      builderBtn.textContent = 'Open builder';
+      builderBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openSchematicBuilder(inferDocTypeFromViewerType('statement') || 'statement');
+      });
+      actions.append(applyBtn, builderBtn);
+      card.appendChild(actions);
       statementGrid.appendChild(card);
     });
   }
@@ -1757,6 +2149,24 @@
   if (viewerOverlay) {
     viewerOverlay.addEventListener('click', () => {
       closeViewer();
+    });
+  }
+  if (viewerSelectAll) {
+    viewerSelectAll.addEventListener('click', (event) => {
+      event.preventDefault();
+      selectAllViewerFiles();
+    });
+  }
+  if (viewerClearSelection) {
+    viewerClearSelection.addEventListener('click', (event) => {
+      event.preventDefault();
+      clearViewerSelection();
+    });
+  }
+  if (viewerApplySchematic) {
+    viewerApplySchematic.addEventListener('click', (event) => {
+      event.preventDefault();
+      applySchematicsToSelection();
     });
   }
 

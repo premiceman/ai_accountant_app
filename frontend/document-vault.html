@@ -844,6 +844,49 @@
       padding: 4px 0;
     }
 
+    .grid-card__actions {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      position: relative;
+      z-index: 1;
+    }
+
+    .grid-card__action {
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.22);
+      color: inherit;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      backdrop-filter: blur(4px);
+      transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+    }
+
+    .grid-card__action:hover {
+      background: rgba(255, 255, 255, 0.32);
+      border-color: rgba(255, 255, 255, 0.85);
+      color: inherit;
+    }
+
+    .grid-card__action:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .grid-card:not(.grid-card--brand) .grid-card__action {
+      border-color: rgba(103, 89, 255, 0.25);
+      background: rgba(103, 89, 255, 0.08);
+      color: rgba(103, 89, 255, 0.82);
+    }
+
+    .grid-card:not(.grid-card--brand) .grid-card__action:hover {
+      background: rgba(103, 89, 255, 0.15);
+      border-color: rgba(103, 89, 255, 0.45);
+      color: rgba(103, 89, 255, 0.95);
+    }
+
     .collection-card {
       background: var(--mint-card);
       border: 1px solid rgba(15, 23, 42, 0.12);
@@ -971,6 +1014,70 @@
       color: var(--viewer-muted);
     }
 
+    .viewer__toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 12px 24px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+      flex-wrap: wrap;
+    }
+
+    .viewer__toolbar-left {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 200px;
+    }
+
+    .viewer__selection-count {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .viewer__status {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--viewer-muted);
+    }
+
+    .viewer__status--muted { color: var(--viewer-muted); }
+    .viewer__status--info { color: var(--vault-accent); }
+    .viewer__status--success { color: var(--light-green); }
+    .viewer__status--error { color: var(--light-red); }
+
+    .viewer__toolbar-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .viewer__toolbar-actions button {
+      border: 1px solid rgba(103, 89, 255, 0.25);
+      background: rgba(255, 255, 255, 0.9);
+      color: rgba(103, 89, 255, 0.8);
+      padding: 5px 14px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      transition: background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+    }
+
+    .viewer__toolbar-actions button:hover:not(:disabled) {
+      background: rgba(103, 89, 255, 0.18);
+      color: rgba(103, 89, 255, 0.95);
+    }
+
+    .viewer__toolbar-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .viewer__toolbar-actions button.is-busy {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
     .viewer__body {
       display: grid;
       grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
@@ -1036,6 +1143,11 @@
       position: relative;
     }
 
+    .viewer__file.is-marked {
+      border-color: rgba(103, 89, 255, 0.35);
+      background: rgba(103, 89, 255, 0.12);
+    }
+
     .viewer__file.is-selected {
       border-color: rgba(103, 89, 255, 0.35);
       box-shadow: 0 14px 28px rgba(103, 89, 255, 0.18);
@@ -1045,8 +1157,58 @@
     .viewer__file-header {
       display: flex;
       justify-content: space-between;
-      gap: 12px;
-      align-items: baseline;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .viewer__file-select {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .viewer__file-checkbox {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .viewer__file-checkbox-visual {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1.5px solid rgba(103, 89, 255, 0.4);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: transparent;
+      transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+
+    .viewer__file-checkbox-visual::after {
+      content: '';
+    }
+
+    .viewer__file-checkbox:checked + .viewer__file-checkbox-visual {
+      background: rgba(103, 89, 255, 0.18);
+      border-color: rgba(103, 89, 255, 0.6);
+      color: rgba(103, 89, 255, 0.9);
+    }
+
+    .viewer__file-checkbox:checked + .viewer__file-checkbox-visual::after {
+      content: '✓';
+      color: rgba(103, 89, 255, 0.9);
+    }
+
+    .viewer__file-heading {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
     }
 
     .viewer__file-title {
@@ -1356,6 +1518,17 @@
         </div>
         <button type="button" class="viewer__close" id="file-viewer-close">Close</button>
       </header>
+      <div class="viewer__toolbar" id="viewer-toolbar">
+        <div class="viewer__toolbar-left">
+          <span class="viewer__selection-count" id="viewer-selection-count">No files selected</span>
+          <p class="viewer__status" id="viewer-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="viewer__toolbar-actions">
+          <button type="button" id="viewer-select-all">Select all</button>
+          <button type="button" id="viewer-clear-selection" disabled>Clear selection</button>
+          <button type="button" id="viewer-apply-schematic" disabled>Apply schematic</button>
+        </div>
+      </div>
       <div class="viewer__body">
         <div class="viewer__list" id="file-viewer-list" role="list"></div>
         <div class="viewer__preview">
