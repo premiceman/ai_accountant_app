@@ -25,6 +25,7 @@ function requireWorker(req, res, next) {
 function normaliseValues(fieldValues = {}) {
   const preferred = {};
   const fallback = {};
+  const positions = {};
   Object.entries(fieldValues).forEach(([field, entry]) => {
     if (!entry || typeof entry !== 'object') return;
     const source = entry.source || 'heuristic';
@@ -33,8 +34,11 @@ function normaliseValues(fieldValues = {}) {
     } else if (entry.value != null && !(field in preferred)) {
       fallback[field] = entry.value;
     }
+    if (Array.isArray(entry.positions) && entry.positions.length) {
+      positions[field] = entry.positions;
+    }
   });
-  return { preferred, fallback };
+  return { preferred, fallback, positions };
 }
 
 const PARSE_SESSION_TTL_SECONDS = 24 * 60 * 60;
@@ -69,7 +73,7 @@ router.post('/parse-result', requireWorker, async (req, res) => {
   }
 
   const { fieldValues = {}, metadata = {}, insights = {}, narrative = [], text = '' } = result;
-  const { preferred, fallback } = normaliseValues(fieldValues);
+  const { preferred, fallback, positions } = normaliseValues(fieldValues);
 
   const metrics = { ...(insights.metrics || {}) };
   Object.entries(preferred).forEach(([field, value]) => {
@@ -104,6 +108,9 @@ router.post('/parse-result', requireWorker, async (req, res) => {
           extractedFields: {
             preferred,
             fallback,
+            positions: Object.keys({ ...(metadata.fieldPositions || {}), ...positions }).length
+              ? { ...(metadata.fieldPositions || {}), ...positions }
+              : undefined,
           },
           extractionSource,
         },

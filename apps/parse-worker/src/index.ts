@@ -162,3 +162,4 @@ main().catch((err) => {
 });
 
 export { extractFields, suggestAnchors } from './fields';
+export { extractText } from './text-extraction';
