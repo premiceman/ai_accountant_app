@@ -708,7 +708,7 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     active: true,
     message: `Analysing ${entryForCatalogue?.label || 'document'}…`,
   });
-  const schematicsEnabled = String(process.env.ENABLE_SCHEMATICS || 'false').toLowerCase() === 'true';
+  const schematicsEnabled = String(process.env.ENABLE_SCHEMATICS || 'true').toLowerCase() === 'true';
   let activeRulesVersion = null;
   if (schematicsEnabled) {
     const activeDoc = await DocumentSchematic.findOne({

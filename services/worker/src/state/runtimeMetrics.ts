@@ -20,7 +20,7 @@ export async function getHealthSnapshot(): Promise<{
   }
 
   return {
-    schematicsEnabled: String(process.env.ENABLE_SCHEMATICS || 'false').toLowerCase() === 'true',
+    schematicsEnabled: String(process.env.ENABLE_SCHEMATICS || 'true').toLowerCase() === 'true',
     redis: {
       connected: isRedisConnected(),
       queueDepth,
