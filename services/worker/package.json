@@ -23,6 +23,7 @@
     "express": "^4.19.2",
     "mongoose": "^8.5.1",
     "pdf-parse": "^1.1.1",
+    "tesseract.js": "^5.0.4",
     "pino": "^9.1.0",
     "typescript": "^5.4.5"
   },
