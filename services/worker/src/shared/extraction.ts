@@ -42,7 +42,7 @@ type StatementExtractionResult = {
     amount: number;
     direction?: 'inflow' | 'outflow';
     category?: string | null;
-  }> | null;
+  }>;
   provenance?: Record<string, unknown> | null;
 };
 
@@ -89,15 +89,9 @@ export async function extractPayslip(buffer: Buffer): Promise<PayslipExtractionR
   return mod.extractPayslip(buffer);
 }
 
-export async function extractStatement(
-  buffer: Buffer,
-  meta?: { originalName?: string; schematicTransactions?: Array<{ date?: string; description?: string; amount?: number }> }
-): Promise<StatementExtractionResult> {
+export async function extractStatement(buffer: Buffer): Promise<StatementExtractionResult> {
   const mod = (await loadStatementModule()) as {
-    extractStatement(
-      buffer: Buffer,
-      meta?: { originalName?: string; schematicTransactions?: Array<{ date?: string; description?: string; amount?: number }> }
-    ): Promise<StatementExtractionResult>;
+    extractStatement(buffer: Buffer): Promise<StatementExtractionResult>;
   };
-  return mod.extractStatement(buffer, meta);
+  return mod.extractStatement(buffer);
 }

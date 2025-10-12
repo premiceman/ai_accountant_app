@@ -41,11 +41,7 @@ const {
   summarizeCatalogue,
 } = require('../services/documents/catalogue');
 const { analyseDocument } = require('../services/documents/ingest');
-const { setInsightsProcessing } = require('../services/documents/insightsStore');
-const { lpush: kvLpush, set: kvSet, get: kvGet } = require('../lib/kv');
-const { sha256 } = require('../lib/hash');
-const DocumentSchematic = require('../../models/DocumentSchematic');
-const { enumerateZipBuffers } = require('../lib/zip');
+const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
 
 const REQUIRED_KEYS = getKeysByCategory('required');
 const HELPFUL_KEYS = getKeysByCategory('helpful');
@@ -55,7 +51,6 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 
 const STORAGE_CONTEXT_TTL_MS = 5 * 60 * 1000; // cache storage slug for 5 minutes per user
-const PARSE_SESSION_TTL_SECONDS = 24 * 60 * 60; // retain parse session metadata for 24h
 const storageContextCache = new Map();
 
 function stripDiacritics(value) {
@@ -104,17 +99,6 @@ function sanitizeMonthSegment(raw) {
     .replace(/[^0-9]/g, '');
   if (/^[0-9]{6}$/.test(cleaned)) return cleaned;
   return dayjs().format('MMYYYY');
-}
-
-function resolveStoragePath(key) {
-  const publicHost = process.env.R2_PUBLIC_HOST || null;
-  if (!publicHost) return key;
-  const trimmed = String(publicHost).replace(/\/+$/, '');
-  if (/^https?:\/\//i.test(trimmed)) {
-    return `${trimmed}/${key}`;
-  }
-  const normalisedHost = trimmed.replace(/^https?:\/\//i, '');
-  return `https://${normalisedHost}/${key}`;
 }
 
 async function getStorageContext(userId) {
@@ -717,166 +701,85 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
     : colId;
 
   const uploaded = [];
-  const classifications = [];
+  const analyses = [];
   await setInsightsProcessing(u.id, normalizedCatalogueKey, {
     active: true,
-    message: `Validating ${entryForCatalogue?.label || 'document'}…`,
+    message: `Analysing ${entryForCatalogue?.label || 'document'}…`,
   });
-  const schematicsEnabled = String(process.env.ENABLE_SCHEMATICS || 'true').toLowerCase() === 'true';
-  let activeRulesVersion = null;
-  if (schematicsEnabled) {
-    const activeDoc = await DocumentSchematic.findOne({
-      userId: u.id,
-      docType: normalizedCatalogueKey,
-      status: 'active',
-    })
-      .sort({ updatedAt: -1 })
-      .lean();
-    activeRulesVersion = activeDoc?.version || null;
-  }
   try {
-    const processDocument = async (buffer, nameHint, originalSize) => {
-      const originalName = nameHint || 'document.pdf';
-      const analysis = await analyseDocument(entryForCatalogue, buffer, originalName, { user: userContext });
+    for (const f of files) {
+      const ok = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
+      if (!ok) {
+        await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: 'Only PDF files are allowed.' });
+        return res.status(400).json({ error: 'Only PDF files are allowed' });
+      }
+
+      const analysis = await analyseDocument(
+        entryForCatalogue,
+        f.buffer,
+        f.originalname || 'document.pdf',
+        { user: userContext }
+      );
       if (!analysis.valid) {
-        await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-          active: false,
-          message: analysis.reason || 'Document type could not be recognised.',
-        });
-        const error = new Error(analysis.reason || 'Document type could not be recognised.');
-        error.status = 400;
-        throw error;
+        await setInsightsProcessing(u.id, normalizedCatalogueKey, { active: false, message: analysis.reason || 'Document type could not be recognised.' });
+        return res.status(400).json({ error: analysis.reason || 'Document type could not be recognised.' });
       }
 
       const date = dayjs().format('YYYYMMDD');
       const monthSegment = dayjs().format('MMYYYY');
-      const safeBase = String(originalName || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
+      const safeBase = String(f.originalname || 'file.pdf').replace(/[^\w.\- ]+/g, '_');
       const key = storage.objectKey(
         storageCollectionId,
         monthSegment,
         `${date}-${randomUUID()}-${safeBase}`
       );
-      const storagePath = resolveStoragePath(key);
-      const contentHash = sha256(buffer);
-      const jobId = randomUUID();
-      await putObject(key, buffer, 'application/pdf');
+      await putObject(key, f.buffer, 'application/pdf');
       const id = keyToFileId(key);
       await setInsightsProcessing(u.id, normalizedCatalogueKey, {
         active: true,
-        message: `Queued ${safeBase} for Docupipe…`,
-        step: 'queued',
+        message: `Extracting insights from ${safeBase}…`,
+        step: 'analyse',
         fileId: id,
         fileName: safeBase,
       });
-
-      if (schematicsEnabled) {
-        try {
-          const parseSessionKey = `parse:session:${id}`;
-          const sessionPayload = {
-            status: 'queued',
-            queuedAt: new Date().toISOString(),
-            docId: id,
-            jobId,
-            userId: u.id,
-            docType: normalizedCatalogueKey,
-            userRulesVersion: activeRulesVersion || null,
-            storagePath,
-            r2Key: key,
-            originalName: safeBase,
-            contentHash,
-            collectionId: storageCollectionId || null,
-            catalogueKey: normalizedCatalogueKey,
-            source: 'vault-upload',
-            docupipeStatus: 'queued',
-          };
-          await kvSet(parseSessionKey, sessionPayload, PARSE_SESSION_TTL_SECONDS);
-        } catch (queueErr) {
-          console.warn('[ingest] Failed to persist parse session metadata', queueErr);
-        }
-        try {
-          await kvLpush('parse:jobs', {
-            docId: id,
-            userId: u.id,
-            storagePath,
-            docType: normalizedCatalogueKey,
-            userRulesVersion: activeRulesVersion || undefined,
-            source: 'vault-upload',
-            originalName: safeBase,
-          });
-          console.log({
-            name: 'ingest',
-            msg: 'Enqueued parse job to Redis',
-            docId: id,
-            docType: normalizedCatalogueKey,
-          });
-        } catch (queueErr) {
-          console.warn('[ingest] Failed to enqueue schematics parse job', queueErr);
-        }
-      }
-
       uploaded.push({
         id,
         name: safeBase,
-        size: originalSize ?? buffer.length,
+        size: f.size || 0,
         uploadedAt: new Date().toISOString(),
         viewUrl: `/api/vault/files/${id}/view`,
         downloadUrl: `/api/vault/files/${id}/download`,
         catalogueKey: hasValidCatalogueKey ? normalizedCatalogueKey : null,
       });
-      classifications.push({ fileId: id, classification: analysis.classification });
-    };
-
-    for (const f of files) {
-      const isPdf = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname || '');
-      const isZip = f.mimetype === 'application/zip' || /\.zip$/i.test(f.originalname || '');
-
-      if (!isPdf && !isZip) {
-        await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-          active: false,
-          message: 'Only PDF or ZIP files are allowed.',
-        });
-        return res.status(400).json({ error: 'Only PDF or ZIP files are allowed.' });
-      }
-
-      if (isZip) {
-        const entries = await enumerateZipBuffers(f.buffer, (entry) => entry.fileName.toLowerCase().endsWith('.pdf'));
-        if (!entries.length) {
-          await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-            active: false,
-            message: 'ZIP archive must contain at least one PDF.',
-          });
-          return res.status(400).json({ error: 'ZIP archive must contain at least one PDF document.' });
-        }
-        for (const entry of entries) {
-          await processDocument(entry.buffer, entry.fileName || f.originalname || 'document.pdf', entry.buffer.length);
-        }
-        continue;
-      }
-
-      await processDocument(f.buffer, f.originalname || 'document.pdf', f.size || f.buffer.length);
+      analyses.push({
+        fileId: id,
+        insights: analysis.insights,
+        fileName: safeBase,
+        uploadedAt: new Date(),
+      });
     }
-
     if (hasValidCatalogueKey) {
       await recordCatalogueUploads(u.id, normalizedCatalogueKey, uploaded, storageCollectionId);
     }
-
+    for (const item of analyses) {
+      await applyDocumentInsights(u.id, normalizedCatalogueKey, item.insights, {
+        id: item.fileId,
+        name: item.fileName,
+        uploadedAt: item.uploadedAt,
+      });
+    }
     await setInsightsProcessing(u.id, normalizedCatalogueKey, {
-      active: true,
-      message: `${entryForCatalogue?.label || 'Document'} processing with Docupipe…`,
-      step: 'provider',
-      fileId: uploaded[uploaded.length - 1]?.id || null,
-      fileName: uploaded[uploaded.length - 1]?.name || null,
+      active: false,
+      message: `${entryForCatalogue?.label || 'Document'} analytics updated`,
+      fileId: analyses[analyses.length - 1]?.fileId || null,
+      fileName: analyses[analyses.length - 1]?.fileName || null,
     });
-
-    res.status(201).json({ uploaded, classifications });
+    res.status(201).json({ uploaded });
   } catch (err) {
     await setInsightsProcessing(u.id, normalizedCatalogueKey, {
       active: false,
-      message: err?.message || 'Document processing failed',
+      message: 'Document processing failed',
     });
-    if (err && err.status) {
-      return res.status(err.status).json({ error: err.message });
-    }
     throw err;
   }
 });
@@ -898,60 +801,6 @@ router.get('/files/:id/view', async (req, res) => {
   const storage = await getStorageContext(u.id);
   if (!key.startsWith(storage.rootPrefix)) return res.status(403).json({ error: 'Forbidden' });
   await streamR2Object(req, res, key, { inline: true });
-});
-
-router.get('/files/:id/status', async (req, res) => {
-  const u = getUser(req); if (!u) return res.status(401).json({ error: 'Unauthorized' });
-  const fileId = String(req.params.id || '').trim();
-  if (!fileId) return res.status(400).json({ error: 'Invalid file id' });
-
-  const sessionKey = `parse:session:${fileId}`;
-  let sessionMeta = null;
-  try {
-    sessionMeta = await kvGet(sessionKey);
-  } catch (err) {
-    console.warn('[vault] failed to load parse session for status', { fileId, err: err?.message });
-  }
-
-  if (!sessionMeta) {
-    return res.status(404).json({ error: 'Status not found' });
-  }
-
-  let processing = 'amber';
-  let message = 'Processing with Docupipe…';
-  const docupipeStatus = sessionMeta.docupipeStatus || sessionMeta.status || null;
-
-  if (docupipeStatus === 'completed' || sessionMeta.status === 'completed') {
-    processing = 'green';
-    message = 'Docupipe JSON received';
-  } else if (docupipeStatus === 'failed' || sessionMeta.status === 'failed') {
-    processing = 'red';
-    message = sessionMeta.error || 'Docupipe processing failed';
-  } else if (docupipeStatus) {
-    message = `Docupipe status: ${docupipeStatus}`;
-  }
-
-  try {
-    const errorInfo = await kvGet(`parse:error:${fileId}`);
-    if (errorInfo && processing !== 'green') {
-      processing = 'red';
-      if (typeof errorInfo === 'string') {
-        message = errorInfo;
-      } else if (errorInfo?.message) {
-        message = errorInfo.message;
-      }
-    }
-  } catch (err) {
-    console.warn('[vault] failed to load parse error entry', { fileId, err: err?.message });
-  }
-
-  res.json({
-    upload: 'green',
-    processing,
-    message,
-    docupipeStatus: docupipeStatus || null,
-    updatedAt: sessionMeta.completedAt || sessionMeta.updatedAt || sessionMeta.queuedAt || null,
-  });
 });
 
 router.get('/files/:id/download', async (req, res) => {

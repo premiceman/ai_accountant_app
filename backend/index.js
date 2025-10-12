@@ -9,20 +9,7 @@ let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,
 const mongoose = require('mongoose');
 
 // Helper to require modules without crashing if missing
-function safeRequire(modPath) {
-  try {
-    return require(modPath);
-  } catch (err) {
-    const message = err?.message || err;
-    const code = err?.code;
-    const isModuleMissing = code === 'MODULE_NOT_FOUND';
-    // Only surface unexpected load errors; missing optional modules remain silent.
-    if (!isModuleMissing || !String(message).includes(modPath.replace('./', ''))) {
-      console.warn(`⚠️  Failed to load optional module "${modPath}"`, message);
-    }
-    return null;
-  }
-}
+function safeRequire(modPath) { try { return require(modPath); } catch { return null; } }
 
 // ---- Routers (mount only if found) ----
 const authRouter    = safeRequire('./routes/auth')                  || safeRequire('./src/routes/auth');
@@ -39,10 +26,7 @@ const docsRouter =
 const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequire('./routes/events.routes');
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
-const vaultRouter  =
-  safeRequire('./src/routes/vault.routes.js') ||
-  safeRequire('./src/routes/vault') ||
-  safeRequire('./routes/vault');
+const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');
@@ -51,8 +35,6 @@ const truelayerRouter  = null;
 const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
 const jsonTestRouter = safeRequire('./src/routes/jsonTest.routes');
 const adminRequeueRouter = safeRequire('./src/routes/admin.requeue.routes.js') || safeRequire('./routes/admin.requeue.routes');
-const parseRouter = safeRequire('./src/routes/parse.routes');
-const schematicsRouter = safeRequire('./src/routes/schematics.routes');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -113,8 +95,6 @@ mount('/api/analytics', analyticsRouter, 'analytics');
 mount('/api/flags', flagsRouter, 'flags');
 mount('/api/tax', taxRouter, 'tax');
 mount('/api/json-test', jsonTestRouter, 'json-test');
-mount('/api', parseRouter, 'parse');
-mount('/api', schematicsRouter, 'schematics');
 mount('/', adminRequeueRouter, 'admin-requeue');
 if (qaDevRouter) {
   mount('/__qa__', qaDevRouter, 'qa-dev');

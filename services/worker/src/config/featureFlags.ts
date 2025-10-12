@@ -1,7 +1,8 @@
 // NOTE: Triage diagnostics for empty transactions (non-destructive). Remove after issue is resolved.
-// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Addi
-// tive, non-breaking.
-import sharedFeatureFlags from '../shared/featureFlagsProxy.js';
+// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type SharedFeatureFlagsModule = {
   ENABLE_AJV_STRICT: boolean;
@@ -32,7 +33,20 @@ type SharedFeatureFlagsModule = {
   };
 };
 
-const typedFeatureFlags = sharedFeatureFlags as SharedFeatureFlagsModule;
+const require = createRequire(import.meta.url);
+
+const featureFlagModulePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  '..',
+  'shared',
+  'config',
+  'featureFlags.js',
+);
+
+const sharedFeatureFlags = require(featureFlagModulePath) as SharedFeatureFlagsModule;
 
 export const {
   ENABLE_AJV_STRICT,
@@ -47,6 +61,6 @@ export const {
   getAllFlags,
   getFlag,
   serialiseFlagsForClient,
-} = typedFeatureFlags;
+} = sharedFeatureFlags;
 
-export default typedFeatureFlags;
+export default sharedFeatureFlags;

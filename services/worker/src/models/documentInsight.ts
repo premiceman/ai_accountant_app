@@ -43,13 +43,6 @@ const DocumentInsightSchema = new Schema(
     version: { type: String, default: null },
     currency: { type: String, default: null },
     documentDateV1: { type: String, default: null },
-    status: {
-      type: String,
-      enum: ['pending', 'success', 'failed'],
-      default: 'pending',
-      index: true,
-    },
-    statusReason: { type: String, default: null },
     metadata: { type: Schema.Types.Mixed, default: () => ({}) },
     metrics: { type: Schema.Types.Mixed, default: () => ({}) },
     metricsV1: { type: Schema.Types.Mixed, default: null },
