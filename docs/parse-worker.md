@@ -15,6 +15,11 @@ await redis.lpush('parse:jobs', JSON.stringify({
 }));
 ```
 
+## Environment
+
+- `REDIS_URL` must point to the shared Redis instance (for example `redis://redis.internal:6379`).
+- `PARSE_WORKER_TOKEN` secures the `/api/parse-result` callback. Configure the backend and worker with the same secret and send `Authorization: Bearer <token>` from the worker.
+
 ## Reading results
 
 - Poll `parse:result:{docId}` for a JSON payload identical to the example in `apps/parse-worker/README.md`.
