@@ -17,6 +17,7 @@ const {
 const {
   DocumentProcessingError,
 } = require('../services/documents/pipeline/errors');
+const { postDocument, waitForJob, getDocument } = require('../services/docupipe.client');
 
 const JSON_TEST_ENABLED = toBoolean(process.env.JSON_TEST);
 
@@ -64,6 +65,51 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
 
     const userDoc = await User.findById(userId, 'firstName lastName username').lean();
     const context = { user: buildUserContext(userDoc) };
+
+    const useDocuPipe = (process.env.JSON_TEST_USE_DOCUPIPE ?? 'true') !== 'false' && !!process.env.DOCUPIPE_API_KEY;
+
+    if (useDocuPipe) {
+      try {
+        const { documentId, jobId } = await postDocument({
+          buffer: file.buffer,
+          filename: file.originalname || 'document.pdf',
+        });
+
+        await waitForJob(jobId, { timeoutMs: 60000 });
+
+        const doc = await getDocument(documentId);
+
+        const key = buildObjectKey({
+          userId,
+          userPrefix: 'json-test',
+          collectionSegment: 'JSON TEST',
+          sessionPrefix: dayjs().format('YYYYMMDD'),
+          originalName: file.originalname || 'document.pdf',
+          extension: '.pdf',
+        });
+        await putObject({ key, body: file.buffer, contentType: 'application/pdf' });
+        const fileId = keyToFileId(key);
+
+        return res.json({
+          ok: true,
+          provider: 'docupipe',
+          document: doc,
+          storage: {
+            key,
+            fileId,
+            size: file.size || file.buffer.length,
+          },
+        });
+      } catch (err) {
+        console.warn('[json-test] DocuPipe failed', err);
+        return res.status(200).json({
+          ok: false,
+          code: err.code || 'DOCUPIPE_ERROR',
+          error: err.message || 'DocuPipe error',
+        });
+      }
+    }
+
     let analysis;
     try {
       analysis = await autoAnalyseDocument(file.buffer, file.originalname || 'document.pdf', context);
