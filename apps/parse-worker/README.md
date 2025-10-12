@@ -36,6 +36,24 @@ Jobs are `LPUSH`ed onto `parse:jobs` with a JSON payload:
 {
   "ok": true,
   "classification": { "docType": "payslip", "confidence": 0.8, "anchors": ["payDate"] },
+  "fieldValues": {
+    "grossPay": {
+      "field": "grossPay",
+      "source": "rule",
+      "value": 1234.56,
+      "positions": [
+        {
+          "lineIndex": 12,
+          "charStart": 14,
+          "charEnd": 23,
+          "pageNumber": 1,
+          "boxes": [
+            { "page": 1, "left": 212.3, "top": 456.7, "width": 108.2, "height": 14.1 }
+          ]
+        }
+      ]
+    }
+  },
   "insights": { "metrics": { "grossPay": 1234.56 } },
   "narrative": [],
   "metadata": {
@@ -46,7 +64,17 @@ Jobs are `LPUSH`ed onto `parse:jobs` with a JSON payload:
     "employerName": "Employer Ltd",
     "personName": "Employee Name",
     "rulesVersion": "v3",
-    "dateConfidence": 0.82
+    "dateConfidence": 0.82,
+    "fieldPositions": {
+      "grossPay": [
+        {
+          "lineIndex": 12,
+          "charStart": 14,
+          "charEnd": 23,
+          "pageNumber": 1
+        }
+      ]
+    }
   },
   "text": "full text...",
   "storage": { "path": "https://storage/doc.pdf", "processedAt": "2024-05-28T12:00:00.000Z" },
@@ -55,6 +83,11 @@ Jobs are `LPUSH`ed onto `parse:jobs` with a JSON payload:
 }
 ```
 
+- `fieldValues` entries now include optional `positions` data to help render highlights. Each position references the line index,
+  character range and, when available, PDF bounding boxes in page coordinates.
+- The worker also echoes a flattened `metadata.fieldPositions` map for consumers that only need positional data without the
+  full field payload.
+
 - Errors are written to `parse:error:{docId}`.
 - Listeners can subscribe to `parse:done` to be notified when a document finishes processing.
 
@@ -62,5 +95,7 @@ Jobs are `LPUSH`ed onto `parse:jobs` with a JSON payload:
 
 The worker exports two pure helpers that the web application can reuse:
 
-- `extractFields(text, docType, userRules)` – runs rule-based extraction with heuristics + validation.
+- `extractText(buffer, docType)` → `ExtractedTextContent` – returns normalised text plus page geometry.
+- `extractFields(extractedText, docType, userRules)` – runs rule-based extraction with heuristics + validation using the
+  geometry metadata.
 - `suggestAnchors(text)` – returns likely anchors for UI highlight mode.

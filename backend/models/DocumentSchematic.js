@@ -14,6 +14,67 @@ const DocumentSchematicSchema = new mongoose.Schema(
     },
     rules: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     fingerprint: { type: mongoose.Schema.Types.Mixed, default: null },
+    builderMetadata: {
+      type: new mongoose.Schema(
+        {
+          sessionId: { type: String, default: null },
+          samples: {
+            type: [
+              new mongoose.Schema(
+                {
+                  id: { type: String, default: null },
+                  name: { type: String, default: null },
+                  size: { type: Number, default: null },
+                  mimeType: { type: String, default: null },
+                  uploadedAt: { type: Date, default: null },
+                  storagePath: { type: String, default: null },
+                  notes: { type: String, default: '' },
+                },
+                { _id: false }
+              ),
+            ],
+            default: () => [],
+          },
+          colourPalette: {
+            type: new mongoose.Schema(
+              {
+                primary: { type: String, default: null },
+                secondary: { type: String, default: null },
+                accent: { type: String, default: null },
+                background: { type: String, default: null },
+                text: { type: String, default: null },
+              },
+              { _id: false }
+            ),
+            default: null,
+          },
+          columnTemplates: {
+            type: [
+              new mongoose.Schema(
+                {
+                  name: { type: String, default: null },
+                  description: { type: String, default: '' },
+                  fields: { type: [String], default: () => [] },
+                },
+                { _id: false }
+              ),
+            ],
+            default: () => [],
+          },
+          fieldMappings: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+          notes: { type: String, default: '' },
+        },
+        { _id: false }
+      ),
+      default: () => ({
+        sessionId: null,
+        samples: [],
+        colourPalette: null,
+        columnTemplates: [],
+        fieldMappings: {},
+        notes: '',
+      }),
+    },
   },
   { timestamps: true }
 );

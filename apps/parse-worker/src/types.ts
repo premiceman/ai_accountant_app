@@ -73,6 +73,7 @@ export interface ExtractedFieldValue {
   source: 'rule' | 'heuristic';
   field: string;
   detail?: string;
+  positions?: FieldPosition[];
 }
 
 export interface ExtractFieldsResult {
@@ -108,6 +109,7 @@ export interface ParseResultPayload {
     personName: string | null;
     rulesVersion: string | null;
     dateConfidence: number;
+    fieldPositions?: Record<string, FieldPosition[]>;
   };
   text: string;
   storage: {

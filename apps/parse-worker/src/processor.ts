@@ -4,7 +4,7 @@ import { extractFields, parseUserRules } from './fields';
 import { fetchDocumentBytes } from './storage';
 import { extractText } from './text-extraction';
 import { normaliseWhitespace } from './utils';
-import { ParseJob, ParseResultPayload } from './types';
+import { FieldPosition, ParseJob, ParseResultPayload } from './types';
 
 const MAX_ATTEMPTS = 3;
 const DEDUPE_TTL_SECONDS = 60 * 10;
@@ -56,13 +56,13 @@ export async function shouldSkipJob(redis: Redis, job: ParseJob): Promise<boolea
 export async function processParseJob(redis: Redis, job: ParseJob): Promise<ParseResultPayload> {
   const startedAt = Date.now();
   const buffer = await fetchDocumentBytes(job.storagePath);
-  const text = await extractText(buffer, job.docType);
-  const normalisedText = normaliseWhitespace(text);
+  const extracted = await extractText(buffer, job.docType);
+  const normalisedText = normaliseWhitespace(extracted.text);
   const dateExtraction = extractDates(normalisedText);
 
   const ruleTimerStart = Date.now();
   const { rules, version, raw } = await loadActiveUserRules(redis, job);
-  const fields = extractFields(normalisedText, job.docType, rules);
+  const fields = extractFields(extracted, job.docType, rules);
   const ruleLatencyMs = Date.now() - ruleTimerStart;
 
   const metrics: Record<string, number | null> = {};
@@ -71,6 +71,12 @@ export async function processParseJob(redis: Redis, job: ParseJob): Promise<Pars
       metrics[field] = payload.value;
     }
   });
+
+  const fieldPositions = Object.fromEntries(
+    Object.entries(fields.values)
+      .filter(([, value]) => Array.isArray(value.positions) && value.positions.length > 0)
+      .map(([key, value]) => [key, value.positions as FieldPosition[]])
+  );
 
   const metadata = {
     payDate: dateExtraction.payDate,
@@ -81,6 +87,7 @@ export async function processParseJob(redis: Redis, job: ParseJob): Promise<Pars
     personName: typeof fields.values.employeeName?.value === 'string' ? (fields.values.employeeName.value as string) : null,
     rulesVersion: version,
     dateConfidence: dateExtraction.confidence,
+    fieldPositions: Object.keys(fieldPositions).length ? fieldPositions : undefined,
   } as const;
 
   const payload: ParseResultPayload = {
