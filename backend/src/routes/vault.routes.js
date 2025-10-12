@@ -42,7 +42,8 @@ const {
 } = require('../services/documents/catalogue');
 const { analyseDocument } = require('../services/documents/ingest');
 const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
-const { lpush: kvLpush } = require('../lib/kv');
+const { lpush: kvLpush, set: kvSet } = require('../lib/kv');
+const { sha256 } = require('../lib/hash');
 const DocumentSchematic = require('../../models/DocumentSchematic');
 
 const REQUIRED_KEYS = getKeysByCategory('required');
@@ -53,6 +54,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB
 
 const STORAGE_CONTEXT_TTL_MS = 5 * 60 * 1000; // cache storage slug for 5 minutes per user
+const PARSE_SESSION_TTL_SECONDS = 24 * 60 * 60; // retain parse session metadata for 24h
 const storageContextCache = new Map();
 
 function stripDiacritics(value) {
@@ -101,6 +103,17 @@ function sanitizeMonthSegment(raw) {
     .replace(/[^0-9]/g, '');
   if (/^[0-9]{6}$/.test(cleaned)) return cleaned;
   return dayjs().format('MMYYYY');
+}
+
+function resolveStoragePath(key) {
+  const publicHost = process.env.R2_PUBLIC_HOST || null;
+  if (!publicHost) return key;
+  const trimmed = String(publicHost).replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(trimmed)) {
+    return `${trimmed}/${key}`;
+  }
+  const normalisedHost = trimmed.replace(/^https?:\/\//i, '');
+  return `https://${normalisedHost}/${key}`;
 }
 
 async function getStorageContext(userId) {
@@ -747,6 +760,9 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
         monthSegment,
         `${date}-${randomUUID()}-${safeBase}`
       );
+      const storagePath = resolveStoragePath(key);
+      const contentHash = sha256(f.buffer);
+      const jobId = randomUUID();
       await putObject(key, f.buffer, 'application/pdf');
       const id = keyToFileId(key);
       await setInsightsProcessing(u.id, normalizedCatalogueKey, {
@@ -758,10 +774,32 @@ router.post('/collections/:id/files', upload.array('files'), async (req, res) =>
       });
       if (schematicsEnabled) {
         try {
+          const parseSessionKey = `parse:session:${id}`;
+          const sessionPayload = {
+            status: 'queued',
+            queuedAt: new Date().toISOString(),
+            docId: id,
+            jobId,
+            userId: u.id,
+            docType: normalizedCatalogueKey,
+            userRulesVersion: activeRulesVersion || null,
+            storagePath,
+            r2Key: key,
+            originalName: safeBase,
+            contentHash,
+            collectionId: storageCollectionId || null,
+            catalogueKey: normalizedCatalogueKey,
+            source: 'vault-upload',
+          };
+          await kvSet(parseSessionKey, sessionPayload, PARSE_SESSION_TTL_SECONDS);
+        } catch (queueErr) {
+          console.warn('[ingest] Failed to persist parse session metadata', queueErr);
+        }
+        try {
           await kvLpush('parse:jobs', {
             docId: id,
             userId: u.id,
-            storagePath: key,
+            storagePath,
             docType: normalizedCatalogueKey,
             userRulesVersion: activeRulesVersion || undefined,
             source: 'vault-upload',

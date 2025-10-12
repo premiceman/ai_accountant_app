@@ -41,6 +41,9 @@
 ## 🌍 Environment Variables
 - **File**: `.env` (create from `.env.example`)
 - **Keys**: populate using secure values for your environment. See `.env.example` for placeholders and flag defaults.
+- **Required additions for schematics parsing**:
+  - `REDIS_URL` — connection string for the shared Redis instance that backs `parse:jobs` and `parse:session:*` bookkeeping.
+  - `PARSE_WORKER_TOKEN` — shared bearer token that authorises the parsing worker when it posts `/api/parse-result`.
 
 ## 📂 Directory Structure
 - backend/

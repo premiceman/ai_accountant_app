@@ -26,7 +26,10 @@ const docsRouter =
 const eventsRouter  = safeRequire('./src/routes/events.routes')     || safeRequire('./routes/events.routes');
 const summaryRouter = safeRequire('./src/routes/summary.routes')    || safeRequire('./routes/summary.routes');
 const billingRouter = safeRequire('./routes/billing')               || safeRequire('./src/routes/billing');
-const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
+const vaultRouter  =
+  safeRequire('./src/routes/vault.routes.js') ||
+  safeRequire('./src/routes/vault') ||
+  safeRequire('./routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');

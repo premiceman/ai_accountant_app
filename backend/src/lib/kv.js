@@ -44,9 +44,25 @@ async function lpush(key, value) {
   return redis.lpush(key, payload);
 }
 
+async function del(key) {
+  const redis = getClient();
+  if (!redis) return 0;
+  return redis.del(key);
+}
+
+async function expire(key, ttlSeconds) {
+  const redis = getClient();
+  if (!redis) return false;
+  if (!ttlSeconds || ttlSeconds <= 0) return false;
+  await redis.expire(key, ttlSeconds);
+  return true;
+}
+
 module.exports = {
   getClient,
   set,
   get,
   lpush,
+  del,
+  expire,
 };

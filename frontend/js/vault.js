@@ -2170,6 +2170,15 @@
     });
   }
 
+  if (schematicOpenButton) {
+    schematicOpenButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (window.VaultSchematics && typeof window.VaultSchematics.open === 'function') {
+        window.VaultSchematics.open();
+      }
+    });
+  }
+
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     if (jsonModal && jsonModal.classList.contains('is-visible')) {
@@ -2182,6 +2191,9 @@
   });
 
   document.addEventListener('DOMContentLoaded', () => {
+    if (window.VaultSchematics && typeof window.VaultSchematics.init === 'function') {
+      window.VaultSchematics.init();
+    }
     init().catch((error) => {
       console.error('Failed to initialise vault page', error);
       showError('Something went wrong initialising the vault. Please try again.');

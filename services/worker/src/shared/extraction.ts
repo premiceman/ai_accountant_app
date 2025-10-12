@@ -89,9 +89,15 @@ export async function extractPayslip(buffer: Buffer): Promise<PayslipExtractionR
   return mod.extractPayslip(buffer);
 }
 
-export async function extractStatement(buffer: Buffer): Promise<StatementExtractionResult> {
+export async function extractStatement(
+  buffer: Buffer,
+  meta?: { originalName?: string; schematicTransactions?: Array<{ date?: string; description?: string; amount?: number }> }
+): Promise<StatementExtractionResult> {
   const mod = (await loadStatementModule()) as {
-    extractStatement(buffer: Buffer): Promise<StatementExtractionResult>;
+    extractStatement(
+      buffer: Buffer,
+      meta?: { originalName?: string; schematicTransactions?: Array<{ date?: string; description?: string; amount?: number }> }
+    ): Promise<StatementExtractionResult>;
   };
-  return mod.extractStatement(buffer);
+  return mod.extractStatement(buffer, meta);
 }

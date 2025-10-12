@@ -15,9 +15,15 @@ await redis.lpush('parse:jobs', JSON.stringify({
 }));
 ```
 
+## Environment
+
+- `REDIS_URL` must point to the shared Redis instance (for example `redis://redis.internal:6379`).
+- `PARSE_WORKER_TOKEN` secures the `/api/parse-result` callback. Configure the backend and worker with the same secret and send `Authorization: Bearer <token>` from the worker.
+
 ## Reading results
 
-- Poll `parse:result:{docId}` for a JSON payload identical to the example in `apps/parse-worker/README.md`.
+- Poll `parse:result:{docId}` for a JSON payload identical to the example in `apps/parse-worker/README.md` (including
+  `fieldValues[..].positions` and `metadata.fieldPositions` for highlight metadata).
 - Subscribe to the `parse:done` channel for completion notifications.
 - Errors are stored under `parse:error:{docId}`.
 
@@ -29,4 +35,6 @@ await redis.lpush('parse:jobs', JSON.stringify({
 
 ## Pure helpers
 
-The worker exports `extractFields` and `suggestAnchors` for use in previews/validation flows without queueing a job.
+The worker exports `extractText`, `extractFields` and `suggestAnchors` for use in previews/validation flows without queueing a
+job. `extractText` now returns line-level geometry and bounding boxes so previews can mirror worker behaviour when applying
+rules.

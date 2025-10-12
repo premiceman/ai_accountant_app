@@ -1095,7 +1095,10 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     }
   } else if (isStatementClassification(classification.type)) {
     try {
-      const extraction = await extractStatement(buffer);
+      const builderTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+      const extraction = await extractStatement(buffer, {
+        schematicTransactions: builderTransactions as Array<{ date?: string; description?: string; amount?: number }> | null,
+      });
       payload.transactions = Array.isArray(extraction.transactions) ? extraction.transactions : [];
       const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
       payload.metrics = {
