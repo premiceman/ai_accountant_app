@@ -1,5 +1,14 @@
 // frontend/js/nav.js
+let topbarResizeObserver;
+let topbarReady = false;
+let sidebarReady = false;
+
 (async function injectNav() {
+  const body = document.body;
+  const topbarHost = document.getElementById('topbar-container');
+  const sidebarHost = document.getElementById('sidebar-container');
+  if (body && topbarHost) body.classList.add('has-topbar');
+  if (body && sidebarHost) body.classList.add('has-sidebar');
   try {
     const top = await fetch('/components/topbar.html', { cache: 'no-store' });
     if (top.ok) {
@@ -8,6 +17,11 @@
         const brandLabel = document.querySelector('#topbar-container .topbar-logo span:last-child')?.textContent?.trim() || null;
         console.info?.('[instrumentation] nav:topbar:injected', { brandLabel, timestamp: new Date().toISOString() });
       } catch { /* no-op */ }
+      const topbarEl = document.querySelector('#topbar-container .topbar-glass');
+      if (topbarEl) {
+        topbarReady = true;
+        initialiseTopbarLayout(topbarEl);
+      }
       hydrateTopbarMeta();
     }
     const side = await fetch('/components/sidebar.html', { cache: 'no-store' });
@@ -15,6 +29,9 @@
       const host = document.getElementById('sidebar-container');
       const html = await side.text();
       host?.insertAdjacentHTML('beforeend', html);
+      if (host) {
+        sidebarReady = true;
+      }
       try {
         const navItemCount = document.querySelectorAll('#sidebar-container .app-nav-item').length;
         console.info?.('[instrumentation] nav:sidebar:injected', { navItemCount, timestamp: new Date().toISOString() });
@@ -23,7 +40,40 @@
       initializeSidebarCollapsibles(host);
     }
   } catch (e) { console.warn('nav inject failed', e); }
+  finally {
+    if (!topbarReady) body?.classList.remove('has-topbar');
+    if (!sidebarReady) body?.classList.remove('has-sidebar');
+  }
 })();
+
+function initialiseTopbarLayout(topbarEl) {
+  if (!topbarEl) return;
+  syncTopbarHeight(topbarEl);
+  if (typeof ResizeObserver === 'function') {
+    topbarResizeObserver?.disconnect?.();
+    topbarResizeObserver = new ResizeObserver(() => syncTopbarHeight(topbarEl));
+    topbarResizeObserver.observe(topbarEl);
+  } else {
+    window.addEventListener('resize', () => syncTopbarHeight(topbarEl), { passive: true });
+  }
+}
+
+function syncTopbarHeight(topbarEl) {
+  if (!topbarEl) return;
+  const measure = () => {
+    const rect = topbarEl.getBoundingClientRect();
+    if (!rect || !rect.height) return;
+    const height = Math.round(rect.height);
+    if (height > 0) {
+      document.documentElement.style.setProperty('--topbar-h', `${height}px`);
+    }
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(measure);
+  } else {
+    measure();
+  }
+}
 
 async function applySidebarFeatureFlags(host) {
   if (!host || !window.Auth || typeof Auth.fetch !== 'function') return;
