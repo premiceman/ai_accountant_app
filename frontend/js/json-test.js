@@ -5,6 +5,15 @@
   const errorBox = document.getElementById('json-test-error');
   const statusPill = document.getElementById('json-test-status');
   const labelBadge = document.getElementById('json-test-label');
+  const asyncToggleEl = document.getElementById('asyncMode');
+
+  const asyncFeatureEnabled = (window.JSON_TEST_ASYNC ?? 'true') !== 'false';
+  if (asyncToggleEl && !asyncFeatureEnabled) {
+    asyncToggleEl.checked = false;
+    asyncToggleEl.disabled = true;
+    const asyncLabel = asyncToggleEl.closest('label');
+    if (asyncLabel) asyncLabel.style.opacity = '0.6';
+  }
 
   if (!dropzone || !fileInput || !output) return;
 
@@ -70,33 +79,104 @@
     setStatus('Processing…', true);
     labelBadge?.setAttribute('hidden', '');
     output.textContent = 'Analysing document…';
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const docTypeEl = document.getElementById('docType');
-      if (docTypeEl) form.append('docType', docTypeEl.value); // 'bank' | 'payslip'
-      const res = await Auth.fetch('/api/json-test/upload', {
-        method: 'POST',
-        body: form,
-      });
-      if (!res.ok) {
-        const contentType = res.headers.get('content-type') || '';
-        let reason = res.statusText || 'Upload failed';
-        if (contentType.includes('application/json')) {
-          try { reason = (await res.json())?.error || reason; } catch { /* ignore */ }
-        } else {
-          try { reason = await res.text(); } catch { /* ignore */ }
-        }
-        throw new Error(reason || `Upload failed (${res.status})`);
+    let pollTimer = null;
+    const cancelPoll = () => {
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
       }
-      const payload = await res.json();
-      renderResult(payload);
-      setStatus('Complete', false);
+    };
+
+    try {
+      const docTypeEl = document.getElementById('docType');
+      const docType = docTypeEl ? docTypeEl.value : (window.DEFAULT_DOC_TYPE || 'bank');
+      const useAsync = !!(asyncToggleEl && asyncToggleEl.checked && asyncFeatureEnabled);
+
+      if (useAsync) {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('docType', docType);
+
+        const submitRes = await Auth.fetch('/api/json-test/submit', { method: 'POST', body: form });
+        let submitJson = null;
+        try {
+          submitJson = await submitRes.json();
+        } catch (err) {
+          throw new Error('Failed to parse submit response');
+        }
+        if (!submitRes.ok || !submitJson?.ok) {
+          throw new Error(submitJson?.error || submitRes.statusText || 'Submit failed');
+        }
+
+        const stdJobId = submitJson.stdJobId;
+        const standardizationId = submitJson.standardizationId;
+        if (!stdJobId || !standardizationId) {
+          throw new Error('Missing job identifiers');
+        }
+
+        output.textContent = 'Waiting for DocuPipe standardization…';
+
+        await new Promise((resolve, reject) => {
+          const intervalMs = 3000;
+
+          const poll = async () => {
+            try {
+              const statusRes = await Auth.fetch(`/api/json-test/status?stdJobId=${encodeURIComponent(stdJobId)}&standardizationId=${encodeURIComponent(standardizationId)}`);
+              const statusJson = await statusRes.json();
+              if (!statusRes.ok) {
+                throw new Error(statusJson?.error || statusRes.statusText || 'Status check failed');
+              }
+              if (statusJson?.state === 'completed') {
+                cancelPoll();
+                renderResult(statusJson.data);
+                resolve();
+                return;
+              }
+              if (statusJson?.state === 'failed' || statusJson?.state === 'error' || statusJson?.ok === false) {
+                cancelPoll();
+                reject(new Error(statusJson?.error || 'Processing failed'));
+                return;
+              }
+              pollTimer = setTimeout(poll, intervalMs);
+            } catch (pollErr) {
+              cancelPoll();
+              reject(pollErr);
+            }
+          };
+
+          poll();
+        });
+
+        setStatus('Complete', false);
+      } else {
+        const form = new FormData();
+        form.append('file', file);
+        if (docType) form.append('docType', docType);
+        const res = await Auth.fetch('/api/json-test/upload', {
+          method: 'POST',
+          body: form,
+        });
+        if (!res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          let reason = res.statusText || 'Upload failed';
+          if (contentType.includes('application/json')) {
+            try { reason = (await res.json())?.error || reason; } catch { /* ignore */ }
+          } else {
+            try { reason = await res.text(); } catch { /* ignore */ }
+          }
+          throw new Error(reason || `Upload failed (${res.status})`);
+        }
+        const payload = await res.json();
+        renderResult(payload);
+        setStatus('Complete', false);
+      }
     } catch (err) {
       console.error('JSON test upload failed', err);
       showError(err.message || 'Upload failed. Please try again.');
       output.textContent = 'Upload a document to view the parsed JSON payload.';
       setStatus('Ready', false);
+    } finally {
+      cancelPoll();
     }
   }
 
