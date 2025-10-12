@@ -53,12 +53,12 @@ async function shouldSkipJob(redis, job) {
 async function processParseJob(redis, job) {
     const startedAt = Date.now();
     const buffer = await (0, storage_1.fetchDocumentBytes)(job.storagePath);
-    const text = await (0, text_extraction_1.extractText)(buffer, job.docType);
-    const normalisedText = (0, utils_1.normaliseWhitespace)(text);
+    const extracted = await (0, text_extraction_1.extractText)(buffer, job.docType);
+    const normalisedText = (0, utils_1.normaliseWhitespace)(extracted.text);
     const dateExtraction = (0, dates_1.extractDates)(normalisedText);
     const ruleTimerStart = Date.now();
     const { rules, version, raw } = await loadActiveUserRules(redis, job);
-    const fields = (0, fields_1.extractFields)(normalisedText, job.docType, rules);
+    const fields = (0, fields_1.extractFields)(extracted, job.docType, rules);
     const ruleLatencyMs = Date.now() - ruleTimerStart;
     const metrics = {};
     Object.entries(fields.values).forEach(([field, payload]) => {
@@ -66,6 +66,9 @@ async function processParseJob(redis, job) {
             metrics[field] = payload.value;
         }
     });
+    const fieldPositions = Object.fromEntries(Object.entries(fields.values)
+        .filter(([, value]) => Array.isArray(value.positions) && value.positions.length > 0)
+        .map(([key, value]) => [key, value.positions]));
     const metadata = {
         payDate: dateExtraction.payDate,
         periodStart: dateExtraction.periodStart,
@@ -75,6 +78,7 @@ async function processParseJob(redis, job) {
         personName: typeof fields.values.employeeName?.value === 'string' ? fields.values.employeeName.value : null,
         rulesVersion: version,
         dateConfidence: dateExtraction.confidence,
+        fieldPositions: Object.keys(fieldPositions).length ? fieldPositions : undefined,
     };
     const payload = {
         ok: true,
@@ -94,6 +98,12 @@ async function processParseJob(redis, job) {
             ruleLatencyMs,
         },
         softErrors: fields.issues,
+        statement: fields.statementTransactions.length || fields.statementIssues.length
+            ? {
+                transactions: fields.statementTransactions,
+                issues: fields.statementIssues,
+            }
+            : undefined,
     };
     if (fields.issues.length && raw) {
         // preserve the active version under a historical key with timestamp for debugging

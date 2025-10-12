@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.suggestAnchors = exports.extractFields = void 0;
+exports.extractText = exports.suggestAnchors = exports.extractFields = void 0;
 const node_http_1 = require("node:http");
 const ioredis_1 = __importDefault(require("ioredis"));
 const processor_1 = require("./processor");
@@ -166,3 +166,5 @@ main().catch((err) => {
 var fields_1 = require("./fields");
 Object.defineProperty(exports, "extractFields", { enumerable: true, get: function () { return fields_1.extractFields; } });
 Object.defineProperty(exports, "suggestAnchors", { enumerable: true, get: function () { return fields_1.suggestAnchors; } });
+var text_extraction_1 = require("./text-extraction");
+Object.defineProperty(exports, "extractText", { enumerable: true, get: function () { return text_extraction_1.extractText; } });

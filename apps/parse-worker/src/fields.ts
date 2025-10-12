@@ -2,8 +2,13 @@ import * as chrono from 'chrono-node';
 import { z } from 'zod';
 import { chunkLines, dedupe, normaliseWhitespace, parseNumberStrict, formatMonthYear } from './utils';
 import {
+  BoundingBox,
+  BoxRule,
   ExtractedFieldValue,
+  ExtractedTextContent,
   ExtractFieldsResult,
+  FieldPosition,
+  LineGeometry,
   StatementColumnRule,
   StatementRowTemplate,
   StatementRules,
@@ -41,8 +46,10 @@ const RuleSchema = z.discriminatedUnion('strategy', [AnchorRegexRuleSchema, Line
 
 const RuleSetSchema = z.record(RuleSchema);
 
+const STATEMENT_COLUMN_KEYS = ['date', 'description', 'amount', 'ignore'] as const;
+
 const StatementColumnSchema = z.object({
-  key: z.enum(['date', 'description', 'amount', 'ignore']).default('description'),
+  key: z.enum(STATEMENT_COLUMN_KEYS).default('description'),
   regex: z.string().optional(),
   start: z.number().int().min(0).optional(),
   end: z.number().int().min(0).optional(),
@@ -71,14 +78,16 @@ function validateRules(rules: unknown): UserSchematicRules | null {
   if (!rules) return null;
   const composite = CompositeRuleSchema.safeParse(rules);
   if (composite.success) {
+    const typedFields = (composite.data.fields ?? null) as UserRuleSet | null;
+    const typedStatement = (composite.data.statement ?? null) as StatementRules | null;
     return {
-      fields: composite.data.fields ?? null,
-      statement: composite.data.statement ?? null,
+      fields: typedFields,
+      statement: typedStatement,
     };
   }
   const legacy = RuleSetSchema.safeParse(rules);
   if (legacy.success) {
-    return { fields: legacy.data, statement: null };
+    return { fields: legacy.data as UserRuleSet, statement: null };
   }
   console.warn('[parse-worker] invalid user rules', composite.error.issues);
   return null;
@@ -313,10 +322,14 @@ function applyRule(field: string, rule: UserFieldRule, context: ExtractionContex
   }
 }
 
-function runRuleExtraction(lines: string[], rules: UserRuleSet | null): Pick<ExtractFieldsResult, 'values' | 'issues' | 'usedRuleFields'> {
+function runRuleExtraction(
+  context: ExtractionContext,
+  rules: UserRuleSet | null
+): Pick<ExtractFieldsResult, 'values' | 'issues' | 'usedRuleFields'> {
   const values: Record<string, ExtractedFieldValue> = {};
   const issues: string[] = [];
   const usedRuleFields: string[] = [];
+  const { lines } = context;
   if (!rules) {
     return { values, issues, usedRuleFields };
   }
@@ -443,14 +456,22 @@ function applyStatementRules(
   return { transactions, issues };
 }
 
-function locateNumberByKeywords(lines: string[], keywords: string[]): number | null {
+interface LocatedNumber {
+  value: number;
+  lineIndex: number;
+  charStart: number;
+  charEnd: number;
+}
+
+function locateNumberByKeywords(context: ExtractionContext, keywords: string[]): LocatedNumber | null {
+  const { lines } = context;
   const keywordRegex = new RegExp(keywords.join('|'), 'i');
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (keywordRegex.test(line) && !/\bYTD\b/i.test(line)) {
       const numberPattern = /-?[£$€]?[\d,.()]+/g;
       let match: RegExpExecArray | null = null;
-      let candidate: { value: number; lineIndex: number; charStart: number; charEnd: number } | null = null;
+      let candidate: LocatedNumber | null = null;
       while ((match = numberPattern.exec(line))) {
         const parsed = parseNumberStrict(match[0]);
         if (parsed === null) continue;
@@ -534,9 +555,10 @@ function buildHeuristicValues(context: ExtractionContext, docType: string): Reco
 
 export function extractFields(extracted: ExtractedTextContent, docType: string, userRulesRaw?: unknown): ExtractFieldsResult {
   const context = createContext(extracted);
+  const { lines } = context;
   const rules = validateRules(userRulesRaw);
-  const ruleExtraction = runRuleExtraction(lines, rules?.fields ?? null);
-  const heuristics = buildHeuristicValues(lines, docType);
+  const ruleExtraction = runRuleExtraction(context, rules?.fields ?? null);
+  const heuristics = buildHeuristicValues(context, docType);
   const mergedValues: Record<string, ExtractedFieldValue> = { ...heuristics, ...ruleExtraction.values };
   const isStatementDoc = /statement/i.test(docType);
   const statementResult = isStatementDoc ? applyStatementRules(lines, rules?.statement ?? null) : { transactions: [], issues: [] };

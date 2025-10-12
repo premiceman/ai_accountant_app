@@ -19,33 +19,40 @@ declare module 'chrono-node' {
 declare module 'zod' {
   type ZodTypeAny = unknown;
 
-  interface RefinementCtx {
-    addIssue(issue: { code: string; message?: string }): void;
-  }
-
   interface ZodType<T> {
     parse(data: unknown): T;
     safeParse(data: unknown): { success: true; data: T } | { success: false; error: { issues: Array<{ message: string }> } };
     optional(): ZodType<T | undefined>;
+    nullable(): ZodType<T | null>;
+    default(value: T): ZodType<T>;
     min(value: number): ZodType<T>;
+    max(value: number): ZodType<T>;
     int(): ZodType<T>;
-    enum(values: readonly string[]): ZodType<T>;
-    literal(value: unknown): ZodType<T>;
-    extend(shape: Record<string, ZodTypeAny>): ZodType<T>;
+    refine(predicate: (value: T) => boolean, message?: string): ZodType<T>;
   }
 
   interface ZodObject<T> extends ZodType<T> {
     extend(shape: Record<string, ZodTypeAny>): ZodObject<T>;
+    optional(): ZodObject<T | undefined>;
   }
 
   interface ZodRecord<T> extends ZodType<Record<string, T>> {}
+
+  interface ZodEnum<T extends readonly [string, ...string[]]> extends ZodType<T[number]> {
+    default(value: T[number]): ZodEnum<T>;
+  }
+
+  interface ZodArray<T> extends ZodType<T[]> {
+    min(value: number): ZodArray<T>;
+  }
 
   export const z: {
     object<T extends Record<string, ZodTypeAny>>(shape: T): ZodObject<{ [K in keyof T]: unknown }>;
     string(): ZodType<string>;
     number(): ZodType<number>;
     literal<T>(value: T): ZodType<T>;
-    enum<T extends [string, ...string[]]>(values: T): ZodType<T[number]>;
+    enum<T extends readonly [string, ...string[]]>(values: T): ZodEnum<T>;
+    array<T>(schema: ZodType<T>): ZodArray<T>;
     record<T>(value: ZodType<T>): ZodRecord<T>;
     discriminatedUnion<K extends string, U extends ZodTypeAny[]>(
       key: K,
