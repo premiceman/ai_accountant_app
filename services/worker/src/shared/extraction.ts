@@ -42,7 +42,7 @@ type StatementExtractionResult = {
     amount: number;
     direction?: 'inflow' | 'outflow';
     category?: string | null;
-  }>;
+  }> | null;
   provenance?: Record<string, unknown> | null;
 };
 
