@@ -9,6 +9,10 @@ const { get: kvGet, set: kvSet } = require('../lib/kv');
 
 const router = express.Router();
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function requireWorker(req, res, next) {
   const token = process.env.PARSE_WORKER_TOKEN;
   if (!token) {
@@ -73,7 +77,9 @@ router.post('/parse-result', requireWorker, async (req, res) => {
   }
 
   const { fieldValues = {}, metadata = {}, insights = {}, narrative = [], text = '' } = result;
-  const { preferred, fallback, positions } = normaliseValues(fieldValues);
+  const schematic = isPlainObject(result?.schematic) ? result.schematic : null;
+  const schematicVersion = schematic?.version || metadata.rulesVersion || null;
+  const { preferred, fallback } = normaliseValues(fieldValues);
 
   const metrics = { ...(insights.metrics || {}) };
   Object.entries(preferred).forEach(([field, value]) => {
@@ -82,19 +88,54 @@ router.post('/parse-result', requireWorker, async (req, res) => {
     }
   });
 
-  const extractionSource = metadata.extractionSource || 'heuristic';
+  const extractionSource = schematicVersion
+    ? `schematic@${schematicVersion}`
+    : metadata.extractionSource || 'heuristic';
   const insightKey = docType || 'document';
-  const sessionKey = `parse:session:${docId}`;
-  let sessionMeta = null;
-  try {
-    const rawSession = await kvGet(sessionKey);
-    if (rawSession) {
-      sessionMeta = JSON.parse(rawSession);
-    }
-  } catch (err) {
-    console.warn('[parse-result] Failed to read parse session metadata', err);
+
+  const structuredFields = {
+    preferred,
+    fallback,
+    raw: fieldValues,
+  };
+  if (schematicVersion) {
+    structuredFields.version = schematicVersion;
   }
-  const sessionDocType = sessionMeta?.docType || sessionMeta?.catalogueKey || null;
+  if (schematic?.fields && isPlainObject(schematic.fields)) {
+    structuredFields.schematic = schematic.fields;
+  }
+
+  const positions = isPlainObject(schematic?.positions) ? schematic.positions : null;
+  const transactionsV1 = (() => {
+    if (Array.isArray(schematic?.transactions)) {
+      return schematic.transactions.filter((entry) => isPlainObject(entry));
+    }
+    if (isPlainObject(schematic?.transactions) && Array.isArray(schematic.transactions.items)) {
+      return schematic.transactions.items.filter((entry) => isPlainObject(entry));
+    }
+    return null;
+  })();
+
+  const metricsV1 = isPlainObject(schematic?.metrics) ? schematic.metrics : null;
+
+  const metadataPayload = {
+    ...metadata,
+    extractedFields: structuredFields,
+    extractionSource,
+  };
+  if (schematicVersion) {
+    metadataPayload.schematicVersion = schematicVersion;
+  }
+  if (positions) {
+    metadataPayload.positions = positions;
+  }
+  if (schematic && !metadataPayload.schematic) {
+    metadataPayload.schematic = {
+      version: schematicVersion,
+      docType: schematic.docType || docType || null,
+      provider: schematic.provider || 'schematic',
+    };
+  }
   try {
     await applyDocumentInsights(
       userObjectId,
@@ -103,19 +144,16 @@ router.post('/parse-result', requireWorker, async (req, res) => {
         baseKey: insightKey,
         insightType: insightKey,
         metrics,
-        metadata: {
-          ...metadata,
-          extractedFields: {
-            preferred,
-            fallback,
-            positions: Object.keys({ ...(metadata.fieldPositions || {}), ...positions }).length
-              ? { ...(metadata.fieldPositions || {}), ...positions }
-              : undefined,
-          },
-          extractionSource,
-        },
+        metadata: metadataPayload,
         narrative,
         text,
+        metricsV1: metricsV1 || null,
+        transactionsV1: transactionsV1 || null,
+        version: schematicVersion ? 'v1' : undefined,
+        schemaVersion: schematicVersion ? 'schematic-v1' : undefined,
+        parserVersion: schematic?.parserVersion || (schematicVersion ? `schematic@${schematicVersion}` : undefined),
+        promptVersion: schematic?.promptVersion || undefined,
+        model: schematic?.model || (schematicVersion ? 'schematic' : undefined),
       },
       {
         id: docId,
@@ -129,7 +167,11 @@ router.post('/parse-result', requireWorker, async (req, res) => {
       {
         $set: {
           'metadata.rulesVersion': metadata.rulesVersion || null,
+          'metadata.schematicVersion': schematicVersion || metadata.rulesVersion || null,
           'metadata.issues': Array.isArray(result.softErrors) ? result.softErrors : [],
+          'metadata.extractionSource': extractionSource,
+          'metadata.extractedFields': metadataPayload.extractedFields,
+          'metadata.positions': positions || null,
         },
       }
     ).catch(() => {});

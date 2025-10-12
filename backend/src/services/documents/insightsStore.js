@@ -8,6 +8,11 @@ const LEGACY_PARSER_VERSION = 'legacy-parser-v1';
 const LEGACY_PROMPT_VERSION = 'legacy-prompt-v1';
 const LEGACY_MODEL = 'legacy-ingest';
 
+const SCHEMATIC_SCHEMA_VERSION = 'schematic-v1';
+const SCHEMATIC_PARSER_VERSION = 'schematic-parser-v1';
+const SCHEMATIC_PROMPT_VERSION = 'schematic-prompt-v1';
+const SCHEMATIC_MODEL = 'schematic-ingest';
+
 function mergeFileReference(existing = [], fileInfo) {
   const filtered = existing.filter((item) => item.id !== fileInfo.id);
   filtered.unshift({
@@ -79,6 +84,11 @@ function deriveDocumentContext(insights = {}, fileInfo = {}) {
     metrics.periodStart,
   ];
   const txList = Array.isArray(insights.transactions) ? insights.transactions : [];
+  const txListV1 = Array.isArray(insights.transactionsV1) ? insights.transactionsV1 : [];
+  txListV1.forEach((tx) => {
+    if (tx?.date) candidates.push(tx.date);
+    else if (tx?.postedAt) candidates.push(tx.postedAt);
+  });
   txList.forEach((tx) => {
     if (tx?.date) candidates.push(tx.date);
   });
@@ -116,12 +126,12 @@ function deriveDocumentContext(insights = {}, fileInfo = {}) {
 function summariseStatementEntries(entries = []) {
   const transactions = [];
   const accounts = new Map();
-  entries.forEach((entry) => {
-    const meta = entry.metadata || {};
-    const accountId = meta.accountId || entry.key;
-    const accountName = meta.accountName || 'Account';
-    const accountSummary = accounts.get(accountId) || {
-      accountId,
+    entries.forEach((entry) => {
+      const meta = entry.metadata || {};
+      const accountId = meta.accountId || entry.key;
+      const accountName = meta.accountName || 'Account';
+      const accountSummary = accounts.get(accountId) || {
+        accountId,
       accountName,
       bankName: meta.bankName || null,
       accountType: meta.accountType || null,
@@ -130,30 +140,59 @@ function summariseStatementEntries(entries = []) {
       totals: { income: 0, spend: 0 },
       extractionSource: meta.extractionSource || entry.metrics?.extractionSource || null,
     };
-    accounts.set(accountId, accountSummary);
+      accounts.set(accountId, accountSummary);
 
-    const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
-    txList.forEach((tx, idx) => {
-      const amount = Number(tx.amount);
-      if (!Number.isFinite(amount)) return;
-      const direction = String(tx.direction || (amount >= 0 ? 'inflow' : 'outflow')).toLowerCase();
-      const signedAmount = direction === 'outflow' ? -Math.abs(amount) : Math.abs(amount);
-      const id = `${entry.key}:${idx}`;
-      transactions.push({
-        ...tx,
-        __id: id,
-        amount: signedAmount,
-        direction,
-        accountId: tx.accountId || accountId,
-        accountName: tx.accountName || accountName,
-        bankName: tx.bankName || meta.bankName || null,
-        accountType: tx.accountType || meta.accountType || null,
-        statementPeriod: tx.statementPeriod || meta.period || entry.period || null,
-        statementKey: entry.key,
-        date: tx.date || meta.period?.end || meta.period?.start || null,
-      });
+      const txV1 = Array.isArray(entry.transactionsV1) ? entry.transactionsV1 : [];
+      if (txV1.length) {
+        txV1.forEach((tx, idx) => {
+          const amountMinor = Number(tx?.amountMinor);
+          if (!Number.isFinite(amountMinor)) return;
+          const direction = String(tx?.direction || (amountMinor >= 0 ? 'inflow' : 'outflow')).toLowerCase();
+          const coercedDirection = direction === 'outflow' ? 'outflow' : 'inflow';
+          const major = Math.round(Math.abs(amountMinor)) / 100;
+          const signedAmount = coercedDirection === 'outflow' ? -major : major;
+          const id = `${entry.key}:v1:${idx}`;
+          transactions.push({
+            ...tx,
+            __id: id,
+            amount: signedAmount,
+            direction: coercedDirection,
+            accountId: tx?.accountId || accountId,
+            accountName: tx?.accountName || accountName,
+            bankName: tx?.bankName || meta.bankName || null,
+            accountType: tx?.accountType || meta.accountType || null,
+            statementPeriod: tx?.statementPeriod || meta.period || entry.period || null,
+            statementKey: entry.key,
+            description: tx?.description || tx?.originalDescription || 'Transaction',
+            category: tx?.category || 'Other',
+            date: tx?.date || tx?.postedAt || meta.period?.end || meta.period?.start || null,
+            transfer: Boolean(tx?.transfer || tx?.meta?.transfer || tx?.category === 'Transfers'),
+          });
+        });
+      } else {
+        const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
+        txList.forEach((tx, idx) => {
+          const amount = Number(tx.amount);
+          if (!Number.isFinite(amount)) return;
+          const direction = String(tx.direction || (amount >= 0 ? 'inflow' : 'outflow')).toLowerCase();
+          const signedAmount = direction === 'outflow' ? -Math.abs(amount) : Math.abs(amount);
+          const id = `${entry.key}:${idx}`;
+          transactions.push({
+            ...tx,
+            __id: id,
+            amount: signedAmount,
+            direction,
+            accountId: tx.accountId || accountId,
+            accountName: tx.accountName || accountName,
+            bankName: tx.bankName || meta.bankName || null,
+            accountType: tx.accountType || meta.accountType || null,
+            statementPeriod: tx.statementPeriod || meta.period || entry.period || null,
+            statementKey: entry.key,
+            date: tx.date || meta.period?.end || meta.period?.start || null,
+          });
+        });
+      }
     });
-  });
 
   const signatureMap = new Map();
   const transferIds = new Set();
@@ -270,7 +309,7 @@ function buildAggregates(sources) {
   }
 
   if (latestPayslip?.metrics) {
-    aggregates.income = {
+    const income = {
       gross: latestPayslip.metrics.gross ?? null,
       grossYtd: latestPayslip.metrics.grossYtd ?? null,
       net: latestPayslip.metrics.net ?? null,
@@ -295,8 +334,34 @@ function buildAggregates(sources) {
       periodStart: latestPayslip.metrics.periodStart || latestPayslip.metadata?.periodStart || null,
       periodEnd: latestPayslip.metrics.periodEnd || latestPayslip.metadata?.periodEnd || null,
     };
+    if (latestPayslip.metricsV1) {
+      const toMajor = (value) => {
+        if (typeof value !== 'number' || Number.isNaN(value)) return null;
+        return Math.round(value) / 100;
+      };
+      const v1 = latestPayslip.metricsV1;
+      const gross = toMajor(v1.grossMinor);
+      if (gross != null) income.gross = gross;
+      const net = toMajor(v1.netMinor);
+      if (net != null) income.net = net;
+      const tax = toMajor(v1.taxMinor);
+      if (tax != null) income.tax = tax;
+      const niMinor = toMajor(v1.nationalInsuranceMinor);
+      if (niMinor != null) income.ni = niMinor;
+      const pensionMinor = toMajor(v1.pensionMinor);
+      if (pensionMinor != null) income.pension = pensionMinor;
+      const studentLoanMinor = toMajor(v1.studentLoanMinor);
+      if (studentLoanMinor != null) income.studentLoan = studentLoanMinor;
+      if (v1.payDate) income.payDate = v1.payDate;
+      if (v1.period?.start) income.periodStart = v1.period.start;
+      if (v1.period?.end) income.periodEnd = v1.period.end;
+      if (v1.payFrequency && !income.payFrequency) income.payFrequency = v1.payFrequency;
+      if (v1.taxCode && !income.taxCode) income.taxCode = v1.taxCode;
+      income.extractionSource = v1.extractionSource || income.extractionSource;
+    }
+    aggregates.income = income;
     if (latestPayslip.metrics.notes) {
-      aggregates.income.notes = latestPayslip.metrics.notes;
+      income.notes = latestPayslip.metrics.notes;
     }
   }
 
@@ -443,7 +508,30 @@ function buildTimeline(sources = {}) {
       }
     } else if (baseKey === 'current_account_statement') {
       const meta = entry.metadata || {};
-      const txList = Array.isArray(entry.transactions) ? entry.transactions : [];
+      const rawTransactionsV1 = Array.isArray(entry.transactionsV1) ? entry.transactionsV1 : [];
+      const txList = rawTransactionsV1.length
+        ? rawTransactionsV1
+            .map((tx, idx) => {
+              if (!tx || typeof tx !== 'object') return null;
+              const amountMinor = Number(tx.amountMinor);
+              if (!Number.isFinite(amountMinor)) return null;
+              const direction = String(tx.direction || (amountMinor >= 0 ? 'inflow' : 'outflow')).toLowerCase();
+              const coercedDirection = direction === 'outflow' ? 'outflow' : 'inflow';
+              const major = Math.round(Math.abs(amountMinor)) / 100;
+              const signedAmount = coercedDirection === 'outflow' ? -major : major;
+              return {
+                __id: tx.id || `${entry.key}:${idx}`,
+                amount: signedAmount,
+                direction: coercedDirection,
+                description: tx.description || tx.originalDescription || 'Transaction',
+                category: tx.category || 'Other',
+                date: tx.date || tx.postedAt || null,
+              };
+            })
+            .filter(Boolean)
+        : Array.isArray(entry.transactions)
+        ? entry.transactions
+        : [];
       const fallbackStart = normaliseDate(meta.period?.start || entry.period || entry.files?.[0]?.uploadedAt);
       const fallbackEnd = normaliseDate(meta.period?.end || entry.period || entry.files?.[0]?.uploadedAt);
       txList.forEach((tx) => {
@@ -538,13 +626,22 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   const baseKey = insights.baseKey || key;
   const existing = sources[storeKey] || {};
   const documentContext = deriveDocumentContext(insights, fileInfo);
+  const metricsV1 = insights.metricsV1 || existing.metricsV1 || null;
+  const transactionsV1 = Array.isArray(insights.transactionsV1)
+    ? insights.transactionsV1
+    : Array.isArray(existing.transactionsV1)
+    ? existing.transactionsV1
+    : null;
+
   sources[storeKey] = {
     ...existing,
     key: storeKey,
     baseKey,
     metrics: insights.metrics || existing.metrics || {},
+    metricsV1,
     narrative: insights.narrative || existing.narrative || [],
     transactions: insights.transactions || existing.transactions || [],
+    transactionsV1: transactionsV1 ?? null,
     metadata: {
       ...(existing.metadata || {}),
       ...(insights.metadata || {}),
@@ -554,9 +651,28 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
       documentName: documentContext.documentName || existing.metadata?.documentName || null,
       nameMatchesUser: documentContext.nameMatchesUser ?? existing.metadata?.nameMatchesUser ?? null,
     },
-    period: insights.metadata?.period || insights.metrics?.period || existing.period || null,
-    files: fileInfo ? mergeFileReference(existing.files, fileInfo) : (existing.files || []),
+    period:
+      insights.metadata?.period ||
+      insights.metrics?.period ||
+      insights.metricsV1?.period ||
+      existing.period ||
+      null,
+    files: fileInfo ? mergeFileReference(existing.files, fileInfo) : existing.files || [],
+    version: insights.version || existing.version || (metricsV1 || transactionsV1 ? 'v1' : existing.version || null),
   };
+
+  const hasStructuredData =
+    (insights.version && String(insights.version).startsWith('v')) ||
+    insights.schemaVersion === SCHEMATIC_SCHEMA_VERSION ||
+    Boolean(metricsV1) ||
+    (Array.isArray(transactionsV1) && transactionsV1.length > 0);
+
+  const schemaVersion = insights.schemaVersion || (hasStructuredData ? SCHEMATIC_SCHEMA_VERSION : LEGACY_SCHEMA_VERSION);
+  const parserVersion = insights.parserVersion || (hasStructuredData ? SCHEMATIC_PARSER_VERSION : LEGACY_PARSER_VERSION);
+  const promptVersion = insights.promptVersion || (hasStructuredData ? SCHEMATIC_PROMPT_VERSION : LEGACY_PROMPT_VERSION);
+  const model = insights.model || (hasStructuredData ? SCHEMATIC_MODEL : LEGACY_MODEL);
+  const versionTag = insights.version || (hasStructuredData ? 'v1' : 'legacy-sync');
+  const stateVersion = insights.version || current.version || (hasStructuredData ? 'v1' : current.version || 'legacy-sync');
 
   const processing = { ...(current.processing || {}) };
   processing[baseKey] = {
@@ -572,6 +688,7 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
     timeline: buildTimeline(sources),
     processing,
     updatedAt: new Date(),
+    version: stateVersion,
   };
 
   await User.findByIdAndUpdate(userId, {
@@ -586,7 +703,10 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
     try {
       const now = new Date();
       const extractionSource =
-        insights.metadata?.extractionSource || insights.metrics?.extractionSource || 'heuristic';
+        insights.metadata?.extractionSource ||
+        insights.metrics?.extractionSource ||
+        insights.metricsV1?.extractionSource ||
+        'heuristic';
       const currency = insights.metadata?.currency || 'GBP';
       const documentIso = documentContext.documentIso || null;
       const documentDate = documentIso ? new Date(documentIso) : null;
@@ -598,6 +718,8 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
           documentIso || '',
           JSON.stringify(insights.metrics || {}),
           JSON.stringify(insights.transactions || []),
+          JSON.stringify(metricsV1 || {}),
+          JSON.stringify(transactionsV1 || []),
         ].join('|')
       );
 
@@ -614,6 +736,7 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
             documentName: documentContext.documentName || null,
             nameMatchesUser: documentContext.nameMatchesUser,
             metrics: insights.metrics || {},
+            metricsV1: metricsV1 || null,
             metadata: {
               ...(insights.metadata || {}),
               documentMonth: documentContext.monthKey || null,
@@ -621,16 +744,17 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
               documentDate: documentIso || null,
             },
             transactions: Array.isArray(insights.transactions) ? insights.transactions : [],
+            transactionsV1: Array.isArray(transactionsV1) ? transactionsV1 : [],
             narrative: Array.isArray(insights.narrative) ? insights.narrative : [],
             extractedAt: now,
             updatedAt: now,
-            schemaVersion: LEGACY_SCHEMA_VERSION,
-            parserVersion: LEGACY_PARSER_VERSION,
-            promptVersion: LEGACY_PROMPT_VERSION,
-            model: extractionSource === 'openai' ? 'openai-legacy' : LEGACY_MODEL,
+            schemaVersion,
+            parserVersion,
+            promptVersion,
+            model: extractionSource === 'openai' ? 'openai-legacy' : model,
             extractionSource,
             contentHash,
-            version: 'legacy-sync',
+            version: versionTag,
             currency,
             documentDateV1,
           },
