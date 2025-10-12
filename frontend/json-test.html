@@ -137,6 +137,31 @@
       </div>
       <pre class="json-output" id="json-test-output">Upload a document to view the parsed JSON payload.</pre>
     </section>
+
+    <section id="trim-lab" style="margin-top:2rem;">
+      <h3>Trim Lab (testing only – does not affect current upload flow)</h3>
+      <input type="file" id="trimFile" accept="application/pdf" />
+      <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
+        <button id="btnTrimAnalyze">Analyze</button>
+        <button id="btnTrimApply" disabled>Apply Selection</button>
+        <button id="btnTrimKeepAll" disabled>Keep all</button>
+        <button id="btnTrimReset" disabled>Reset</button>
+      </div>
+      <div style="margin-top:0.5rem;">
+        <label for="trimThreshold" class="small">Threshold: <span id="trimThresholdValue">6</span></label>
+        <input type="range" id="trimThreshold" min="0" max="12" value="6" style="width:100%;">
+      </div>
+      <div id="trimMeta" class="mono small" style="margin-top:0.5rem;"></div>
+      <div id="trimPages" class="mono small" style="margin-top:0.5rem;"></div>
+      <div style="display:flex; gap:1rem; margin-top:0.5rem;">
+        <div style="flex:1;">
+          <h4>Trimmed Preview</h4>
+          <iframe id="trimPreview" style="width:100%;height:480px;border:1px solid #ddd;"></iframe>
+          <button id="btnDownloadTrim" disabled>Download trimmed PDF</button>
+        </div>
+      </div>
+      <p class="small">Once validated here, we can pair trimming + standardization as a single workflow.</p>
+    </section>
   </main>
 
   <script src="/js/nav.js" defer></script>
