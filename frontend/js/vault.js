@@ -4,7 +4,35 @@
   const POLL_INTERVAL_UPLOAD = 3000;
   const POLL_INTERVAL_TILES = 10000;
   const POLL_INTERVAL_LISTS = 15000;
-  const LIGHT_LABELS = { red: 'Waiting', amber: 'Processing', green: 'Complete' };
+  const PROCESS_POLL_INTERVAL = 3000;
+  const STATUS_LABELS = {
+    idle: 'Ready',
+    queued: 'Queued',
+    processing: 'Processing…',
+    completed: 'Completed',
+    failed: 'Failed',
+  };
+  const STATUS_ICONS = {
+    idle: 'bi-pause-circle',
+    queued: 'bi-clock-history',
+    completed: 'bi-check-circle',
+    failed: 'bi-x-octagon',
+  };
+  const LEGACY_STATUS_MAP = {
+    red: 'queued',
+    amber: 'processing',
+    yellow: 'processing',
+    orange: 'processing',
+    green: 'completed',
+    complete: 'completed',
+    completed: 'completed',
+    success: 'completed',
+    error: 'failed',
+    failed: 'failed',
+    waiting: 'queued',
+    pending: 'queued',
+    ready: 'idle',
+  };
   const STORAGE_KEY = 'vault.uploadSessions.v1';
 
   const BRAND_THEMES = [
@@ -91,6 +119,8 @@
     viewer: { type: null, context: null, files: [], selectedFileId: null },
   };
 
+  const processingPollers = new Map();
+
   let unauthorised = false;
   let viewerPreviewUrl = null;
   let viewerPreviewToken = 0;
@@ -166,6 +196,239 @@
     const number = toNumberLike(value);
     if (number == null) return value == null ? '—' : String(value);
     return number.toLocaleString();
+  }
+
+  function ensureObject(value) {
+    return value && typeof value === 'object' ? value : {};
+  }
+
+  function normaliseStatus(value, fallback = 'queued') {
+    if (!value && value !== 0) return fallback;
+    if (typeof value === 'object' && value !== null) {
+      const statusValue = value.status || value.state || value.phase;
+      if (statusValue) return normaliseStatus(statusValue, fallback);
+    }
+    const input = String(value || '').trim().toLowerCase();
+    if (!input) return fallback;
+    if (STATUS_LABELS[input]) return input;
+    if (LEGACY_STATUS_MAP[input]) return LEGACY_STATUS_MAP[input];
+    return fallback;
+  }
+
+  function normaliseProcessingState(value, fallback = 'queued') {
+    const info = ensureObject(typeof value === 'object' ? value : {});
+    info.status = normaliseStatus(value && typeof value === 'object' ? value.status || value.state || value : value, fallback);
+    return info;
+  }
+
+  function createStatusIndicator(label, stateValue) {
+    const info = normaliseProcessingState(stateValue, 'queued');
+    const statusValue = info.status || 'queued';
+    const indicator = document.createElement('span');
+    indicator.className = 'status-indicator';
+    indicator.dataset.state = statusValue;
+    indicator.setAttribute('role', 'status');
+    indicator.setAttribute('tabindex', '0');
+    const labelText = `${label}: ${STATUS_LABELS[statusValue] || STATUS_LABELS.queued}`;
+    indicator.setAttribute('aria-label', labelText);
+    indicator.title = labelText;
+
+    let icon;
+    if (statusValue === 'processing') {
+      icon = document.createElement('span');
+      icon.className = 'spinner-border spinner-border-sm';
+      icon.setAttribute('role', 'presentation');
+      icon.setAttribute('aria-hidden', 'true');
+    } else {
+      icon = document.createElement('i');
+      const iconClass = STATUS_ICONS[statusValue] || STATUS_ICONS.queued;
+      icon.className = `bi ${iconClass}`;
+      icon.setAttribute('aria-hidden', 'true');
+    }
+
+    const text = document.createElement('span');
+    text.className = 'status-indicator__label';
+    text.textContent = STATUS_LABELS[statusValue] || STATUS_LABELS.queued;
+
+    indicator.append(icon, text);
+    return indicator;
+  }
+
+  function resolveDocId(input) {
+    if (!input) return null;
+    const source = input.raw && typeof input.raw === 'object' ? input.raw : input;
+    const candidates = [
+      input.docId,
+      input.documentId,
+      input.id,
+      source?.docId,
+      source?.documentId,
+      source?.id,
+      source?.fileId,
+      source?.storage?.fileId,
+      source?.processing?.docId,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return null;
+  }
+
+  function resolveDocClass(input) {
+    if (!input) return null;
+    const source = input.raw && typeof input.raw === 'object' ? input.raw : input;
+    const candidates = [
+      source?.meta?.docClass,
+      source?.meta?.doc_class,
+      source?.docClass,
+      source?.doc_class,
+      source?.classification?.docClass,
+      source?.classification?.doc_class,
+      source?.docType,
+      source?.documentType,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim().toLowerCase();
+      }
+    }
+    return null;
+  }
+
+  function docHasWarning(input) {
+    const source = input && input.raw && typeof input.raw === 'object' ? input.raw : input;
+    if (!source) return false;
+    if (source.ui && source.ui.warning) return true;
+    const meta = ensureObject(source.meta);
+    if (meta.trim_required) return true;
+    const pageCount = Number(meta.page_count_original || meta.pageCountOriginal || 0);
+    return Number.isFinite(pageCount) && pageCount > 5;
+  }
+
+  function getViewerFiles() {
+    return Array.isArray(state.viewer.files) ? state.viewer.files : [];
+  }
+
+  function findViewerFileByDocId(docId) {
+    if (!docId) return null;
+    const normalised = String(docId).trim();
+    if (!normalised) return null;
+    return getViewerFiles().find((file) => resolveDocId(file) === normalised) || null;
+  }
+
+  function applyProcessingUpdate(target, updates = {}) {
+    const file = typeof target === 'string' ? findViewerFileByDocId(target) : target;
+    if (!file) return null;
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    const processing = normaliseProcessingState(raw.processing || file.processingInfo || {}, 'queued');
+    if (updates.processing && typeof updates.processing === 'object') {
+      Object.assign(processing, updates.processing);
+    }
+    if (updates.status) {
+      processing.status = normaliseStatus(updates.status, processing.status || 'queued');
+    }
+    processing.status = normaliseStatus(processing.status, 'queued');
+    raw.processing = processing;
+    file.processingInfo = processing;
+    file.processingStatus = processing.status;
+    file.processing = processing.status;
+    if (updates.meta && typeof updates.meta === 'object') {
+      raw.meta = { ...ensureObject(raw.meta), ...updates.meta };
+    }
+    if (updates.result && typeof updates.result === 'object') {
+      raw.result = { ...ensureObject(raw.result), ...updates.result };
+    }
+    if (updates.ui && typeof updates.ui === 'object') {
+      raw.ui = { ...ensureObject(raw.ui), ...updates.ui };
+    }
+    return file;
+  }
+
+  function appendUiMessage(file, message) {
+    if (!file || !message) return;
+    const raw = ensureObject(file.raw);
+    const ui = ensureObject(raw.ui);
+    const messages = Array.isArray(ui.messages) ? ui.messages.slice() : [];
+    if (!messages.includes(message)) {
+      messages.push(message);
+      ui.messages = messages;
+      raw.ui = ui;
+    }
+  }
+
+  function withButtonSpinner(button, label) {
+    if (!button) return () => {};
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ${label}`;
+    return () => {
+      button.innerHTML = original;
+      button.disabled = false;
+    };
+  }
+
+  function stopProcessingPoll(docId) {
+    if (!docId) return;
+    const timer = processingPollers.get(docId);
+    if (timer) {
+      clearTimeout(timer);
+      processingPollers.delete(docId);
+    }
+  }
+
+  function stopAllProcessingPolls() {
+    processingPollers.forEach((timer) => clearTimeout(timer));
+    processingPollers.clear();
+  }
+
+  function scheduleProcessingPoll(docId) {
+    stopProcessingPoll(docId);
+    const timer = setTimeout(() => {
+      pollProcessingStatus(docId).catch((error) => console.warn('Processing poll error', error));
+    }, PROCESS_POLL_INTERVAL);
+    processingPollers.set(docId, timer);
+  }
+
+  async function pollProcessingStatus(docId) {
+    if (!docId) return;
+    stopProcessingPoll(docId);
+    const file = findViewerFileByDocId(docId);
+    if (!file) return;
+    try {
+      const response = await apiFetch(`/status?docId=${encodeURIComponent(docId)}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || response.statusText || 'Status check failed');
+      }
+      if (payload?.state === 'completed') {
+        applyProcessingUpdate(file, { status: 'completed' });
+        renderViewerFiles();
+        return;
+      }
+      if (payload?.state === 'failed' || payload?.ok === false) {
+        const errorMessage = payload?.error || 'Processing failed';
+        applyProcessingUpdate(file, {
+          status: 'failed',
+          processing: { error: errorMessage },
+        });
+        appendUiMessage(file, errorMessage);
+        renderViewerFiles();
+        return;
+      }
+      scheduleProcessingPoll(docId);
+    } catch (error) {
+      console.warn('Processing status poll failed', error);
+      appendUiMessage(file, error?.message || 'Processing status check failed');
+      renderViewerFiles();
+    }
+  }
+
+  function startProcessingPoll(docId) {
+    if (!docId) return;
+    pollProcessingStatus(docId).catch((error) => console.warn('Initial processing poll failed', error));
   }
 
   function pickMetric(metrics, keys) {
@@ -256,8 +519,8 @@
     }
 
     const records = Array.from(state.files.values());
-    const uploadCompleted = records.filter((file) => file.upload === 'green').length;
-    const processingCompleted = records.filter((file) => file.processing === 'green').length;
+    const uploadCompleted = records.filter((file) => normaliseStatus(file.upload, 'completed') === 'completed').length;
+    const processingCompleted = records.filter((file) => normaliseStatus(file.processing, 'queued') === 'completed').length;
 
     if (uploadCompleted < totalFiles) {
       const phase = `Uploading files (${uploadCompleted}/${totalFiles})`;
@@ -278,6 +541,7 @@
   function closeViewer() {
     if (!viewerRoot) return;
     viewerPreviewToken += 1;
+    stopAllProcessingPolls();
     viewerRoot.setAttribute('aria-hidden', 'true');
     if (viewerFrame) {
       viewerFrame.src = 'about:blank';
@@ -363,7 +627,9 @@
       .vault-json-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
       .vault-json-modal__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px; }
       .vault-json-modal__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
-      .vault-json-modal__meta { padding: 12px 20px 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); display: flex; flex-wrap: wrap; gap: 8px 12px; }
+      .vault-json-modal__meta { padding: 12px 20px 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); display: flex; flex-direction: column; gap: 12px; max-height: 160px; overflow: auto; }
+      .vault-json-modal__meta-item { display: flex; flex-direction: column; gap: 4px; }
+      .vault-json-modal__meta-item code { display: block; white-space: pre-wrap; font-size: 0.75rem; }
       .vault-json-modal__content { flex: 1; margin: 0; padding: 16px 20px 20px; background: rgba(15, 23, 42, 0.03); font-family: 'SFMono-Regular', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.85rem; line-height: 1.45; overflow: auto; white-space: pre-wrap; word-break: break-word; color: inherit; }
     `;
     document.head.appendChild(style);
@@ -465,6 +731,73 @@
     return Object.keys(payload).length ? payload : null;
   }
 
+  async function showProcessedJson(file, trigger) {
+    const docId = resolveDocId(file);
+    if (!docId) {
+      window.alert('Processed JSON is unavailable for this document.');
+      return;
+    }
+
+    const restore = trigger ? withButtonSpinner(trigger, 'Loading…') : () => {};
+    try {
+      const response = await apiFetch(`/json?docId=${encodeURIComponent(docId)}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok || typeof payload.json === 'undefined') {
+        throw new Error(payload?.error || 'Processed JSON unavailable');
+      }
+
+      const modal = ensureJsonModal();
+      if (!modal || !jsonModalContent) {
+        throw new Error('Unable to display JSON right now.');
+      }
+
+      if (jsonModalTitle) {
+        jsonModalTitle.textContent = file?.title ? `${file.title} — Processed JSON` : 'Processed JSON';
+      }
+      if (jsonModalMeta) {
+        jsonModalMeta.innerHTML = '';
+        const sections = [
+          ['Meta', ensureObject(file.raw?.meta)],
+          ['Processing', ensureObject(file.raw?.processing)],
+          ['Result', ensureObject(file.raw?.result)],
+        ];
+        sections.forEach(([label, data]) => {
+          if (!data || !Object.keys(data).length) return;
+          const item = document.createElement('div');
+          item.className = 'vault-json-modal__meta-item';
+          const name = document.createElement('strong');
+          name.textContent = `${label}:`;
+          const value = document.createElement('code');
+          value.textContent = JSON.stringify(data, null, 2);
+          item.append(name, value);
+          jsonModalMeta.appendChild(item);
+        });
+        jsonModalMeta.hidden = jsonModalMeta.childElementCount === 0;
+        jsonModalMeta.scrollTop = 0;
+      }
+
+      try {
+        jsonModalContent.textContent = JSON.stringify(payload.json, null, 2);
+      } catch (error) {
+        console.error('Failed to serialise processed JSON payload', error);
+        jsonModalContent.textContent = 'Unable to serialise processed JSON payload.';
+      }
+      jsonModalContent.scrollTop = 0;
+
+      jsonModalReturnFocus = trigger || null;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      if (jsonModalClose) {
+        jsonModalClose.focus();
+      }
+    } catch (error) {
+      console.error('Processed JSON preview failed', error);
+      window.alert(error.message || 'Unable to load processed JSON right now.');
+    } finally {
+      restore();
+    }
+  }
+
   function showJsonForFile(file, trigger) {
     if (!jsonTestEnabled) return;
     const payload = buildJsonPayload(file);
@@ -548,18 +881,47 @@
       card.classList.add('is-selected');
     }
 
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    const processing = normaliseProcessingState(file.processingInfo || raw.processing || file.processing || {}, 'idle');
+    file.processingInfo = processing;
+    file.processingStatus = processing.status;
+    file.processing = processing.status;
+    const docId = resolveDocId(file);
+    if (docId) {
+      card.dataset.docId = docId;
+    }
+    const docClass = resolveDocClass(file);
+    const hasWarning = docHasWarning(file);
+
     const header = document.createElement('div');
     header.className = 'viewer__file-header';
+    const titleGroup = document.createElement('div');
+    titleGroup.className = 'viewer__file-titles';
     const title = document.createElement('h4');
     title.className = 'viewer__file-title';
     title.textContent = file.title || 'Document';
-    header.appendChild(title);
+    titleGroup.appendChild(title);
     if (file.subtitle) {
       const subtitle = document.createElement('span');
       subtitle.className = 'viewer__file-subtitle muted';
       subtitle.textContent = file.subtitle;
-      header.appendChild(subtitle);
+      titleGroup.appendChild(subtitle);
     }
+    header.appendChild(titleGroup);
+
+    const statusGroup = document.createElement('div');
+    statusGroup.className = 'viewer__file-status';
+    statusGroup.appendChild(createStatusIndicator('Processing status', processing));
+    if (hasWarning) {
+      const warningIcon = document.createElement('i');
+      warningIcon.className = 'bi bi-exclamation-triangle-fill viewer__file-warning';
+      warningIcon.setAttribute('role', 'img');
+      warningIcon.setAttribute('aria-label', 'Long document — review trim before processing');
+      warningIcon.title = 'Long document — review trim before processing';
+      statusGroup.appendChild(warningIcon);
+    }
+    header.appendChild(statusGroup);
     card.appendChild(header);
 
     if (Array.isArray(file.summary) && file.summary.length) {
@@ -588,6 +950,138 @@
       selectViewerFile(file.fileId, { preview: true });
     });
     actions.appendChild(previewButton);
+
+    const canAutoTrim = docClass === 'bank_statement';
+    if (canAutoTrim) {
+      const autoTrimButton = document.createElement('button');
+      autoTrimButton.type = 'button';
+      autoTrimButton.textContent = 'Auto-trim';
+      if (!docId) {
+        autoTrimButton.disabled = true;
+        autoTrimButton.title = 'Document identifier unavailable for trimming.';
+      }
+      autoTrimButton.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!docId) {
+          window.alert('Unable to trim this document because it is missing an identifier.');
+          return;
+        }
+        const restore = withButtonSpinner(autoTrimButton, 'Auto-trimming…');
+        try {
+          const response = await apiFetch('/autotrim', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docId }),
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.ok) {
+            throw new Error(payload?.error || 'Auto-trim failed');
+          }
+          const trim = ensureObject(payload.trim);
+          const trimRequired = Boolean(payload.trimRequired);
+          applyProcessingUpdate(file, {
+            status: trimRequired ? 'idle' : 'queued',
+            processing: { provider: 'docupipe' },
+            meta: {
+              page_count_original: trim.originalPageCount ?? trim.page_count_original ?? raw.meta?.page_count_original,
+              pages_kept: trim.keptPages ?? trim.pages_kept ?? raw.meta?.pages_kept,
+              trim_required: trimRequired,
+              trim_review_state: trimRequired ? 'pending' : 'skipped',
+            },
+            ui: { warning: trimRequired },
+          });
+          if (trimRequired) {
+            appendUiMessage(file, 'Document trimmed automatically. Review before processing.');
+          }
+          renderViewerFiles();
+          queueRefresh();
+        } catch (error) {
+          console.error('Auto-trim failed', error);
+          window.alert(error.message || 'Unable to auto-trim this document right now.');
+        } finally {
+          restore();
+        }
+      });
+      actions.appendChild(autoTrimButton);
+    }
+
+    if (hasWarning) {
+      const reviewTrimButton = document.createElement('button');
+      reviewTrimButton.type = 'button';
+      reviewTrimButton.textContent = 'Review Trim';
+      reviewTrimButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        window.alert('Trim review coming soon.');
+      });
+      actions.appendChild(reviewTrimButton);
+    }
+
+    const processableClasses = new Set(['bank_statement', 'payslip']);
+    if (processableClasses.has(docClass)) {
+      const processButton = document.createElement('button');
+      processButton.type = 'button';
+      processButton.textContent = processing.status === 'processing' ? 'Processing…' : 'Process';
+      if (!docId) {
+        processButton.disabled = true;
+        processButton.title = 'Document identifier unavailable for processing.';
+      }
+      if (processing.status === 'processing') {
+        processButton.disabled = true;
+      }
+      processButton.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!docId) {
+          window.alert('Unable to process this document because it is missing an identifier.');
+          return;
+        }
+        const restore = withButtonSpinner(processButton, 'Processing…');
+        try {
+          const response = await apiFetch('/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docId }),
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.ok) {
+            throw new Error(payload?.error || 'Process failed');
+          }
+          applyProcessingUpdate(file, {
+            status: 'processing',
+            processing: {
+              stdJobId: payload.stdJobId,
+              standardizationId: payload.standardizationId,
+              startedAt: new Date().toISOString(),
+            },
+          });
+          renderViewerFiles();
+          queueRefresh();
+          startProcessingPoll(docId);
+        } catch (error) {
+          console.error('Processing failed', error);
+          window.alert(error.message || 'Unable to process this document right now.');
+        } finally {
+          restore();
+        }
+      });
+      actions.appendChild(processButton);
+    }
+
+    const processedJsonButton = document.createElement('button');
+    processedJsonButton.type = 'button';
+    processedJsonButton.textContent = 'Processed JSON';
+    if (processing.status !== 'completed' || !docId) {
+      processedJsonButton.disabled = true;
+      processedJsonButton.title = 'Available after processing completes.';
+    }
+    processedJsonButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showProcessedJson(file, processedJsonButton);
+    });
+    actions.appendChild(processedJsonButton);
 
     const downloadButton = document.createElement('button');
     downloadButton.type = 'button';
@@ -622,17 +1116,16 @@
     });
     actions.appendChild(downloadButton);
 
-    let jsonButton = null;
-    if (jsonTestEnabled) {
-      jsonButton = document.createElement('button');
-      jsonButton.type = 'button';
-      jsonButton.textContent = 'JSON';
-      jsonButton.addEventListener('click', (event) => {
+    if (jsonTestEnabled && (!docId || processing.status !== 'completed')) {
+      const debugJsonButton = document.createElement('button');
+      debugJsonButton.type = 'button';
+      debugJsonButton.textContent = 'Debug JSON';
+      debugJsonButton.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        showJsonForFile(file, jsonButton);
+        showJsonForFile(file, debugJsonButton);
       });
-      actions.appendChild(jsonButton);
+      actions.appendChild(debugJsonButton);
     }
 
     const deleteButton = document.createElement('button');
@@ -644,6 +1137,18 @@
     });
     actions.appendChild(deleteButton);
     card.appendChild(actions);
+
+    const uiMessages = Array.isArray(raw.ui?.messages) ? raw.ui.messages.filter((msg) => typeof msg === 'string' && msg.trim()) : [];
+    if (uiMessages.length) {
+      const messageBox = document.createElement('div');
+      messageBox.className = 'viewer__file-messages';
+      uiMessages.forEach((msg) => {
+        const line = document.createElement('p');
+        line.textContent = msg;
+        messageBox.appendChild(line);
+      });
+      card.appendChild(messageBox);
+    }
 
     const details = document.createElement('div');
     details.className = 'viewer__file-details';
@@ -754,8 +1259,8 @@
             const record = normaliseFileRecord(entry.sessionId, {
               fileId: file.fileId,
               originalName: file.originalName,
-              upload: file.upload || 'amber',
-              processing: file.processing || 'red',
+              upload: file.upload || 'queued',
+              processing: file.processing || 'queued',
               message: file.message || '',
             });
             session.files.set(file.fileId, record);
@@ -877,13 +1382,13 @@
     name.textContent = file.originalName;
     row.appendChild(name);
 
-    const uploadLight = createLight('Upload', file.upload || 'amber');
-    const processingLight = createLight('Processing', file.processing || 'red');
+    const uploadIndicator = createStatusIndicator('Upload', file.upload || 'completed');
+    const processingIndicator = createStatusIndicator('Processing', file.processing || 'queued');
 
-    const lights = document.createElement('div');
-    lights.className = 'lights';
-    lights.append(uploadLight, processingLight);
-    row.appendChild(lights);
+    const indicators = document.createElement('div');
+    indicators.className = 'status-list';
+    indicators.append(uploadIndicator, processingIndicator);
+    row.appendChild(indicators);
 
     const message = document.createElement('div');
     message.className = 'message muted';
@@ -900,11 +1405,11 @@
     name.textContent = entry.originalName;
     row.appendChild(name);
 
-    const lights = document.createElement('div');
-    lights.className = 'lights';
-    lights.appendChild(createLight('Upload', 'red'));
-    lights.appendChild(createLight('Processing', 'red'));
-    row.appendChild(lights);
+    const indicators = document.createElement('div');
+    indicators.className = 'status-list';
+    indicators.appendChild(createStatusIndicator('Upload', 'queued'));
+    indicators.appendChild(createStatusIndicator('Processing', 'queued'));
+    row.appendChild(indicators);
 
     const message = document.createElement('div');
     message.className = 'message muted';
@@ -913,36 +1418,28 @@
     return row;
   }
 
-  function createLight(label, stateValue) {
-    const light = document.createElement('span');
-    light.className = 'light';
-    light.dataset.state = stateValue;
-    light.setAttribute('role', 'status');
-    light.setAttribute('tabindex', '0');
-    light.setAttribute('aria-label', `${label}: ${LIGHT_LABELS[stateValue] || stateValue}`);
-    return light;
-  }
+  // createStatusIndicator defined earlier
 
   function normaliseFileRecord(sessionId, file) {
     const record = state.files.get(file.fileId) || {
       sessionId,
       fileId: file.fileId,
-      upload: 'amber',
-      processing: 'red',
+      upload: 'queued',
+      processing: 'queued',
       message: '',
     };
     if (file.originalName) {
       record.originalName = file.originalName;
     }
     if (file.upload) {
-      record.upload = file.upload;
+      record.upload = normaliseStatus(file.upload, 'completed');
     } else if (!record.upload) {
-      record.upload = 'amber';
+      record.upload = 'queued';
     }
     if (file.processing) {
-      record.processing = file.processing;
+      record.processing = normaliseStatus(file.processing, 'queued');
     } else if (!record.processing) {
-      record.processing = 'red';
+      record.processing = 'queued';
     }
     if (file.message != null) {
       record.message = file.message;
@@ -970,7 +1467,7 @@
     if (Array.isArray(payload.files)) {
       payload.files.forEach((file) => {
         if (!file.fileId) return;
-        const record = normaliseFileRecord(sessionId, { ...file, upload: 'green', processing: 'red' });
+        const record = normaliseFileRecord(sessionId, { ...file, upload: 'completed', processing: 'queued' });
         session.files.set(file.fileId, record);
       });
     }
@@ -1079,16 +1576,16 @@
       const data = await response.json();
       const record = state.files.get(fileId);
       if (!record) return;
-      const previousProcessing = record.processing;
-      record.upload = data.upload || record.upload;
-      record.processing = data.processing || record.processing;
+      const previousProcessing = normaliseStatus(record.processing, 'queued');
+      record.upload = normaliseStatus(data.upload || record.upload, 'completed');
+      record.processing = normaliseStatus(data.processing || record.processing, 'queued');
       record.message = data.message || '';
       const session = state.sessions.get(record.sessionId);
       if (session) {
         session.files.set(fileId, record);
       }
       renderSessionPanel();
-      if (previousProcessing !== 'green' && record.processing === 'green') {
+      if (previousProcessing !== 'completed' && record.processing === 'completed') {
         queueRefresh();
       }
     } catch (error) {
