@@ -117,3 +117,62 @@
     }
   }
 })();
+
+(function(){
+  const trimLabSection = document.getElementById('trim-lab');
+  const trimFile = document.getElementById('trimFile');
+  const btnTrim = document.getElementById('btnTrim');
+  const trimMeta = document.getElementById('trimMeta');
+  const trimPreview = document.getElementById('trimPreview');
+  const btnDownloadTrim = document.getElementById('btnDownloadTrim');
+  let trimmedBlob = null;
+
+  async function base64ToBlob(b64, mime) {
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime || 'application/pdf' });
+  }
+
+  if (trimLabSection && window.Auth && typeof Auth.fetch === 'function') {
+    Auth.fetch('/api/flags', { cache: 'no-store' })
+      .then(res => res.ok ? res.json() : null)
+      .then(flags => {
+        if (flags && flags.JSON_TEST_ENABLE_TRIMLAB === false) {
+          trimLabSection.style.display = 'none';
+        }
+      })
+      .catch(() => {});
+  }
+
+  if (btnTrim) {
+    btnTrim.addEventListener('click', async () => {
+      trimmedBlob = null;
+      if (btnDownloadTrim) btnDownloadTrim.disabled = true;
+      if (trimMeta) trimMeta.textContent = 'Trimming...';
+      const f = trimFile?.files?.[0];
+      if (!f) { if (trimMeta) trimMeta.textContent = 'Choose a PDF first.'; return; }
+      const fd = new FormData(); fd.append('file', f);
+      const r = await fetch('/api/pdf/trim', { method:'POST', body: fd });
+      const j = await r.json();
+      if (!j.ok) { if (trimMeta) trimMeta.textContent = 'Trim failed: ' + (j.error||''); if (trimPreview) trimPreview.src=''; return; }
+      trimmedBlob = await base64ToBlob(j.data_base64, j.mime);
+      const url = URL.createObjectURL(trimmedBlob);
+      if (trimPreview) trimPreview.src = url;
+      if (btnDownloadTrim) {
+        btnDownloadTrim.disabled = false;
+        btnDownloadTrim.onclick = () => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = j.filename || 'trimmed.pdf';
+          a.click();
+        };
+      }
+      const meta = j.meta || {};
+      if (trimMeta) {
+        trimMeta.textContent = `Kept pages: ${meta.keptPages?.join(', ') || '?'} of ${meta.originalPageCount || '?'} `;
+      }
+    });
+  }
+})();
