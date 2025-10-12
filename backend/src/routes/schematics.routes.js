@@ -29,6 +29,31 @@ try {
   utils = { normaliseWhitespace: (value) => String(value || '').trim() };
 }
 
+if (!extractText) {
+  console.warn('[schematics] Falling back to basic text extractor');
+  extractText = async (buffer) => {
+    if (!buffer) return '';
+    if (Buffer.isBuffer(buffer)) return buffer.toString('utf8');
+    if (typeof buffer === 'string') return buffer;
+    try {
+      return Buffer.from(buffer).toString('utf8');
+    } catch (err) {
+      console.warn('[schematics] Unable to coerce buffer for fallback extractor', err);
+      return '';
+    }
+  };
+}
+
+if (!extractFields) {
+  console.warn('[schematics] Falling back to no-op field extraction');
+  extractFields = () => ({ values: {}, issues: ['Preview worker unavailable'], usedRuleFields: [] });
+}
+
+if (!suggestAnchors) {
+  console.warn('[schematics] Falling back to empty anchor suggestions');
+  suggestAnchors = () => [];
+}
+
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 const router = express.Router();
