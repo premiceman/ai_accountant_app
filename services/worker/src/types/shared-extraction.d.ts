@@ -31,7 +31,7 @@ declare module '../../../../shared/extraction/statement.js' {
       amount: number;
       direction?: 'inflow' | 'outflow';
       category?: string | null;
-    }>;
+    }> | null;
   }
 
   export function extractStatement(

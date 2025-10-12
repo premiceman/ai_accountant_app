@@ -1096,10 +1096,15 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
   } else if (isStatementClassification(classification.type)) {
     try {
       const builderTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
+      const schematicTransactions = builderTransactions.length
+        ? (builderTransactions as Array<{ date?: string; description?: string; amount?: number }>)
+        : undefined;
       const extraction = await extractStatement(buffer, {
-        schematicTransactions: builderTransactions as Array<{ date?: string; description?: string; amount?: number }> | null,
+        schematicTransactions,
       });
-      payload.transactions = Array.isArray(extraction.transactions) ? extraction.transactions : [];
+      const extractedTransactions: Array<{ date?: string; description?: string; amount?: number }> | undefined =
+        Array.isArray(extraction.transactions) ? extraction.transactions : undefined;
+      payload.transactions = extractedTransactions ?? [];
       const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
       payload.metrics = {
         ...metrics,
