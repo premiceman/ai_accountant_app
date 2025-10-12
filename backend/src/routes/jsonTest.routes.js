@@ -17,7 +17,8 @@ const {
 const {
   DocumentProcessingError,
 } = require('../services/documents/pipeline/errors');
-const { postDocument, waitForJob, getDocument } = require('../services/docupipe.client');
+const { postDocument } = require('../services/docupipe.client');
+const { waitForJob: waitStdJob, standardizeWithSchema, getStandardization } = require('../services/docupipe.standardize');
 
 const JSON_TEST_ENABLED = toBoolean(process.env.JSON_TEST);
 
@@ -70,14 +71,32 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
 
     if (useDocuPipe) {
       try {
+        if (!file?.buffer) throw new Error('No file uploaded');
+
         const { documentId, jobId } = await postDocument({
           buffer: file.buffer,
           filename: file.originalname || 'document.pdf',
         });
 
-        await waitForJob(jobId, { timeoutMs: 60000 });
+        await waitStdJob(jobId, { timeoutMs: 60000 });
 
-        const doc = await getDocument(documentId);
+        const schemaId = process.env.DOCUPIPE_PAYSLIP_SCHEMA_ID;
+        if (!schemaId) throw new Error('Missing DOCUPIPE_PAYSLIP_SCHEMA_ID');
+
+        const { jobId: stdJobId, standardizationIds } = await standardizeWithSchema({
+          documentId,
+          schemaId,
+          stdVersion: process.env.DOCUPIPE_STD_VERSION,
+        });
+
+        if (!stdJobId) throw new Error('DocuPipe standardization job missing');
+        await waitStdJob(stdJobId, { timeoutMs: 60000 });
+
+        const stdId = Array.isArray(standardizationIds) ? standardizationIds[0] : null;
+        if (!stdId) throw new Error('DocuPipe standardization missing ID');
+
+        const std = await getStandardization(stdId);
+        if (!std || typeof std.data === 'undefined') throw new Error('DocuPipe standardization missing data');
 
         const key = buildObjectKey({
           userId,
@@ -93,7 +112,9 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
         return res.json({
           ok: true,
           provider: 'docupipe',
-          document: doc,
+          mode: 'standardized',
+          schemaId,
+          data: std.data,
           storage: {
             key,
             fileId,
