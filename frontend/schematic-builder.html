@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Schematic Builder — AI Accountant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="/css/styles.css" fetchpriority="high">
+  <script>window.__API_BASE = window.__API_BASE || '';</script>
+  <script src="/js/head-include.js"></script>
+  <script src="/js/auth.js"></script>
+  <style>
+    body {
+      background: var(--bg-body);
+      color: var(--fg);
+      min-height: 100vh;
+    }
+
+    main {
+      padding: clamp(20px, 3vw, 32px);
+      max-width: 1100px;
+      margin: 0 auto 80px;
+    }
+
+    .builder-card {
+      background: var(--bg-surface);
+      border-radius: 20px;
+      border: 1px solid var(--bd-hairline);
+      box-shadow: var(--shadow);
+      padding: clamp(20px, 3vw, 28px);
+    }
+
+    .column-table input[type="number"] {
+      width: 100px;
+    }
+
+    .column-table .btn-outline-danger {
+      --bs-btn-padding-y: 0.25rem;
+      --bs-btn-padding-x: 0.5rem;
+    }
+
+    .hint-badge {
+      font-size: 0.8rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--brand) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent);
+      color: var(--brand);
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar-container"></div>
+  <div id="sidebar-container" data-role="sidebar"></div>
+
+  <main>
+    <header class="mb-4">
+      <p class="text-uppercase text-muted fw-semibold mb-1">Schematics</p>
+      <h1 class="mb-1">Statement row builder</h1>
+      <p class="text-muted mb-0">Define how repeating transaction rows should be parsed for this schematic. Mark the first row, describe how the rows repeat, and map date, name and amount columns.</p>
+    </header>
+
+    <section class="builder-card mb-4">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1" id="schematic-name">Loading…</h2>
+          <p class="text-muted mb-0" id="schematic-meta"></p>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="hint-badge" id="cluster-hint" hidden></span>
+          <button class="btn btn-primary" id="save-btn" disabled>
+            <i class="bi bi-save me-1"></i>
+            Save schematic
+          </button>
+        </div>
+      </div>
+
+      <div id="builder-alert" class="alert d-none" role="alert"></div>
+
+      <form id="builder-form" class="row gy-3">
+        <div class="col-12 col-md-4">
+          <label class="form-label" for="first-row">First row (1-based)</label>
+          <input type="number" min="1" class="form-control" id="first-row" placeholder="e.g. 12">
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label" for="row-stride">Row stride</label>
+          <input type="number" min="1" class="form-control" id="row-stride" value="1">
+          <div class="form-text">How many lines between each transaction row.</div>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label" for="max-rows">Max rows</label>
+          <input type="number" min="1" class="form-control" id="max-rows" placeholder="Leave blank to auto-detect">
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="stop-regex">Stop when line matches</label>
+          <input type="text" class="form-control" id="stop-regex" placeholder="Optional regex to stop scanning">
+        </div>
+      </form>
+    </section>
+
+    <section class="builder-card">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Column mapping</h2>
+          <p class="text-muted mb-0">Define each column in the transaction row. Provide optional character offsets and regex capture patterns.</p>
+        </div>
+        <button class="btn btn-outline-secondary" id="add-column-btn">
+          <i class="bi bi-plus-lg me-1"></i>
+          Add column
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table align-middle column-table">
+          <thead>
+            <tr>
+              <th style="width: 160px;">Role</th>
+              <th style="width: 120px;">Start offset</th>
+              <th style="width: 120px;">End offset</th>
+              <th>Regex (optional)</th>
+              <th style="width: 60px;"></th>
+            </tr>
+          </thead>
+          <tbody id="column-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/nav.js" defer></script>
+  <script src="/js/mobile-sidebar.js" defer></script>
+  <script src="/js/schematic-builder.js" defer></script>
+</body>
+</html>

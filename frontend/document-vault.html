@@ -46,10 +46,48 @@
       margin: 0 auto 64px;
     }
 
-    h1 {
+    .page-header {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .page-header__top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .page-header__top h1 {
       font-size: clamp(1.6rem, 2.2vw, 2.1rem);
       font-weight: 700;
-      margin-bottom: 8px;
+      margin: 0;
+    }
+
+    .page-header__cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(103, 89, 255, 0.35);
+      background: rgba(103, 89, 255, 0.1);
+      color: rgba(52, 36, 188, 0.92);
+      padding: 8px 16px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: background 0.2s ease, transform 0.2s ease;
+    }
+
+    .page-header__cta:hover {
+      background: rgba(103, 89, 255, 0.16);
+      transform: translateY(-1px);
+    }
+
+    .page-header__cta .bi {
+      font-size: 1rem;
     }
 
     p.lede {
@@ -116,6 +154,223 @@
       gap: 16px;
       position: sticky;
       top: 16px;
+    }
+
+    .schematic-builder {
+      margin-top: 32px;
+      padding: 24px;
+      border-radius: var(--vault-radius);
+      border: 1px solid var(--vault-border);
+      box-shadow: var(--vault-shadow-soft);
+      background: var(--vault-card-bg);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .schematic-builder[hidden] {
+      display: none !important;
+    }
+
+    .schematic-builder__header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .schematic-builder__header h2 {
+      margin: 0;
+      font-size: 1.25rem;
+    }
+
+    .schematic-builder__header p {
+      margin: 4px 0 0;
+      color: var(--vault-muted);
+      font-size: 0.9rem;
+    }
+
+    .schematic-builder__status {
+      font-size: 0.85rem;
+      color: var(--vault-muted);
+      min-height: 1.2em;
+    }
+
+    .schematic-builder__status.is-error {
+      color: var(--light-red);
+    }
+
+    .schematic-builder__body {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+      gap: 24px;
+    }
+
+    @media (max-width: 1080px) {
+      .schematic-builder__body { grid-template-columns: 1fr; }
+    }
+
+    .schematic-builder__left,
+    .schematic-builder__right {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .schematic-field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.9rem;
+    }
+
+    .schematic-field-group label {
+      font-weight: 600;
+    }
+
+    .schematic-field-inline {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .schematic-field-inline .schematic-field-group {
+      flex: 1 1 160px;
+    }
+
+    .schematic-upload {
+      border: 1px dashed rgba(103, 89, 255, 0.3);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .schematic-upload__label {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .schematic-upload__hint,
+    .schematic-upload__meta {
+      font-size: 0.85rem;
+      margin: 0;
+      color: var(--vault-muted);
+    }
+
+    .schematic-preview {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .schematic-preview__actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .schematic-preview textarea {
+      min-height: 280px;
+      border-radius: 12px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      padding: 12px;
+      font-family: 'SFMono-Regular', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+      font-size: 0.85rem;
+      background: rgba(15, 23, 42, 0.02);
+      resize: vertical;
+    }
+
+    .schematic-selection {
+      font-size: 0.85rem;
+      color: var(--vault-muted);
+      min-height: 1.2em;
+    }
+
+    .schematic-panel {
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: rgba(103, 89, 255, 0.02);
+    }
+
+    .schematic-panel header h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    .schematic-panel header p {
+      margin: 4px 0 0;
+      font-size: 0.85rem;
+      color: var(--vault-muted);
+    }
+
+    .schematic-list,
+    .schematic-mappings {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 240px;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    .schematic-list__item,
+    .schematic-mapping {
+      border: 1px solid rgba(103, 89, 255, 0.18);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(103, 89, 255, 0.05);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .schematic-mapping {
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .schematic-list__item strong,
+    .schematic-mapping__title {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .schematic-list__meta,
+    .schematic-mapping__meta {
+      font-size: 0.8rem;
+      color: var(--vault-muted);
+      display: grid;
+      gap: 4px;
+    }
+
+    .schematic-mapping__actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .schematic-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .schematic-actions--footer {
+      justify-content: flex-end;
+    }
+
+    .schematic-empty {
+      font-size: 0.85rem;
+      color: var(--vault-muted);
+      margin: 0;
     }
 
     .session-panel h2 {
@@ -589,6 +844,49 @@
       padding: 4px 0;
     }
 
+    .grid-card__actions {
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      position: relative;
+      z-index: 1;
+    }
+
+    .grid-card__action {
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.22);
+      color: inherit;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      backdrop-filter: blur(4px);
+      transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+    }
+
+    .grid-card__action:hover {
+      background: rgba(255, 255, 255, 0.32);
+      border-color: rgba(255, 255, 255, 0.85);
+      color: inherit;
+    }
+
+    .grid-card__action:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .grid-card:not(.grid-card--brand) .grid-card__action {
+      border-color: rgba(103, 89, 255, 0.25);
+      background: rgba(103, 89, 255, 0.08);
+      color: rgba(103, 89, 255, 0.82);
+    }
+
+    .grid-card:not(.grid-card--brand) .grid-card__action:hover {
+      background: rgba(103, 89, 255, 0.15);
+      border-color: rgba(103, 89, 255, 0.45);
+      color: rgba(103, 89, 255, 0.95);
+    }
+
     .collection-card {
       background: var(--mint-card);
       border: 1px solid rgba(15, 23, 42, 0.12);
@@ -716,6 +1014,70 @@
       color: var(--viewer-muted);
     }
 
+    .viewer__toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 12px 24px;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+      flex-wrap: wrap;
+    }
+
+    .viewer__toolbar-left {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 200px;
+    }
+
+    .viewer__selection-count {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .viewer__status {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--viewer-muted);
+    }
+
+    .viewer__status--muted { color: var(--viewer-muted); }
+    .viewer__status--info { color: var(--vault-accent); }
+    .viewer__status--success { color: var(--light-green); }
+    .viewer__status--error { color: var(--light-red); }
+
+    .viewer__toolbar-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .viewer__toolbar-actions button {
+      border: 1px solid rgba(103, 89, 255, 0.25);
+      background: rgba(255, 255, 255, 0.9);
+      color: rgba(103, 89, 255, 0.8);
+      padding: 5px 14px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      transition: background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+    }
+
+    .viewer__toolbar-actions button:hover:not(:disabled) {
+      background: rgba(103, 89, 255, 0.18);
+      color: rgba(103, 89, 255, 0.95);
+    }
+
+    .viewer__toolbar-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .viewer__toolbar-actions button.is-busy {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
     .viewer__body {
       display: grid;
       grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
@@ -781,6 +1143,11 @@
       position: relative;
     }
 
+    .viewer__file.is-marked {
+      border-color: rgba(103, 89, 255, 0.35);
+      background: rgba(103, 89, 255, 0.12);
+    }
+
     .viewer__file.is-selected {
       border-color: rgba(103, 89, 255, 0.35);
       box-shadow: 0 14px 28px rgba(103, 89, 255, 0.18);
@@ -790,8 +1157,58 @@
     .viewer__file-header {
       display: flex;
       justify-content: space-between;
-      gap: 12px;
-      align-items: baseline;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .viewer__file-select {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .viewer__file-checkbox {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .viewer__file-checkbox-visual {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1.5px solid rgba(103, 89, 255, 0.4);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      color: transparent;
+      transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+
+    .viewer__file-checkbox-visual::after {
+      content: '';
+    }
+
+    .viewer__file-checkbox:checked + .viewer__file-checkbox-visual {
+      background: rgba(103, 89, 255, 0.18);
+      border-color: rgba(103, 89, 255, 0.6);
+      color: rgba(103, 89, 255, 0.9);
+    }
+
+    .viewer__file-checkbox:checked + .viewer__file-checkbox-visual::after {
+      content: '✓';
+      color: rgba(103, 89, 255, 0.9);
+    }
+
+    .viewer__file-heading {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
     }
 
     .viewer__file-title {
@@ -893,8 +1310,14 @@
   <div id="sidebar-container"></div>
 
   <main>
-    <header>
-      <h1>Smart Document Vault</h1>
+    <header class="page-header">
+      <div class="page-header__top">
+        <h1>Smart Document Vault</h1>
+        <button type="button" class="page-header__cta" id="schematic-open">
+          <i class="bi bi-diagram-3"></i>
+          <span>Generate extraction schema</span>
+        </button>
+      </div>
       <p class="lede">Upload payslips, statements, ISA and investment reports, pensions, and HMRC correspondence. We classify, extract, and surface insights automatically.</p>
     </header>
 
@@ -928,6 +1351,134 @@
         </div>
         <div class="session-table" id="session-rows"></div>
       </aside>
+    </section>
+
+    <section class="schematic-builder card" id="schematic-builder" hidden aria-live="polite">
+      <div class="schematic-builder__header">
+        <div>
+          <h2>Extraction schematic builder</h2>
+          <p>Upload a representative sample, map fields, and publish a reusable extraction schema.</p>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="schematic-close">Close</button>
+      </div>
+      <div class="schematic-builder__status" id="schematic-status" role="status"></div>
+      <div class="schematic-builder__body">
+        <div class="schematic-builder__left">
+          <div class="schematic-field-group">
+            <label for="schematic-doc-type">Document type</label>
+            <select id="schematic-doc-type" class="form-select form-select-sm">
+              <option value="payslip">Payslip</option>
+              <option value="statement">Statement</option>
+              <option value="hmrc">HMRC correspondence</option>
+              <option value="investment">Investment report</option>
+              <option value="document">Custom</option>
+            </select>
+          </div>
+          <div class="schematic-field-group">
+            <label for="schematic-schema-name">Schema name</label>
+            <input id="schematic-schema-name" type="text" class="form-control form-control-sm" placeholder="e.g. Acme Payslip v1" />
+          </div>
+          <div class="schematic-upload">
+            <label class="schematic-upload__label" for="schematic-sample">Sample document</label>
+            <input id="schematic-sample" type="file" accept=".pdf,.docx,.txt,.csv,.xml" />
+            <p class="schematic-upload__hint">Upload a representative file to inspect extracted text and anchors.</p>
+            <p class="schematic-upload__meta" id="schematic-sample-meta"></p>
+          </div>
+          <div class="schematic-preview">
+            <div class="schematic-preview__actions">
+              <span>Preview text</span>
+              <button type="button" class="btn btn-link btn-sm" id="schematic-use-selection">Use highlighted text</button>
+            </div>
+            <textarea id="schematic-text-preview" readonly></textarea>
+            <div class="schematic-selection" id="schematic-selection"></div>
+          </div>
+        </div>
+        <div class="schematic-builder__right">
+          <section class="schematic-panel">
+            <header>
+              <h3>Inferred fields</h3>
+              <p>Click a field to populate the mapping form.</p>
+            </header>
+            <div id="schematic-inferred-fields" class="schematic-list"></div>
+          </section>
+          <section class="schematic-panel">
+            <header>
+              <h3>Field mapping</h3>
+              <p>Select an anchor and capture how the schema key should be extracted.</p>
+            </header>
+            <form id="schematic-mapping-form">
+              <div class="schematic-field-group">
+                <label for="schematic-field-key">Schema key</label>
+                <input id="schematic-field-key" type="text" class="form-control form-control-sm" placeholder="e.g. grossPay" required />
+              </div>
+              <div class="schematic-field-inline">
+                <div class="schematic-field-group">
+                  <label for="schematic-anchor-select">Anchor</label>
+                  <select id="schematic-anchor-select" class="form-select form-select-sm"></select>
+                </div>
+                <div class="schematic-field-group">
+                  <label for="schematic-expected-type">Type</label>
+                  <select id="schematic-expected-type" class="form-select form-select-sm">
+                    <option value="string">String</option>
+                    <option value="number">Number</option>
+                    <option value="date">Date</option>
+                  </select>
+                </div>
+              </div>
+              <div class="schematic-field-group">
+                <label for="schematic-sample-value">Sample value</label>
+                <input id="schematic-sample-value" type="text" class="form-control form-control-sm" placeholder="Value to match" />
+              </div>
+              <div class="schematic-actions">
+                <button type="submit" class="btn btn-primary btn-sm" id="schematic-add-mapping">Add mapping</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="schematic-clear-form">Clear</button>
+              </div>
+            </form>
+            <div id="schematic-mappings-list" class="schematic-mappings"></div>
+          </section>
+          <section class="schematic-panel">
+            <header>
+              <h3>Builder preferences</h3>
+            </header>
+            <div class="schematic-field-inline">
+              <div class="schematic-field-group">
+                <label for="schematic-colour-primary">Primary colour</label>
+                <input type="text" id="schematic-colour-primary" class="form-control form-control-sm" placeholder="#6759ff" />
+              </div>
+              <div class="schematic-field-group">
+                <label for="schematic-colour-secondary">Secondary</label>
+                <input type="text" id="schematic-colour-secondary" class="form-control form-control-sm" placeholder="#0f172a" />
+              </div>
+            </div>
+            <div class="schematic-field-inline">
+              <div class="schematic-field-group">
+                <label for="schematic-colour-accent">Accent</label>
+                <input type="text" id="schematic-colour-accent" class="form-control form-control-sm" placeholder="#10b981" />
+              </div>
+              <div class="schematic-field-group">
+                <label for="schematic-colour-background">Background</label>
+                <input type="text" id="schematic-colour-background" class="form-control form-control-sm" placeholder="#ffffff" />
+              </div>
+              <div class="schematic-field-group">
+                <label for="schematic-colour-text">Text</label>
+                <input type="text" id="schematic-colour-text" class="form-control form-control-sm" placeholder="#111827" />
+              </div>
+            </div>
+            <div class="schematic-field-group">
+              <label for="schematic-column-templates">Column templates</label>
+              <textarea id="schematic-column-templates" class="form-control form-control-sm" rows="3" placeholder="One per line: Template name | fieldOne, fieldTwo"></textarea>
+            </div>
+            <div class="schematic-field-group">
+              <label for="schematic-notes">Notes</label>
+              <textarea id="schematic-notes" class="form-control form-control-sm" rows="2" placeholder="Optional guidance for your team"></textarea>
+            </div>
+            <div class="schematic-actions schematic-actions--footer">
+              <button type="button" class="btn btn-outline-primary btn-sm" id="schematic-save-draft">Save draft</button>
+              <button type="button" class="btn btn-primary btn-sm" id="schematic-save-activate">Save &amp; activate</button>
+            </div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section class="tiles-grid" id="tiles-grid" aria-live="polite"></section>
@@ -967,6 +1518,17 @@
         </div>
         <button type="button" class="viewer__close" id="file-viewer-close">Close</button>
       </header>
+      <div class="viewer__toolbar" id="viewer-toolbar">
+        <div class="viewer__toolbar-left">
+          <span class="viewer__selection-count" id="viewer-selection-count">No files selected</span>
+          <p class="viewer__status" id="viewer-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="viewer__toolbar-actions">
+          <button type="button" id="viewer-select-all">Select all</button>
+          <button type="button" id="viewer-clear-selection" disabled>Clear selection</button>
+          <button type="button" id="viewer-apply-schematic" disabled>Apply schematic</button>
+        </div>
+      </div>
       <div class="viewer__body">
         <div class="viewer__list" id="file-viewer-list" role="list"></div>
         <div class="viewer__preview">
@@ -977,6 +1539,7 @@
     </section>
   </div>
 
+  <script src="/js/vault-schematics.js"></script>
   <script src="/js/vault.js"></script>
   <script src="/js/nav.js"></script>
   <script src="/js/mobile-sidebar.js"></script>
