@@ -3,6 +3,7 @@
 let pdfParsePromise = null;
 let fallbackWarned = false;
 let testOverrides = null;
+let ocrUnavailableLogged = false;
 
 function getTestOverrides() {
   return testOverrides && typeof testOverrides === 'object' ? testOverrides : null;
@@ -58,7 +59,17 @@ async function runOcr(buffer) {
     await worker.terminate();
     return data?.text || '';
   } catch (err) {
-    console.warn('[shared:extractPdfText] OCR fallback failed; returning raw text buffer.', err?.message || err);
+    const message = err?.message || err;
+    if (typeof message === 'string' && message.includes("Cannot find package 'tesseract.js'")) {
+      if (!ocrUnavailableLogged) {
+        console.info(
+          "[shared:extractPdfText] OCR fallback unavailable because 'tesseract.js' is not installed. Skipping OCR fallback.",
+        );
+        ocrUnavailableLogged = true;
+      }
+    } else {
+      console.warn('[shared:extractPdfText] OCR fallback failed; returning raw text buffer.', message);
+    }
     return '';
   }
 }
@@ -133,6 +144,7 @@ module.exports = {
       testOverrides = null;
       pdfParsePromise = null;
       fallbackWarned = false;
+      ocrUnavailableLogged = false;
     },
   },
 };
