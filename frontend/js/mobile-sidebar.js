@@ -123,27 +123,40 @@
     const sections = [];
     if (!sidebar) return { sections, signout: null };
 
-    let current = null;
-    Array.from(sidebar.children).forEach((node) => {
-      if (!(node instanceof HTMLElement)) return;
-      if (node.classList.contains('app-nav-title')) {
-        const title = (node.textContent || '').trim();
-        current = { title: title || 'Navigate', items: [] };
-        sections.push(current);
-        return;
-      }
-      if (node.classList.contains('app-nav-sep')) {
-        current = null;
-        return;
-      }
-      if (node.matches('a.app-nav-item')) {
-        if (!current) {
-          current = { title: 'Navigate', items: [] };
+    const groupedSections = sidebar.querySelectorAll('.app-nav-section');
+    if (groupedSections.length) {
+      groupedSections.forEach((sectionEl) => {
+        if (!(sectionEl instanceof HTMLElement)) return;
+        const toggle = sectionEl.querySelector('.app-nav-toggle');
+        const label = toggle?.querySelector('.label') || toggle;
+        const title = (label?.textContent || '').trim() || 'Navigate';
+        const links = Array.from(sectionEl.querySelectorAll('.app-nav-items a.app-nav-item'))
+          .filter((link) => link instanceof HTMLElement && !link.classList.contains('d-none'));
+        sections.push({ title, items: links });
+      });
+    } else {
+      let current = null;
+      Array.from(sidebar.children).forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.classList.contains('app-nav-title')) {
+          const title = (node.textContent || '').trim();
+          current = { title: title || 'Navigate', items: [] };
           sections.push(current);
+          return;
         }
-        current.items.push(node);
-      }
-    });
+        if (node.classList.contains('app-nav-sep')) {
+          current = null;
+          return;
+        }
+        if (node.matches('a.app-nav-item')) {
+          if (!current) {
+            current = { title: 'Navigate', items: [] };
+            sections.push(current);
+          }
+          current.items.push(node);
+        }
+      });
+    }
 
     const signout = sidebarHost.querySelector('#nav-signout');
     return { sections, signout };
