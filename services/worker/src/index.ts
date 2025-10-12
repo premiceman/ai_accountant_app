@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { URL } from 'node:url';
 import { createHealthRouter } from './http/health.js';
 import { startDocumentJobLoop, stopDocumentJobLoop } from './documentJobLoop.js';
+import { startParseResultBridge, stopParseResultBridge } from './services/parseResultBridge.js';
 import { featureFlags } from './config/featureFlags.js';
 import { getHealthSnapshot } from './state/runtimeMetrics.js';
 
@@ -60,6 +61,13 @@ async function bootstrap() {
     await mongoose.connect(mongoUri);
     logger.info({ mongoUri }, 'Connected to MongoDB');
     await startDocumentJobLoop();
+    const parseBridgeEnabled = String(process.env.ENABLE_PARSE_BRIDGE ?? 'true').toLowerCase() === 'true';
+    if (parseBridgeEnabled) {
+      await startParseResultBridge();
+      logger.info('Parse result bridge enabled');
+    } else {
+      logger.info('Parse result bridge disabled via ENABLE_PARSE_BRIDGE');
+    }
     logger.info('Worker online');
   } catch (error) {
     logger.error({ err: error }, 'Failed to start worker loop');
@@ -70,6 +78,7 @@ async function bootstrap() {
     logger.info({ signal }, 'Shutting down worker');
     server.close();
     await stopDocumentJobLoop();
+    await stopParseResultBridge();
     await mongoose.disconnect();
     process.exit(0);
   };
