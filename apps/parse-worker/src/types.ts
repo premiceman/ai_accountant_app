@@ -68,6 +68,42 @@ export interface UserSchematicRules {
   statement?: StatementRules | null;
 }
 
+export interface BoundingBox {
+  page: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface LineSegmentGeometry {
+  charStart: number;
+  charEnd: number;
+  box: BoundingBox;
+}
+
+export interface LineGeometry {
+  lineIndex: number;
+  text: string;
+  pageNumber?: number;
+  segments: LineSegmentGeometry[];
+  bounds?: BoundingBox;
+}
+
+export interface ExtractedTextContent {
+  text: string;
+  lines: string[];
+  geometry: LineGeometry[];
+}
+
+export interface FieldPosition {
+  lineIndex: number;
+  charStart: number;
+  charEnd: number;
+  pageNumber?: number;
+  boxes?: BoundingBox[];
+}
+
 export interface ExtractedFieldValue {
   value: string | number | null;
   source: 'rule' | 'heuristic';
