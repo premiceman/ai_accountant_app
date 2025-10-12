@@ -139,6 +139,7 @@
   const viewerSelectAll = document.getElementById('viewer-select-all');
   const viewerClearSelection = document.getElementById('viewer-clear-selection');
   const viewerApplySchematic = document.getElementById('viewer-apply-schematic');
+  const schematicOpenButton = document.getElementById('schematic-open');
   const viewerSelectionCount = document.getElementById('viewer-selection-count');
   const viewerStatus = document.getElementById('viewer-status');
 
