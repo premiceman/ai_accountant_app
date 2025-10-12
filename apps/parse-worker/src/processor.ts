@@ -1,49 +1,16 @@
 import type Redis from 'ioredis';
-import { extractDates } from './dates';
-import { extractFields, parseUserRules } from './fields';
+import { submitDocumentToDocupipe, waitForDocupipeResult } from './docupipe';
 import { fetchDocumentBytes } from './storage';
-import { extractText } from './text-extraction';
-import { normaliseWhitespace } from './utils';
-import { FieldPosition, ParseJob, ParseResultPayload } from './types';
+import { ParseJob, ParseResultPayload } from './types';
 
 const MAX_ATTEMPTS = 3;
 const DEDUPE_TTL_SECONDS = 60 * 10;
 
-function isJsonPayload(value: string): boolean {
-  const trimmed = value.trim();
-  return trimmed.startsWith('{') || trimmed.startsWith('[');
-}
-
-export async function loadActiveUserRules(
-  redis: Redis,
-  job: ParseJob
-): Promise<{ rules: unknown; version: string | null; raw: string | null }> {
-  const docType = job.docType || 'unknown';
-  const userId = job.userId;
-  let version: string | null = job.userRulesVersion ?? null;
-  let activeRaw: string | null = null;
-
-  if (version) {
-    activeRaw = await redis.get(`map:${userId}:${docType}:${version}`);
-  } else {
-    const pointer = await redis.get(`map:${userId}:${docType}:active`);
-    if (pointer) {
-      if (isJsonPayload(pointer)) {
-        activeRaw = pointer;
-      } else {
-        version = pointer.trim();
-        if (version) {
-          activeRaw = await redis.get(`map:${userId}:${docType}:${version}`);
-        }
-      }
-    }
+function detectMimeType(job: ParseJob): string {
+  if (job.mimeType) {
+    return job.mimeType;
   }
-
-  if (!activeRaw) {
-    return { rules: null, version: version ?? null, raw: null };
-  }
-
-  return { rules: parseUserRules(activeRaw), version: version ?? null, raw: activeRaw };
+  return 'application/pdf';
 }
 
 export async function shouldSkipJob(redis: Redis, job: ParseJob): Promise<boolean> {
@@ -56,72 +23,45 @@ export async function shouldSkipJob(redis: Redis, job: ParseJob): Promise<boolea
 export async function processParseJob(redis: Redis, job: ParseJob): Promise<ParseResultPayload> {
   const startedAt = Date.now();
   const buffer = await fetchDocumentBytes(job.storagePath);
-  const extracted = await extractText(buffer, job.docType);
-  const normalisedText = normaliseWhitespace(extracted.text);
-  const dateExtraction = extractDates(normalisedText);
+  const mimeType = detectMimeType(job);
 
-  const ruleTimerStart = Date.now();
-  const { rules, version, raw } = await loadActiveUserRules(redis, job);
-  const fields = extractFields(extracted, job.docType, rules);
-  const ruleLatencyMs = Date.now() - ruleTimerStart;
-
-  const metrics: Record<string, number | null> = {};
-  Object.entries(fields.values).forEach(([field, payload]) => {
-    if (typeof payload.value === 'number') {
-      metrics[field] = payload.value;
-    }
+  const providerStarted = Date.now();
+  const submission = await submitDocumentToDocupipe(buffer, {
+    docType: job.docType,
+    mimeType,
+    fileName: job.originalName || null,
+    metadata: {
+      docId: job.docId,
+      userId: job.userId,
+      storagePath: job.storagePath,
+      source: job.source || null,
+    },
   });
 
-  const fieldPositions = Object.fromEntries(
-    Object.entries(fields.values)
-      .filter(([, value]) => Array.isArray(value.positions) && value.positions.length > 0)
-      .map(([key, value]) => [key, value.positions as FieldPosition[]])
-  );
+  const status = await waitForDocupipeResult(submission.documentId);
+  const providerLatencyMs = Date.now() - providerStarted;
 
-  const metadata = {
-    payDate: dateExtraction.payDate,
-    periodStart: dateExtraction.periodStart,
-    periodEnd: dateExtraction.periodEnd,
-    extractionSource: version ? `rules@${version}` : fields.usedRuleFields.length ? 'rules' : 'heuristics',
-    employerName: typeof fields.values.employerName?.value === 'string' ? (fields.values.employerName.value as string) : null,
-    personName: typeof fields.values.employeeName?.value === 'string' ? (fields.values.employeeName.value as string) : null,
-    rulesVersion: version,
-    dateConfidence: dateExtraction.confidence,
-    fieldPositions: Object.keys(fieldPositions).length ? fieldPositions : undefined,
-  } as const;
+  const warnings: string[] = [];
+  if (typeof status.json === 'undefined' || status.json === null) {
+    warnings.push('Docupipe returned no JSON payload.');
+  }
 
   const payload: ParseResultPayload = {
     ok: true,
-    classification: {
-      docType: job.docType,
-      confidence: dateExtraction.confidence,
-      anchors: dateExtraction.anchors,
+    provider: 'docupipe',
+    docType: job.docType,
+    docId: job.docId,
+    docupipe: status,
+    storage: {
+      path: job.storagePath,
+      processedAt: new Date().toISOString(),
     },
-    fieldValues: fields.values,
-    insights: { metrics },
-    narrative: [],
-    metadata,
-    text: normalisedText,
-    storage: { path: job.storagePath, processedAt: new Date().toISOString() },
     metrics: {
       latencyMs: Date.now() - startedAt,
-      ruleLatencyMs,
+      providerLatencyMs,
     },
-    softErrors: fields.issues,
-    statement:
-      fields.statementTransactions.length || fields.statementIssues.length
-        ? {
-            transactions: fields.statementTransactions,
-            issues: fields.statementIssues,
-          }
-        : undefined,
+    warnings,
   };
-
-  if (fields.issues.length && raw) {
-    // preserve the active version under a historical key with timestamp for debugging
-    const stamp = new Date().toISOString();
-    await redis.set(`map:${job.userId}:${job.docType}:${version ?? 'active'}:last-error`, JSON.stringify({ stamp, issues: fields.issues }));
-  }
 
   return payload;
 }
@@ -130,7 +70,15 @@ export async function handleJobFailure(redis: Redis, job: ParseJob, error: unkno
   const attempts = Number(job.attempts ?? 0) + 1;
   const key = `parse:error:${job.docId}`;
   const stack = error instanceof Error ? error.stack ?? error.message : String(error);
-  await redis.set(key, JSON.stringify({ message: error instanceof Error ? error.message : 'Unknown error', stack, attempts, at: new Date().toISOString() }));
+  await redis.set(
+    key,
+    JSON.stringify({
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack,
+      attempts,
+      at: new Date().toISOString(),
+    })
+  );
   if (attempts < MAX_ATTEMPTS) {
     const retryJob: ParseJob = { ...job, attempts };
     const delay = Math.min(60000, attempts * 5000);
@@ -162,19 +110,14 @@ async function postToBackend(job: ParseJob, payload: ParseResultPayload): Promis
     headers.Authorization = `Bearer ${PARSE_WORKER_TOKEN}`;
   }
 
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text}`);
-    }
-  } catch (err) {
-    console.error('[parse-worker] failed to POST result', err);
-    throw err;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
   }
 }
 

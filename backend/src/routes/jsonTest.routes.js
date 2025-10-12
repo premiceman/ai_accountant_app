@@ -93,8 +93,9 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
     res.json({
       ok: true,
       classification: analysis.classification,
-      insights: analysis.insights,
+      insights: null,
       text: analysis.text,
+      message: 'Document validated. Full extraction is performed asynchronously via Docupipe.',
       storage: {
         key,
         fileId,

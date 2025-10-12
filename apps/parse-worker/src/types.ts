@@ -9,160 +9,47 @@ export interface ParseJob {
   dedupeKey?: string | null;
   attempts?: number;
   source?: string | null;
+  mimeType?: string | null;
+  originalName?: string | null;
 }
 
-export interface RuleBase {
-  expectedType: 'number' | 'string' | 'date';
-  label?: string;
+export interface DocupipeConfig {
+  baseUrl: string;
+  apiKey: string;
+  pollIntervalMs: number;
+  pollTimeoutMs: number;
 }
 
-export interface AnchorRegexRule extends RuleBase {
-  strategy: 'anchor+regex';
-  anchor: string;
-  regex: string;
+export interface DocupipeSubmission {
+  documentId: string;
+  status: string;
+  metadata?: Record<string, unknown> | null;
 }
 
-export interface LineOffsetRule extends RuleBase {
-  strategy: 'line-offset';
-  anchor: string;
-  lineOffset: number;
-}
-
-export interface BoxRule extends RuleBase {
-  strategy: 'box';
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
-
-export type UserFieldRule = AnchorRegexRule | LineOffsetRule | BoxRule;
-
-export type UserRuleSet = Record<string, UserFieldRule>;
-
-export type StatementColumnKey = 'date' | 'description' | 'amount' | 'ignore';
-
-export interface StatementColumnRule {
-  key: StatementColumnKey;
-  regex?: string;
-  start?: number;
-  end?: number;
-}
-
-export interface StatementRowTemplate {
-  id?: string;
-  label?: string;
-  startLine: number;
-  lineStride?: number;
-  maxRows?: number;
-  stopRegex?: string;
-  columns: StatementColumnRule[];
-}
-
-export interface StatementRules {
-  templates: StatementRowTemplate[];
-}
-
-export interface UserSchematicRules {
-  fields?: UserRuleSet | null;
-  statement?: StatementRules | null;
-}
-
-export interface BoundingBox {
-  page: number;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-export interface LineSegmentGeometry {
-  charStart: number;
-  charEnd: number;
-  box: BoundingBox;
-}
-
-export interface LineGeometry {
-  lineIndex: number;
-  text: string;
-  pageNumber?: number;
-  segments: LineSegmentGeometry[];
-  bounds?: BoundingBox;
-}
-
-export interface ExtractedTextContent {
-  text: string;
-  lines: string[];
-  geometry: LineGeometry[];
-}
-
-export interface FieldPosition {
-  lineIndex: number;
-  charStart: number;
-  charEnd: number;
-  pageNumber?: number;
-  boxes?: BoundingBox[];
-}
-
-export interface ExtractedFieldValue {
-  value: string | number | null;
-  source: 'rule' | 'heuristic';
-  field: string;
-  detail?: string;
-  positions?: FieldPosition[];
-}
-
-export interface ExtractFieldsResult {
-  values: Record<string, ExtractedFieldValue>;
-  issues: string[];
-  usedRuleFields: string[];
-  statementTransactions: Array<{
-    date: string;
-    description: string;
-    amount: number;
-  }>;
-  statementIssues: string[];
+export interface DocupipeDocumentStatus {
+  id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  json?: unknown;
+  metadata?: Record<string, unknown> | null;
+  error?: { code?: string | null; message?: string | null } | null;
+  submittedAt?: string | null;
+  completedAt?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface ParseResultPayload {
   ok: boolean;
-  classification: {
-    docType: DocumentType;
-    confidence: number;
-    anchors: string[];
-  };
-  fieldValues: Record<string, ExtractedFieldValue>;
-  insights: {
-    metrics: Record<string, number | null>;
-  };
-  narrative: string[];
-  metadata: {
-    payDate: string | null;
-    periodStart: string | null;
-    periodEnd: string | null;
-    extractionSource: string;
-    employerName: string | null;
-    personName: string | null;
-    rulesVersion: string | null;
-    dateConfidence: number;
-    fieldPositions?: Record<string, FieldPosition[]>;
-  };
-  text: string;
+  provider: 'docupipe';
+  docType: DocumentType;
+  docId: string;
+  docupipe: DocupipeDocumentStatus;
   storage: {
     path: string;
     processedAt: string;
   };
   metrics: {
     latencyMs: number;
-    ruleLatencyMs: number;
+    providerLatencyMs: number | null;
   };
-  softErrors: string[];
-  statement?: {
-    transactions: Array<{
-      date: string;
-      description: string;
-      amount: number;
-    }>;
-    issues: string[];
-  };
+  warnings: string[];
 }

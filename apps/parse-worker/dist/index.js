@@ -3,7 +3,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.extractText = exports.suggestAnchors = exports.extractFields = void 0;
 const node_http_1 = require("node:http");
 const ioredis_1 = __importDefault(require("ioredis"));
 const processor_1 = require("./processor");
@@ -110,9 +109,9 @@ class ParseWorker {
                     await (0, processor_1.writeResult)(this.redis, job, payload);
                     console.log('[parse-worker] processed job', job.docId, {
                         latencyMs: payload.metrics.latencyMs,
-                        ruleLatencyMs: payload.metrics.ruleLatencyMs,
-                        dateConfidence: payload.metadata.dateConfidence,
-                        rulesVersion: payload.metadata.rulesVersion,
+                        providerLatencyMs: payload.metrics.providerLatencyMs,
+                        docupipeStatus: payload.docupipe.status,
+                        docupipeId: payload.docupipe.id,
                         source: job.source ?? 'unknown',
                         docType: job.docType,
                         userRulesVersion: job.userRulesVersion ?? null,
@@ -163,8 +162,3 @@ main().catch((err) => {
     console.error('[parse-worker] fatal error', err);
     process.exit(1);
 });
-var fields_1 = require("./fields");
-Object.defineProperty(exports, "extractFields", { enumerable: true, get: function () { return fields_1.extractFields; } });
-Object.defineProperty(exports, "suggestAnchors", { enumerable: true, get: function () { return fields_1.suggestAnchors; } });
-var text_extraction_1 = require("./text-extraction");
-Object.defineProperty(exports, "extractText", { enumerable: true, get: function () { return text_extraction_1.extractText; } });

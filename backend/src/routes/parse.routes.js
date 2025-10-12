@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const { randomUUID } = require('crypto');
 const DocumentInsight = require('../../models/DocumentInsight');
 const UserDocumentJob = require('../../models/UserDocumentJob');
-const { applyDocumentInsights } = require('../services/documents/insightsStore');
+const { applyDocumentInsights, setInsightsProcessing } = require('../services/documents/insightsStore');
 const { sha256 } = require('../lib/hash');
 const { get: kvGet, set: kvSet } = require('../lib/kv');
 
@@ -26,29 +26,7 @@ function requireWorker(req, res, next) {
   return next();
 }
 
-function normaliseValues(fieldValues = {}) {
-  const preferred = {};
-  const fallback = {};
-  const positions = {};
-  Object.entries(fieldValues).forEach(([field, entry]) => {
-    if (!entry || typeof entry !== 'object') return;
-    const source = entry.source || 'heuristic';
-    if (source === 'rule' && entry.value != null) {
-      preferred[field] = entry.value;
-    } else if (entry.value != null && !(field in preferred)) {
-      fallback[field] = entry.value;
-    }
-    if (Array.isArray(entry.positions) && entry.positions.length) {
-      positions[field] = entry.positions;
-    }
-  });
-  return { preferred, fallback, positions };
-}
-
 const PARSE_SESSION_TTL_SECONDS = 24 * 60 * 60;
-const DEFAULT_SCHEMA_VERSION = process.env.SCHEMA_VERSION || '2.0';
-const DEFAULT_PROMPT_VERSION = process.env.PROMPT_VERSION || 'vault-v1';
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 function normalizeCollectionId(value) {
   if (!value) return null;
@@ -76,66 +54,71 @@ router.post('/parse-result', requireWorker, async (req, res) => {
     return res.status(400).json({ error: 'Invalid userId' });
   }
 
-  const { fieldValues = {}, metadata = {}, insights = {}, narrative = [], text = '' } = result;
-  const schematic = isPlainObject(result?.schematic) ? result.schematic : null;
-  const schematicVersion = schematic?.version || metadata.rulesVersion || null;
-  const { preferred, fallback } = normaliseValues(fieldValues);
+  const sessionKey = `parse:session:${docId}`;
+  let sessionMeta = null;
+  try {
+    sessionMeta = await kvGet(sessionKey);
+  } catch (err) {
+    console.warn('[parse-result] Failed to load parse session metadata', err);
+  }
+  const sessionDocType = sessionMeta?.docType || null;
 
-  const metrics = { ...(insights.metrics || {}) };
-  Object.entries(preferred).forEach(([field, value]) => {
-    if (typeof value === 'number') {
-      metrics[field] = value;
-    }
-  });
-
-  const extractionSource = schematicVersion
-    ? `schematic@${schematicVersion}`
-    : metadata.extractionSource || 'heuristic';
-  const insightKey = docType || 'document';
-
-  const structuredFields = {
-    preferred,
-    fallback,
-    raw: fieldValues,
+  const docupipe = isPlainObject(result?.docupipe) ? result.docupipe : {};
+  const warnings = Array.isArray(result?.warnings)
+    ? result.warnings.filter((entry) => typeof entry === 'string')
+    : [];
+  const metricsRaw = isPlainObject(result?.metrics) ? result.metrics : {};
+  const metrics = {
+    providerLatencyMs:
+      metricsRaw?.providerLatencyMs != null ? Number(metricsRaw.providerLatencyMs) : null,
+    totalLatencyMs: metricsRaw?.latencyMs != null ? Number(metricsRaw.latencyMs) : null,
   };
-  if (schematicVersion) {
-    structuredFields.version = schematicVersion;
-  }
-  if (schematic?.fields && isPlainObject(schematic.fields)) {
-    structuredFields.schematic = schematic.fields;
-  }
+  if (!Number.isFinite(metrics.providerLatencyMs)) metrics.providerLatencyMs = null;
+  if (!Number.isFinite(metrics.totalLatencyMs)) metrics.totalLatencyMs = null;
 
-  const positions = isPlainObject(schematic?.positions) ? schematic.positions : null;
-  const transactionsV1 = (() => {
-    if (Array.isArray(schematic?.transactions)) {
-      return schematic.transactions.filter((entry) => isPlainObject(entry));
-    }
-    if (isPlainObject(schematic?.transactions) && Array.isArray(schematic.transactions.items)) {
-      return schematic.transactions.items.filter((entry) => isPlainObject(entry));
-    }
-    return null;
-  })();
+  const docupipeJson = docupipe?.json ?? null;
+  const docupipeMetadata = isPlainObject(docupipe?.metadata) ? docupipe.metadata : null;
+  const docupipeStatus = typeof docupipe?.status === 'string' ? docupipe.status : 'completed';
+  const docupipeId = docupipe?.id || docupipe?.documentId || sessionMeta?.docupipeId || null;
 
-  const metricsV1 = isPlainObject(schematic?.metrics) ? schematic.metrics : null;
+  const insightKey = docType || sessionDocType || 'document';
+
+  const narrative = [`Processed with Docupipe (${docupipeStatus})`];
+  if (warnings.length) {
+    narrative.push(`Docupipe warnings: ${warnings.join('; ')}`);
+  }
 
   const metadataPayload = {
-    ...metadata,
-    extractedFields: structuredFields,
-    extractionSource,
+    provider: 'docupipe',
+    extractionSource: 'docupipe',
+    warnings,
+    docupipe: {
+      documentId: docupipeId,
+      status: docupipeStatus,
+      metadata: docupipeMetadata || null,
+      timestamps: {
+        submittedAt: docupipe?.submittedAt || null,
+        completedAt: docupipe?.completedAt || null,
+        updatedAt: docupipe?.updatedAt || null,
+      },
+      json: docupipeJson ?? null,
+    },
+    rawJson: docupipeJson ?? null,
   };
-  if (schematicVersion) {
-    metadataPayload.schematicVersion = schematicVersion;
+
+  const parserVersion = 'docupipe-v1';
+  const schemaVersion = 'docupipe-v1';
+  const promptVersion = 'docupipe';
+  const model = 'docupipe';
+
+  const metricsForInsights = {};
+  if (metrics.providerLatencyMs != null) {
+    metricsForInsights.providerLatencyMs = metrics.providerLatencyMs;
   }
-  if (positions) {
-    metadataPayload.positions = positions;
+  if (metrics.totalLatencyMs != null) {
+    metricsForInsights.totalLatencyMs = metrics.totalLatencyMs;
   }
-  if (schematic && !metadataPayload.schematic) {
-    metadataPayload.schematic = {
-      version: schematicVersion,
-      docType: schematic.docType || docType || null,
-      provider: schematic.provider || 'schematic',
-    };
-  }
+
   try {
     await applyDocumentInsights(
       userObjectId,
@@ -143,22 +126,19 @@ router.post('/parse-result', requireWorker, async (req, res) => {
       {
         baseKey: insightKey,
         insightType: insightKey,
-        metrics,
+        metrics: metricsForInsights,
         metadata: metadataPayload,
         narrative,
-        text,
-        metricsV1: metricsV1 || null,
-        transactionsV1: transactionsV1 || null,
-        version: schematicVersion ? 'v1' : undefined,
-        schemaVersion: schematicVersion ? 'schematic-v1' : undefined,
-        parserVersion: schematic?.parserVersion || (schematicVersion ? `schematic@${schematicVersion}` : undefined),
-        promptVersion: schematic?.promptVersion || undefined,
-        model: schematic?.model || (schematicVersion ? 'schematic' : undefined),
+        version: 'docupipe-v1',
+        schemaVersion,
+        parserVersion,
+        promptVersion,
+        model,
       },
       {
         id: docId,
-        name: docId,
-        uploadedAt: null,
+        name: sessionMeta?.originalName || docId,
+        uploadedAt: sessionMeta?.uploadedAt || null,
       }
     );
 
@@ -166,12 +146,15 @@ router.post('/parse-result', requireWorker, async (req, res) => {
       { userId: userObjectId, fileId: docId, insightType: insightKey },
       {
         $set: {
-          'metadata.rulesVersion': metadata.rulesVersion || null,
-          'metadata.schematicVersion': schematicVersion || metadata.rulesVersion || null,
-          'metadata.issues': Array.isArray(result.softErrors) ? result.softErrors : [],
-          'metadata.extractionSource': extractionSource,
-          'metadata.extractedFields': metadataPayload.extractedFields,
-          'metadata.positions': positions || null,
+          'metadata.provider': 'docupipe',
+          'metadata.processor': null,
+          'metadata.providerMetadata': docupipeMetadata || null,
+          'metadata.classification': null,
+          'metadata.warnings': warnings,
+          'metadata.extractionSource': 'docupipe',
+          'metadata.documentMetadata': docupipeMetadata || null,
+          'metadata.docupipe': metadataPayload.docupipe,
+          'metadata.rawJson': metadataPayload.rawJson,
         },
       }
     ).catch(() => {});
@@ -183,22 +166,13 @@ router.post('/parse-result', requireWorker, async (req, res) => {
       sha256(
         [
           resolvedStoragePath || docId,
-          metadata.rulesVersion || '',
-          JSON.stringify(metrics || {}),
-          text || '',
+          docupipeStatus || 'unknown',
+          JSON.stringify(docupipeMetadata || {}),
+          docupipeJson == null ? '' : JSON.stringify(docupipeJson),
         ].join('|')
       );
     const collectionId = normalizeCollectionId(sessionMeta?.collectionId);
-    const parserVersion = sessionMeta?.parserVersion ||
-      (metadata.rulesVersion
-        ? `schematics@${metadata.rulesVersion}`
-        : sessionDocType
-          ? `${sessionDocType}@heuristic`
-          : 'schematics@heuristic');
-    const promptVersion = sessionMeta?.promptVersion || DEFAULT_PROMPT_VERSION;
-    const model = sessionMeta?.model || DEFAULT_MODEL;
-    const schemaVersion = sessionMeta?.schemaVersion || DEFAULT_SCHEMA_VERSION;
-    const userRulesVersion = sessionMeta?.userRulesVersion || metadata.rulesVersion || null;
+    const userRulesVersion = sessionMeta?.userRulesVersion || null;
 
     await UserDocumentJob.findOneAndUpdate(
       { userId: userObjectId, fileId: docId },
@@ -207,9 +181,9 @@ router.post('/parse-result', requireWorker, async (req, res) => {
           jobId,
           sessionId: sessionMeta?.sessionId || null,
           collectionId,
-          originalName: sessionMeta?.originalName || metadata.documentName || docId,
+          originalName: sessionMeta?.originalName || docId,
           contentHash,
-          candidateType: docType || sessionDocType || null,
+          candidateType: insightKey,
           status: 'succeeded',
           uploadState: 'succeeded',
           processState: 'succeeded',
@@ -231,21 +205,31 @@ router.post('/parse-result', requireWorker, async (req, res) => {
       docId,
       jobId,
       userId: String(userObjectId),
-      docType: docType || sessionDocType || null,
+      docType: insightKey,
       userRulesVersion,
       storagePath: resolvedStoragePath,
       contentHash,
       resultSummary: {
-        extractionSource,
-        metricsExtracted: Object.keys(metrics || {}).length,
-        softErrorCount: Array.isArray(result.softErrors) ? result.softErrors.length : 0,
+        extractionSource: 'docupipe',
+        metricsExtracted: Object.keys(metricsForInsights || {}).length,
+        docupipeStatus,
+        warnings,
       },
+      docupipeId,
+      docupipeStatus,
     };
     try {
       await kvSet(sessionKey, completionMeta, PARSE_SESSION_TTL_SECONDS);
     } catch (err) {
       console.warn('[parse-result] Failed to persist parse session completion metadata', err);
     }
+
+    await setInsightsProcessing(userObjectId, insightKey, {
+      active: false,
+      message: 'Docupipe JSON received',
+      fileId: docId,
+      fileName: sessionMeta?.originalName || docId,
+    });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to persist parse result', detail: err.message });
   }
