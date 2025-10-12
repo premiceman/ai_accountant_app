@@ -537,6 +537,23 @@ function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
     .join('; ');
 }
 
+function resolveDocumentMonthForAnalytics(payload: InsightUpsertPayload): string | null {
+  const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
+  const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
+  const metadataPeriod = (metadata.period ?? {}) as Record<string, unknown>;
+  const metricsPeriod = (metrics.period ?? {}) as Record<string, unknown>;
+
+  return (
+    v1.ensureIsoMonth((payload.documentMonth ?? metadata.documentMonth) ?? null) ??
+    v1.ensureIsoMonth(
+      (typeof payload.documentDate === 'string' ? payload.documentDate : null) ??
+        (typeof metadata.documentDate === 'string' ? (metadata.documentDate as string) : null) ??
+        (typeof payload.documentDateV1 === 'string' ? payload.documentDateV1 : null)
+    ) ??
+    v1.ensureIsoMonth((metricsPeriod.month ?? metadataPeriod.month) ?? null)
+  );
+}
+
 export function enrichPayloadWithV1(
   payload: InsightUpsertPayload,
   classification: SupportedClassification,
@@ -1161,7 +1178,20 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
     { upsert: true }
   ).exec();
 
-  await rebuildMonthlyAnalytics({ userId: job.userId, month: payload.documentMonth });
+  const analyticsMonth = resolveDocumentMonthForAnalytics(payload);
+  if (analyticsMonth) {
+    await rebuildMonthlyAnalytics({ userId: job.userId, month: analyticsMonth });
+  } else {
+    logger.warn(
+      {
+        area: TRIAGE_AREA,
+        phase: 'analytics-rebuild',
+        jobId: job.jobId,
+        fileId: job.fileId,
+      },
+      'Skipping analytics rebuild due to missing document month'
+    );
+  }
 
   await finalizeJob(job, 'succeeded', {
     lastUpdatePlanSummary: lastPlanSummaryString,
