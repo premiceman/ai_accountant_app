@@ -8,6 +8,7 @@
   const asyncToggleEl = document.getElementById('asyncMode');
 
   const trimReview = createTrimReview();
+  const missingPeriodEditor = createMissingPeriodEditor();
   const asyncFeatureEnabled = (window.JSON_TEST_ASYNC ?? 'true') !== 'false';
   if (asyncToggleEl && !asyncFeatureEnabled) {
     asyncToggleEl.checked = false;
@@ -191,20 +192,47 @@
       trimReview.reset();
     }
 
-    return { processedPayload: payload, shouldStandardize: false };
   }
 
   async function renderResult(payload, { docType } = {}) {
     if (!payload) return;
+    missingPeriodEditor?.hide?.();
     let processedPayload = payload;
     const shouldStandardize = typeof docType === 'string' && docType.length > 0;
     if (shouldStandardize) {
+      processedPayload = await standardizePayload(processedPayload, { docType });
+    } else {
+      setStatus('Complete', false);
+    }
+    try {
+      output.textContent = JSON.stringify(processedPayload, null, 2);
+    } catch (err) {
+      output.textContent = 'Unable to serialise payload.';
+    }
+    const labelSource = processedPayload && typeof processedPayload === 'object' ? processedPayload : payload;
+    const label = labelSource?.classification?.label
+      || labelSource?.classification?.entry?.label
+      || labelSource?.classification?.entry?.key
+      || null;
+    if (label && labelBadge) {
+      labelBadge.textContent = label;
+      labelBadge.removeAttribute('hidden');
+    }
+    return processedPayload;
+  }
+
+  async function standardizePayload(initialPayload, { docType }) {
+    let currentPayload = initialPayload;
+    const normalisedDocType = typeof docType === 'string' ? docType : '';
+
+    while (true) {
       setStatus('JSON standardisation in progress…', true);
       output.textContent = 'Running JSON standardisation…';
       const body = {
-        docType,
-        payload,
+        docType: normalisedDocType,
+        payload: currentPayload,
       };
+
       try {
         const res = await Auth.fetch('/api/json-test/standardize', {
           method: 'POST',
@@ -223,32 +251,35 @@
           throw new Error(message);
         }
         if (typeof standardJson?.data !== 'undefined') {
-          processedPayload = standardJson.data;
+          currentPayload = standardJson.data;
         }
+        missingPeriodEditor?.hide?.();
         setStatus('JSON standardisation complete', false);
+        return currentPayload;
       } catch (err) {
         setStatus('JSON standardisation failed', false);
-        throw err;
+        const editedPayload = await missingPeriodEditor?.promptForPeriod?.({
+          error: err,
+          docType: normalisedDocType,
+          payload: currentPayload,
+          updateStatus: (text, busy) => setStatus(text, busy),
+          onPreview: (draft) => {
+            try {
+              output.textContent = JSON.stringify(draft, null, 2);
+            } catch (serialiseErr) {
+              console.warn('Failed to preview manual period update', serialiseErr);
+              output.textContent = 'Unable to serialise payload.';
+            }
+          },
+        });
+
+        if (!editedPayload) {
+          throw err;
+        }
+
+        currentPayload = editedPayload;
       }
     }
-    try {
-      output.textContent = JSON.stringify(processedPayload, null, 2);
-    } catch (err) {
-      output.textContent = 'Unable to serialise payload.';
-    }
-    const labelSource = processedPayload && typeof processedPayload === 'object' ? processedPayload : payload;
-    const label = labelSource?.classification?.label
-      || labelSource?.classification?.entry?.label
-      || labelSource?.classification?.entry?.key
-      || null;
-    if (label && labelBadge) {
-      labelBadge.textContent = label;
-      labelBadge.removeAttribute('hidden');
-    }
-    if (!shouldStandardize) {
-      setStatus('Complete', false);
-    }
-    return processedPayload;
   }
 })();
 
@@ -756,6 +787,231 @@ function createTrimReview() {
     },
     reset() {
       clearState();
+    },
+  };
+}
+
+function createMissingPeriodEditor() {
+  const section = document.getElementById('missing-period-editor');
+  if (!section) {
+    return {
+      async promptForPeriod() { return null; },
+      hide() {},
+    };
+  }
+
+  const form = section.querySelector('[data-role="form"]');
+  const messageEl = section.querySelector('[data-role="message"]');
+  const badgeEl = section.querySelector('[data-role="badge"]');
+  const errorEl = section.querySelector('[data-role="error"]');
+  const startInput = section.querySelector('input[name="periodStart"]');
+  const endInput = section.querySelector('input[name="periodEnd"]');
+  const monthInput = section.querySelector('input[name="periodMonth"]');
+  const cancelBtn = section.querySelector('[data-role="cancel"]');
+
+  let resolver = null;
+  let context = null;
+
+  function toIsoDate(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : '';
+  }
+
+  function toMonthInput(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (/^\d{4}-\d{2}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/^(\d{2})\/(\d{4})$/);
+    if (match) return `${match[2]}-${match[1]}`;
+    return '';
+  }
+
+  function fromMonthInput(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (/^\d{4}-\d{2}$/.test(trimmed)) {
+      const [year, month] = trimmed.split('-');
+      return `${month}/${year}`;
+    }
+    return trimmed;
+  }
+
+  function clonePayload(value) {
+    if (typeof structuredClone === 'function') {
+      try { return structuredClone(value); } catch (err) { console.warn('structuredClone failed', err); }
+    }
+    try { return JSON.parse(JSON.stringify(value)); } catch (err) {
+      console.warn('Failed to clone payload for manual period entry', err);
+      return null;
+    }
+  }
+
+  function resetError() {
+    if (!errorEl) return;
+    errorEl.textContent = '';
+    errorEl.classList.add('d-none');
+  }
+
+  function showError(message) {
+    if (!errorEl) return;
+    errorEl.textContent = message;
+    errorEl.classList.toggle('d-none', !message);
+  }
+
+  function hideSection() {
+    section.classList.add('d-none');
+    resetError();
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
+    if (monthInput) monthInput.value = '';
+    context = null;
+  }
+
+  function finish(result) {
+    const resolve = resolver;
+    resolver = null;
+    hideSection();
+    if (typeof resolve === 'function') {
+      resolve(result);
+    }
+  }
+
+  function extractExistingPeriod(period) {
+    const result = { start: '', end: '', month: '' };
+    if (!period || typeof period !== 'object') return result;
+    for (const [key, value] of Object.entries(period)) {
+      if (typeof value !== 'string') continue;
+      const lower = key.toLowerCase();
+      if (!result.start && (lower.includes('start') || lower.includes('from'))) {
+        result.start = value;
+        continue;
+      }
+      if (!result.end && (lower.includes('end') || lower.includes('to'))) {
+        result.end = value;
+        continue;
+      }
+      if (!result.month && lower.includes('date')) {
+        result.month = value;
+      }
+    }
+    return result;
+  }
+
+  function ensurePeriodObject(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    const container = payload && typeof payload.data === 'object' && !Array.isArray(payload.data)
+      ? payload.data
+      : payload;
+    if (!container || typeof container !== 'object') return null;
+    if (!container.period || typeof container.period !== 'object') {
+      container.period = {};
+    }
+    return container.period;
+  }
+
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!context) return;
+    resetError();
+
+    const startValue = startInput?.value?.trim() || '';
+    const endValue = endInput?.value?.trim() || '';
+    const monthValue = monthInput?.value?.trim() || '';
+
+    if (!startValue && !endValue && !monthValue) {
+      showError('Enter at least one period value to continue.');
+      return;
+    }
+
+    const cloned = clonePayload(context.payload);
+    if (!cloned) {
+      showError('Unable to clone JSON payload.');
+      return;
+    }
+
+    const period = ensurePeriodObject(cloned);
+    if (!period) {
+      showError('Unable to update period section in payload.');
+      return;
+    }
+
+    if (startValue) {
+      period.startDate = startValue;
+    }
+    if (endValue) {
+      period.endDate = endValue;
+    }
+    if (monthValue) {
+      const formattedMonth = fromMonthInput(monthValue);
+      if (formattedMonth) {
+        period.statementDate = formattedMonth;
+        if (!period.date) {
+          period.date = formattedMonth;
+        }
+      }
+    }
+
+    context.onPreview?.(cloned);
+    context.updateStatus?.('Retrying JSON standardisation…', true);
+    context.payload = cloned;
+    finish(cloned);
+  });
+
+  cancelBtn?.addEventListener('click', (event) => {
+    event.preventDefault();
+    finish(null);
+  });
+
+  return {
+    async promptForPeriod({ error, docType, payload, updateStatus, onPreview }) {
+      const message = typeof error?.message === 'string' ? error.message : '';
+      const normalisedDocType = typeof docType === 'string' ? docType.toLowerCase() : '';
+      if (!/period/i.test(message)) return null;
+      if (normalisedDocType && !['bank', 'statement', 'payslip'].includes(normalisedDocType)) {
+        return null;
+      }
+
+      const cloned = clonePayload(payload);
+      if (!cloned) {
+        return null;
+      }
+
+      const period = ensurePeriodObject(cloned);
+      if (!period) {
+        return null;
+      }
+
+      context = { payload: cloned, updateStatus, onPreview };
+      resetError();
+
+      const existing = extractExistingPeriod(period);
+      if (startInput) startInput.value = toIsoDate(existing.start);
+      if (endInput) endInput.value = toIsoDate(existing.end);
+      if (monthInput) monthInput.value = toMonthInput(existing.month);
+
+      const humanType = normalisedDocType ? `${normalisedDocType} document` : 'document';
+      if (messageEl) {
+        const detail = message ? ` (${message})` : '';
+        messageEl.textContent = `We need period information for this ${humanType} before we can standardise${detail}.`;
+      }
+      if (badgeEl) {
+        badgeEl.textContent = 'Manual input required';
+      }
+
+      section.classList.remove('d-none');
+      updateStatus?.('Manual period input required', false);
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      return await new Promise((resolve) => {
+        resolver = resolve;
+      });
+    },
+    hide() {
+      hideSection();
+      resolver = null;
     },
   };
 }

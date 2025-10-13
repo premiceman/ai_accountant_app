@@ -142,6 +142,39 @@
       <pre class="json-output" id="json-test-output">Upload a document to view the parsed JSON payload.</pre>
     </section>
 
+    <section class="test-card mt-4 d-none" id="missing-period-editor">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Add missing period details</h2>
+          <p class="text-muted mb-0" data-role="message">Provide statement dates so we can continue standardisation.</p>
+        </div>
+        <span class="badge bg-warning-subtle text-dark" data-role="badge">Action required</span>
+      </div>
+      <form class="row gy-3" data-role="form">
+        <div class="col-md-6">
+          <label for="missingPeriodStart" class="form-label">Period start date</label>
+          <input type="date" class="form-control" id="missingPeriodStart" name="periodStart" autocomplete="off">
+        </div>
+        <div class="col-md-6">
+          <label for="missingPeriodEnd" class="form-label">Period end date</label>
+          <input type="date" class="form-control" id="missingPeriodEnd" name="periodEnd" autocomplete="off">
+        </div>
+        <div class="col-md-6">
+          <label for="missingPeriodMonth" class="form-label">Statement month</label>
+          <input type="month" class="form-control" id="missingPeriodMonth" name="periodMonth" autocomplete="off">
+          <div class="form-text">Used when start/end dates are unavailable.</div>
+        </div>
+        <div class="col-12">
+          <div class="alert alert-warning d-none" role="alert" data-role="error"></div>
+        </div>
+        <div class="col-12 d-flex flex-wrap gap-2">
+          <button type="submit" class="btn btn-primary" data-role="submit">Update JSON &amp; retry</button>
+          <button type="button" class="btn btn-outline-secondary" data-role="cancel">Dismiss</button>
+        </div>
+        <p class="text-muted small mb-0">Your entries are written back to the JSON payload before we retry standardisation.</p>
+      </form>
+    </section>
+
     <section class="test-card mt-4 d-none" id="trim-review">
       <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
         <div>
