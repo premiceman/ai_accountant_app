@@ -3,6 +3,7 @@
 const { callOpenAIJson } = require('./documents/openaiClient');
 
 const MONTH_YEAR_REGEX = /^(0[1-9]|1[0-2])\/\d{4}$/;
+const VALUE_CANDIDATE_KEYS = ['date', 'value', 'text', 'raw', 'formatted'];
 const DEFAULT_SCHEMA = {
   name: 'period_month_year',
   schema: {
@@ -23,49 +24,70 @@ function clonePayload(payload) {
   return JSON.parse(JSON.stringify(payload));
 }
 
-function extractStringValue(value) {
+function createAccessor(container, key, value) {
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    return trimmed || null;
+    if (!trimmed) return null;
+    return {
+      value: trimmed,
+      setValue(newValue) {
+        container[key] = newValue;
+      },
+    };
   }
+
   if (isPlainObject(value)) {
-    const keys = ['date', 'value', 'text', 'raw', 'formatted'];
-    for (const key of keys) {
-      if (typeof value[key] === 'string') {
-        const trimmed = value[key].trim();
-        if (trimmed) return trimmed;
+    for (const candidateKey of VALUE_CANDIDATE_KEYS) {
+      if (typeof value[candidateKey] === 'string') {
+        const trimmed = value[candidateKey].trim();
+        if (trimmed) {
+          return {
+            value: trimmed,
+            setValue(newValue) {
+              value[candidateKey] = newValue;
+            },
+          };
+        }
       }
     }
   }
+
   return null;
 }
 
-function findMatchingValue(source, predicate, depth = 0) {
+function findMatchingAccessor(source, predicate, depth = 0) {
   if (!isPlainObject(source) || depth > 2) return null;
 
   for (const [key, value] of Object.entries(source)) {
     const lowerKey = key.toLowerCase();
     if (predicate(lowerKey)) {
-      const extracted = extractStringValue(value);
-      if (extracted) return extracted;
+      const accessor = createAccessor(source, key, value);
+      if (accessor) return accessor;
     }
     if (isPlainObject(value)) {
-      const nested = findMatchingValue(value, predicate, depth + 1);
+      const nested = findMatchingAccessor(value, predicate, depth + 1);
       if (nested) return nested;
     }
   }
   return null;
 }
 
-function extractPeriodValues(period) {
-  const dateValue = findMatchingValue(period, (key) => {
+function extractPeriodAccessors(period) {
+  const dateAccessor = findMatchingAccessor(period, (key) => {
     if (key === 'date' || key === 'perioddate') return true;
     return key.includes('date') && !key.includes('start') && !key.includes('end');
   });
-  const startValue = findMatchingValue(period, (key) => key.includes('start') || key.includes('from'));
-  const endValue = findMatchingValue(period, (key) => key.includes('end') || key.includes('to'));
+  const startAccessor = findMatchingAccessor(period, (key) => key.includes('start') || key.includes('from'));
+  const endAccessor = findMatchingAccessor(period, (key) => key.includes('end') || key.includes('to'));
 
-  return { dateValue, startValue, endValue };
+  return { dateAccessor, startAccessor, endAccessor };
+}
+
+function selectFirstAccessor(...accessors) {
+  for (const accessor of accessors) {
+    if (accessor && accessor.value) return accessor;
+  }
+  return null;
 }
 
 async function requestMonthYear({ docType, rawValue, startValue, endValue }) {
@@ -102,21 +124,29 @@ async function standardizePayslip(data) {
   const period = isPlainObject(data.period) ? data.period : null;
   if (!period) throw new Error('Payslip JSON missing period data');
 
-  const { dateValue, startValue, endValue } = extractPeriodValues(period);
-  const rawValue = dateValue || startValue || endValue;
-  if (!rawValue) throw new Error('Unable to determine payslip period date');
+  const { dateAccessor, startAccessor, endAccessor } = extractPeriodAccessors(period);
+  const primaryAccessor = selectFirstAccessor(dateAccessor, startAccessor, endAccessor);
+  if (!primaryAccessor) throw new Error('Unable to determine payslip period date');
 
   const normalized = await requestMonthYear({
     docType: 'payslip',
-    rawValue,
-    startValue,
-    endValue,
+    rawValue: primaryAccessor.value,
+    startValue: startAccessor ? startAccessor.value : null,
+    endValue: endAccessor ? endAccessor.value : null,
   });
 
-  period.date = normalized;
+  primaryAccessor.setValue(normalized);
 }
 
-function assignEndPeriodValue(period, value) {
+function assignEndPeriodValue(period, value, endAccessor) {
+  if (endAccessor) return;
+
+  const endDateKey = Object.keys(period).find((key) => key.toLowerCase() === 'enddate');
+  if (endDateKey) {
+    period[endDateKey] = value;
+    return;
+  }
+
   period.endDate = value;
 }
 
@@ -124,19 +154,28 @@ async function standardizeStatement(data) {
   const period = isPlainObject(data.period) ? data.period : null;
   if (!period) throw new Error('Statement JSON missing period data');
 
-  const { dateValue, startValue, endValue } = extractPeriodValues(period);
-  const rawValue = endValue || dateValue || startValue;
-  if (!rawValue) throw new Error('Unable to determine statement period date');
+  const { dateAccessor, startAccessor, endAccessor } = extractPeriodAccessors(period);
+  const primaryAccessor = selectFirstAccessor(endAccessor, dateAccessor, startAccessor);
+  if (!primaryAccessor) throw new Error('Unable to determine statement period date');
 
   const normalized = await requestMonthYear({
     docType: 'statement',
-    rawValue,
-    startValue,
-    endValue,
+    rawValue: primaryAccessor.value,
+    startValue: startAccessor ? startAccessor.value : null,
+    endValue: endAccessor ? endAccessor.value : null,
   });
 
-  period.date = normalized;
-  assignEndPeriodValue(period, normalized);
+  primaryAccessor.setValue(normalized);
+
+  if (dateAccessor && primaryAccessor !== dateAccessor) {
+    dateAccessor.setValue(normalized);
+  }
+
+  if (endAccessor && primaryAccessor !== endAccessor) {
+    endAccessor.setValue(normalized);
+  }
+
+  assignEndPeriodValue(period, normalized, endAccessor || null);
 }
 
 async function standardizeDocupipePayload(payload, { docType }) {
