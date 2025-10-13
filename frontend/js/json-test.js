@@ -141,7 +141,7 @@
               }
               if (statusJson?.state === 'completed') {
                 cancelPoll();
-                renderResult(statusJson.data);
+                await renderResult(statusJson.data, { docType });
                 resolve();
                 return;
               }
@@ -160,7 +160,6 @@
           poll();
         });
 
-        setStatus('Complete', false);
       } else {
         const form = new FormData();
         form.append('file', fileForProcessing);
@@ -180,8 +179,7 @@
           throw new Error(reason || `Upload failed (${res.status})`);
         }
         const payload = await res.json();
-        renderResult(payload);
-        setStatus('Complete', false);
+        await renderResult(payload, { docType });
       }
     } catch (err) {
       console.error('JSON test upload failed', err);
@@ -194,21 +192,61 @@
     }
   }
 
-  function renderResult(payload) {
+  async function renderResult(payload, { docType } = {}) {
     if (!payload) return;
+    let processedPayload = payload;
+    const shouldStandardize = typeof docType === 'string' && docType.length > 0;
+    if (shouldStandardize) {
+      setStatus('JSON standardisation in progress…', true);
+      output.textContent = 'Running JSON standardisation…';
+      const body = {
+        docType,
+        payload,
+      };
+      try {
+        const res = await Auth.fetch('/api/json-test/standardize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        let standardJson = null;
+        let parseFailed = false;
+        try {
+          standardJson = await res.json();
+        } catch (err) {
+          parseFailed = true;
+        }
+        if (!res.ok || standardJson?.ok === false) {
+          const message = standardJson?.error || res.statusText || (parseFailed ? 'JSON standardisation failed' : 'JSON standardisation failed');
+          throw new Error(message);
+        }
+        if (typeof standardJson?.data !== 'undefined') {
+          processedPayload = standardJson.data;
+        }
+        setStatus('JSON standardisation complete', false);
+      } catch (err) {
+        setStatus('JSON standardisation failed', false);
+        throw err;
+      }
+    }
     try {
-      output.textContent = JSON.stringify(payload, null, 2);
+      output.textContent = JSON.stringify(processedPayload, null, 2);
     } catch (err) {
       output.textContent = 'Unable to serialise payload.';
     }
-    const label = payload?.classification?.label
-      || payload?.classification?.entry?.label
-      || payload?.classification?.entry?.key
+    const labelSource = processedPayload && typeof processedPayload === 'object' ? processedPayload : payload;
+    const label = labelSource?.classification?.label
+      || labelSource?.classification?.entry?.label
+      || labelSource?.classification?.entry?.key
       || null;
     if (label && labelBadge) {
       labelBadge.textContent = label;
       labelBadge.removeAttribute('hidden');
     }
+    if (!shouldStandardize) {
+      setStatus('Complete', false);
+    }
+    return processedPayload;
   }
 })();
 
