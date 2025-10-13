@@ -33,6 +33,7 @@
     pending: 'queued',
     ready: 'idle',
   };
+  const TRIM_AUTOTRIM_MESSAGE = 'Document trimmed automatically. Review before processing.';
   const STORAGE_KEY = 'vault.uploadSessions.v1';
 
   const BRAND_THEMES = [
@@ -133,6 +134,29 @@
   let jsonModalReturnFocus = null;
   let jsonModalStylesInjected = false;
 
+  let trimModal = null;
+  let trimModalDialog = null;
+  let trimModalTitle = null;
+  let trimModalMeta = null;
+  let trimModalList = null;
+  let trimModalLoading = null;
+  let trimModalError = null;
+  let trimModalForm = null;
+  let trimModalApply = null;
+  let trimModalCancel = null;
+  let trimModalClose = null;
+  let trimModalReturnFocus = null;
+  let trimModalStylesInjected = false;
+
+  const trimReviewState = {
+    docId: null,
+    file: null,
+    pageCount: 0,
+    keptPages: new Set(),
+    isLoading: false,
+    isSubmitting: false,
+  };
+
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
   const sessionRows = document.getElementById('session-rows');
@@ -198,8 +222,108 @@
     return number.toLocaleString();
   }
 
+  function normalisePageCount(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return null;
+    return Math.max(1, Math.round(number));
+  }
+
+  function pickFirstNumber(values) {
+    if (!Array.isArray(values)) return null;
+    for (const value of values) {
+      const number = normalisePageCount(value);
+      if (number != null) return number;
+    }
+    return null;
+  }
+
+  function normalisePageNumbers(value) {
+    const pages = [];
+
+    const addPage = (page) => {
+      const number = Number(page);
+      if (!Number.isFinite(number)) return;
+      const rounded = Math.round(number);
+      if (rounded >= 1) {
+        pages.push(rounded);
+      }
+    };
+
+    const addRange = (start, end) => {
+      const startNumber = Number(start);
+      const endNumber = Number(end);
+      if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber)) return;
+      const startRounded = Math.round(startNumber);
+      const endRounded = Math.round(endNumber);
+      if (startRounded === endRounded) {
+        addPage(startRounded);
+        return;
+      }
+      const step = startRounded < endRounded ? 1 : -1;
+      for (let current = startRounded; step > 0 ? current <= endRounded : current >= endRounded; current += step) {
+        addPage(current);
+      }
+    };
+
+    const parseToken = (token) => {
+      const trimmed = String(token || '').trim();
+      if (!trimmed) return;
+      const rangeMatch = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (rangeMatch) {
+        addRange(Number(rangeMatch[1]), Number(rangeMatch[2]));
+        return;
+      }
+      addPage(trimmed);
+    };
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        if (Array.isArray(entry)) {
+          entry.forEach(parseToken);
+          return;
+        }
+        if (entry && typeof entry === 'object') {
+          if ('start' in entry && 'end' in entry) {
+            addRange(entry.start, entry.end);
+            return;
+          }
+          if ('page' in entry) {
+            addPage(entry.page);
+            return;
+          }
+        }
+        parseToken(entry);
+      });
+    } else if (value && typeof value === 'object') {
+      if ('start' in value && 'end' in value) {
+        addRange(value.start, value.end);
+      } else if ('page' in value) {
+        addPage(value.page);
+      } else if (Symbol.iterator in value) {
+        Array.from(value).forEach(parseToken);
+      }
+    } else if (typeof value === 'string') {
+      value.split(/[\s,]+/).forEach(parseToken);
+    } else {
+      parseToken(value);
+    }
+
+    const unique = Array.from(new Set(pages)).filter((page) => page >= 1);
+    unique.sort((a, b) => a - b);
+    return unique;
+  }
+
   function ensureObject(value) {
     return value && typeof value === 'object' ? value : {};
+  }
+
+  function ensureFileMeta(file) {
+    if (!file) return {};
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    const meta = ensureObject(raw.meta);
+    raw.meta = meta;
+    return meta;
   }
 
   function normaliseStatus(value, fallback = 'queued') {
@@ -302,9 +426,22 @@
     if (!source) return false;
     if (source.ui && source.ui.warning) return true;
     const meta = ensureObject(source.meta);
-    if (meta.trim_required) return true;
-    const pageCount = Number(meta.page_count_original || meta.pageCountOriginal || 0);
-    return Number.isFinite(pageCount) && pageCount > 5;
+    const trimRequired = meta.trim_required;
+    const reviewState = String(meta.trim_review_state || '').trim().toLowerCase();
+    if (trimRequired === false || reviewState === 'completed') return false;
+    if (trimRequired === true) return true;
+    if (reviewState === 'pending' || reviewState === 'required') return true;
+    const pageCount = pickFirstNumber([
+      meta.page_count_original,
+      meta.pageCountOriginal,
+      meta.originalPageCount,
+      meta.original_page_count,
+      meta.page_count,
+      meta.pageCount,
+      meta.total_pages,
+      meta.totalPages,
+    ]);
+    return pageCount != null && pageCount > 5;
   }
 
   function getViewerFiles() {
@@ -359,6 +496,17 @@
     }
   }
 
+  function clearTrimWarning(file) {
+    if (!file) return;
+    const raw = ensureObject(file.raw);
+    const ui = ensureObject(raw.ui);
+    if (Array.isArray(ui.messages)) {
+      ui.messages = ui.messages.filter((message) => message !== TRIM_AUTOTRIM_MESSAGE);
+    }
+    ui.warning = false;
+    raw.ui = ui;
+  }
+
   function withButtonSpinner(button, label) {
     if (!button) return () => {};
     const original = button.innerHTML;
@@ -368,6 +516,40 @@
       button.innerHTML = original;
       button.disabled = false;
     };
+  }
+
+  async function requestAutoTrim(file, docId) {
+    if (!docId) {
+      throw new Error('Document identifier unavailable for trimming.');
+    }
+    const response = await apiFetch('/autotrim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docId }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'Auto-trim failed');
+    }
+    const trim = ensureObject(payload.trim);
+    const trimRequired = Boolean(payload.trimRequired);
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    applyProcessingUpdate(file, {
+      status: trimRequired ? 'idle' : 'queued',
+      processing: { provider: 'docupipe' },
+      meta: {
+        page_count_original: trim.originalPageCount ?? trim.page_count_original ?? raw.meta?.page_count_original,
+        pages_kept: trim.keptPages ?? trim.pages_kept ?? raw.meta?.pages_kept,
+        trim_required: trimRequired,
+        trim_review_state: trimRequired ? 'pending' : 'skipped',
+      },
+      ui: { warning: trimRequired },
+    });
+    if (trimRequired) {
+      appendUiMessage(file, TRIM_AUTOTRIM_MESSAGE);
+    }
+    return { trim, trimRequired };
   }
 
   function stopProcessingPoll(docId) {
@@ -842,6 +1024,573 @@
     }
   }
 
+  function injectTrimModalStyles() {
+    if (trimModalStylesInjected) return;
+    trimModalStylesInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .vault-trim-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: var(--viewer-overlay, rgba(15, 23, 42, 0.45)); z-index: 1250; }
+      .vault-trim-modal.is-visible { display: flex; }
+      .vault-trim-modal__dialog { position: relative; width: min(520px, 100%); max-height: min(90vh, 640px); background: var(--viewer-bg, rgba(255, 255, 255, 0.98)); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid var(--vault-border, rgba(15, 23, 42, 0.08)); box-shadow: var(--vault-shadow, 0 16px 48px rgba(15, 23, 42, 0.12)); display: flex; flex-direction: column; outline: none; }
+      .vault-trim-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      .vault-trim-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
+      .vault-trim-modal__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; padding: 4px; cursor: pointer; }
+      .vault-trim-modal__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
+      .vault-trim-modal__form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+      .vault-trim-modal__body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: hidden; }
+      .vault-trim-modal__description { margin: 0; font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); }
+      .vault-trim-modal__meta { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .vault-trim-modal__loading { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .vault-trim-modal__error { margin: 0; font-size: 0.85rem; color: var(--light-red, #ef4444); }
+      .vault-trim-modal__pages { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid rgba(15, 23, 42, 0.08); background: rgba(15, 23, 42, 0.03); overflow: auto; min-height: 120px; }
+      .vault-trim-modal__page { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; }
+      .vault-trim-modal__page input { cursor: pointer; }
+      .vault-trim-modal__empty { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .vault-trim-modal__footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 20px; border-top: 1px solid rgba(15, 23, 42, 0.08); }
+      @media (max-width: 600px) { .vault-trim-modal { padding: 16px; } .vault-trim-modal__dialog { width: 100%; max-height: 100vh; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureTrimModal() {
+    if (trimModal) return trimModal;
+    injectTrimModalStyles();
+
+    let modal = document.getElementById('vault-trim-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.className = 'vault-trim-modal';
+      modal.id = 'vault-trim-modal';
+      modal.setAttribute('aria-hidden', 'true');
+      modal.setAttribute('hidden', '');
+
+      const dialog = document.createElement('div');
+      dialog.className = 'vault-trim-modal__dialog';
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', 'vault-trim-modal-title');
+      dialog.setAttribute('aria-describedby', 'vault-trim-modal-description');
+      dialog.tabIndex = -1;
+
+      const header = document.createElement('header');
+      header.className = 'vault-trim-modal__header';
+
+      const title = document.createElement('h4');
+      title.className = 'vault-trim-modal__title';
+      title.id = 'vault-trim-modal-title';
+      title.textContent = 'Review Trim';
+
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.className = 'vault-trim-modal__close';
+      closeButton.setAttribute('aria-label', 'Close trim review');
+      closeButton.textContent = '×';
+
+      header.append(title, closeButton);
+
+      const form = document.createElement('form');
+      form.className = 'vault-trim-modal__form';
+      form.id = 'vault-trim-modal-form';
+
+      const body = document.createElement('div');
+      body.className = 'vault-trim-modal__body';
+
+      const description = document.createElement('p');
+      description.className = 'vault-trim-modal__description';
+      description.id = 'vault-trim-modal-description';
+      description.textContent = 'Choose which pages to keep before processing. Unselected pages will be removed.';
+
+      const meta = document.createElement('p');
+      meta.className = 'vault-trim-modal__meta muted';
+      meta.hidden = true;
+
+      const loading = document.createElement('p');
+      loading.className = 'vault-trim-modal__loading muted';
+      loading.hidden = true;
+      loading.textContent = 'Loading page suggestions…';
+
+      const error = document.createElement('p');
+      error.className = 'vault-trim-modal__error';
+      error.hidden = true;
+
+      const pages = document.createElement('div');
+      pages.className = 'vault-trim-modal__pages';
+
+      body.append(description, meta, loading, error, pages);
+
+      const footer = document.createElement('footer');
+      footer.className = 'vault-trim-modal__footer';
+
+      const cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.className = 'btn btn-outline-secondary vault-trim-modal__cancel';
+      cancelButton.textContent = 'Cancel';
+
+      const applyButton = document.createElement('button');
+      applyButton.type = 'submit';
+      applyButton.className = 'btn btn-primary vault-trim-modal__apply';
+      applyButton.textContent = 'Apply & Queue';
+      applyButton.disabled = true;
+
+      footer.append(cancelButton, applyButton);
+      form.append(body, footer);
+      dialog.append(header, form);
+      modal.appendChild(dialog);
+      document.body.appendChild(modal);
+    }
+
+    trimModal = modal;
+    trimModalDialog = modal.querySelector('.vault-trim-modal__dialog');
+    if (trimModalDialog && !trimModalDialog.hasAttribute('tabindex')) {
+      trimModalDialog.tabIndex = -1;
+    }
+    trimModalTitle = modal.querySelector('.vault-trim-modal__title');
+    trimModalMeta = modal.querySelector('.vault-trim-modal__meta');
+    trimModalList = modal.querySelector('.vault-trim-modal__pages');
+    trimModalLoading = modal.querySelector('.vault-trim-modal__loading');
+    trimModalError = modal.querySelector('.vault-trim-modal__error');
+    trimModalForm = modal.querySelector('.vault-trim-modal__form');
+    trimModalApply = modal.querySelector('.vault-trim-modal__apply') || modal.querySelector('.vault-trim-modal__form button[type="submit"]');
+    trimModalCancel = modal.querySelector('.vault-trim-modal__cancel');
+    trimModalClose = modal.querySelector('.vault-trim-modal__close');
+
+    if (!modal.dataset.trimInitialised) {
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+          hideTrimModal();
+        }
+      });
+      if (trimModalCancel) {
+        trimModalCancel.addEventListener('click', (event) => {
+          event.preventDefault();
+          hideTrimModal();
+        });
+      }
+      if (trimModalClose) {
+        trimModalClose.addEventListener('click', (event) => {
+          event.preventDefault();
+          hideTrimModal();
+        });
+      }
+      if (trimModalForm) {
+        trimModalForm.addEventListener('submit', (event) => {
+          event.preventDefault();
+          submitTrimReview();
+        });
+      }
+      modal.dataset.trimInitialised = 'true';
+    }
+
+    return modal;
+  }
+
+  function updateTrimModalMeta() {
+    if (!trimModalMeta) return;
+    const file = trimReviewState.file;
+    const raw = ensureObject(file?.raw);
+    const parts = [];
+    const docParts = [];
+    if (file?.title) docParts.push(file.title);
+    if (file?.subtitle) docParts.push(file.subtitle);
+    if (!docParts.length && raw?.originalName) docParts.push(raw.originalName);
+    if (!docParts.length && file?.originalName) docParts.push(file.originalName);
+    if (docParts.length) {
+      parts.push(docParts.join(' — '));
+    }
+    const pageCount = trimReviewState.pageCount;
+    if (pageCount) {
+      parts.push(`${pageCount} page${pageCount === 1 ? '' : 's'}`);
+    }
+    const keptCount = trimReviewState.keptPages instanceof Set ? trimReviewState.keptPages.size : 0;
+    if (keptCount) {
+      parts.push(`Keeping ${keptCount} page${keptCount === 1 ? '' : 's'}`);
+    }
+    trimModalMeta.textContent = parts.join(' • ');
+    trimModalMeta.hidden = parts.length === 0;
+  }
+
+  function updateTrimModalApplyState() {
+    if (trimModalApply) {
+      trimModalApply.disabled = trimReviewState.keptPages.size === 0 || trimReviewState.isSubmitting;
+    }
+    if (trimModalError && trimModalError.dataset && trimModalError.dataset.trimContext === 'selection' && trimReviewState.keptPages.size > 0) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      trimModalError.dataset.trimContext = '';
+    }
+  }
+
+  function renderTrimModalPages() {
+    if (!trimModalList) return;
+    trimModalList.innerHTML = '';
+    if (!(trimReviewState.keptPages instanceof Set)) {
+      trimReviewState.keptPages = new Set();
+    }
+    const { pageCount, keptPages } = trimReviewState;
+    if (!pageCount || pageCount < 1) {
+      const empty = document.createElement('p');
+      empty.className = 'vault-trim-modal__empty';
+      empty.textContent = 'Page information unavailable.';
+      trimModalList.appendChild(empty);
+      updateTrimModalApplyState();
+      updateTrimModalMeta();
+      return;
+    }
+
+    for (let page = 1; page <= pageCount; page += 1) {
+      const label = document.createElement('label');
+      label.className = 'vault-trim-modal__page';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = String(page);
+      checkbox.checked = keptPages.has(page);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          keptPages.add(page);
+        } else {
+          keptPages.delete(page);
+        }
+        updateTrimModalMeta();
+        updateTrimModalApplyState();
+      });
+
+      const caption = document.createElement('span');
+      caption.textContent = `Page ${page}`;
+
+      label.append(checkbox, caption);
+      trimModalList.appendChild(label);
+    }
+
+    updateTrimModalMeta();
+    updateTrimModalApplyState();
+  }
+
+  function focusFirstTrimCheckbox() {
+    if (!trimModalList) return;
+    const target =
+      trimModalList.querySelector('input[type="checkbox"]:checked') ||
+      trimModalList.querySelector('input[type="checkbox"]');
+    if (target && typeof target.focus === 'function') {
+      requestAnimationFrame(() => {
+        try {
+          target.focus();
+        } catch (error) {
+          console.warn('Failed to focus trim checkbox', error);
+        }
+      });
+    }
+  }
+
+  async function prepareTrimReviewData(file, docId) {
+    const resolvedFile = findViewerFileByDocId(docId) || file;
+    if (!resolvedFile) {
+      throw new Error('Document unavailable for trim review.');
+    }
+    const meta = ensureFileMeta(resolvedFile);
+
+    let pageCount = pickFirstNumber([
+      meta.page_count_original,
+      meta.pageCountOriginal,
+      meta.originalPageCount,
+      meta.original_page_count,
+      meta.page_count,
+      meta.pageCount,
+      meta.total_pages,
+      meta.totalPages,
+    ]);
+
+    let keptPages = normalisePageNumbers(
+      meta.pages_kept ?? meta.pagesKept ?? meta.keptPages ?? meta.trim_pages_kept ?? meta.trimPagesKept ?? meta.pages
+    );
+
+    if ((!pageCount || !keptPages.length) && docId) {
+      const { trim } = await requestAutoTrim(resolvedFile, docId);
+      const refreshedMeta = ensureFileMeta(resolvedFile);
+      pageCount =
+        pickFirstNumber([
+          refreshedMeta.page_count_original,
+          refreshedMeta.pageCountOriginal,
+          refreshedMeta.originalPageCount,
+          refreshedMeta.original_page_count,
+          trim?.originalPageCount,
+          trim?.page_count_original,
+        ]) || pageCount;
+      const updatedPages =
+        refreshedMeta.pages_kept ??
+        refreshedMeta.pagesKept ??
+        refreshedMeta.keptPages ??
+        trim?.keptPages ??
+        trim?.pages_kept;
+      keptPages = normalisePageNumbers(updatedPages);
+      renderViewerFiles();
+      queueRefresh();
+    }
+
+    if (keptPages.length) {
+      const maxPage = Math.max(...keptPages);
+      if (!pageCount || maxPage > pageCount) {
+        pageCount = maxPage;
+      }
+    }
+
+    if (!pageCount) {
+      const fallbackCount = pickFirstNumber([
+        meta.page_count_trimmed,
+        meta.pageCountTrimmed,
+        meta.pages_total,
+        meta.pagesTotal,
+      ]);
+      if (fallbackCount) pageCount = fallbackCount;
+    }
+
+    if (!pageCount) {
+      throw new Error('Page information unavailable for this document.');
+    }
+
+    if (!keptPages.length) {
+      keptPages = Array.from({ length: pageCount }, (_, index) => index + 1);
+    }
+
+    return { file: resolvedFile, pageCount, keptPages };
+  }
+
+  function hideTrimModal() {
+    if (!trimModal) return;
+    trimModal.classList.remove('is-visible');
+    trimModal.setAttribute('aria-hidden', 'true');
+    trimModal.setAttribute('hidden', '');
+    if (trimModalForm) {
+      trimModalForm.hidden = true;
+    }
+    if (trimModalLoading) {
+      trimModalLoading.hidden = true;
+    }
+    if (trimModalError) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      if (trimModalError.dataset) trimModalError.dataset.trimContext = '';
+    }
+    if (trimModalMeta) {
+      trimModalMeta.hidden = true;
+      trimModalMeta.textContent = '';
+    }
+    if (trimModalList) {
+      trimModalList.innerHTML = '';
+    }
+    trimReviewState.docId = null;
+    trimReviewState.file = null;
+    trimReviewState.pageCount = 0;
+    trimReviewState.keptPages = new Set();
+    trimReviewState.isLoading = false;
+    trimReviewState.isSubmitting = false;
+    const returnTarget = trimModalReturnFocus;
+    trimModalReturnFocus = null;
+    if (returnTarget && typeof returnTarget.focus === 'function') {
+      requestAnimationFrame(() => {
+        try {
+          returnTarget.focus();
+        } catch (error) {
+          console.warn('Failed to restore focus after closing trim review', error);
+        }
+      });
+    }
+  }
+
+  async function openTrimReview(file, trigger) {
+    if (trimReviewState.isLoading) return;
+    const docId = resolveDocId(file);
+    if (!docId) {
+      window.alert('Unable to review trim because the document identifier is unavailable.');
+      return;
+    }
+
+    const modal = ensureTrimModal();
+    if (!modal) {
+      window.alert('Trim review unavailable right now.');
+      return;
+    }
+
+    trimReviewState.isLoading = true;
+    trimReviewState.docId = docId;
+    trimReviewState.file = findViewerFileByDocId(docId) || file;
+    trimReviewState.pageCount = 0;
+    trimReviewState.keptPages = new Set();
+    trimReviewState.isSubmitting = false;
+
+    trimModalReturnFocus = trigger || document.activeElement || null;
+
+    if (trimModalTitle) {
+      trimModalTitle.textContent = 'Review Trim';
+    }
+    if (trimModalError) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      if (trimModalError.dataset) trimModalError.dataset.trimContext = '';
+    }
+    if (trimModalLoading) {
+      trimModalLoading.hidden = false;
+      trimModalLoading.textContent = 'Loading page suggestions…';
+    }
+    if (trimModalForm) {
+      trimModalForm.hidden = true;
+    }
+    if (trimModalApply) {
+      trimModalApply.disabled = true;
+    }
+    if (trimModalCancel) {
+      trimModalCancel.disabled = false;
+    }
+    if (trimModalMeta) {
+      trimModalMeta.textContent = '';
+      trimModalMeta.hidden = true;
+    }
+
+    updateTrimModalMeta();
+
+    modal.classList.add('is-visible');
+    modal.removeAttribute('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    if (trimModalDialog) {
+      trimModalDialog.focus();
+    }
+
+    try {
+      const { file: resolvedFile, pageCount, keptPages } = await prepareTrimReviewData(trimReviewState.file, docId);
+      trimReviewState.file = resolvedFile;
+      trimReviewState.pageCount = pageCount;
+      trimReviewState.keptPages = new Set(keptPages);
+      if (trimModalLoading) {
+        trimModalLoading.hidden = true;
+      }
+      if (trimModalForm) {
+        trimModalForm.hidden = false;
+      }
+      renderTrimModalPages();
+      focusFirstTrimCheckbox();
+    } catch (error) {
+      console.error('Failed to load trim review data', error);
+      if (trimModalLoading) {
+        trimModalLoading.hidden = true;
+      }
+      if (trimModalError) {
+        trimModalError.textContent = error.message || 'Unable to load trim suggestions right now.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'load';
+      }
+      updateTrimModalApplyState();
+    } finally {
+      trimReviewState.isLoading = false;
+    }
+  }
+
+  async function submitTrimReview() {
+    if (trimReviewState.isSubmitting) return;
+    const docId = trimReviewState.docId;
+    if (!docId) {
+      hideTrimModal();
+      return;
+    }
+    const kept = Array.from(trimReviewState.keptPages).sort((a, b) => a - b);
+    if (!kept.length) {
+      if (trimModalError) {
+        trimModalError.textContent = 'Select at least one page to keep.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'selection';
+      }
+      updateTrimModalApplyState();
+      return;
+    }
+
+    const file = findViewerFileByDocId(docId) || trimReviewState.file;
+    if (!file) {
+      if (trimModalError) {
+        trimModalError.textContent = 'Document unavailable for trim review.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'apply';
+      }
+      return;
+    }
+
+    trimReviewState.isSubmitting = true;
+    if (trimModalError) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      if (trimModalError.dataset) trimModalError.dataset.trimContext = '';
+    }
+    const restore = trimModalApply ? withButtonSpinner(trimModalApply, 'Applying…') : () => {};
+    if (trimModalCancel) {
+      trimModalCancel.disabled = true;
+    }
+
+    try {
+      const response = await apiFetch('/trim/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId, keptPages: kept }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Unable to apply trim');
+      }
+
+      const pageCount = trimReviewState.pageCount || (kept.length ? Math.max(...kept) : null);
+      const metaUpdates = {
+        pages_kept: kept,
+        trim_required: false,
+        trim_review_state: 'completed',
+      };
+      if (pageCount) {
+        metaUpdates.page_count_original = pageCount;
+      }
+
+      clearTrimWarning(file);
+      applyProcessingUpdate(file, {
+        meta: metaUpdates,
+        ui: { warning: false },
+      });
+      renderViewerFiles();
+      queueRefresh();
+
+      const processResponse = await apiFetch('/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId }),
+      });
+      const processPayload = await processResponse.json().catch(() => null);
+      if (!processResponse.ok || !processPayload?.ok) {
+        throw new Error(processPayload?.error || 'Unable to queue processing');
+      }
+
+      applyProcessingUpdate(file, {
+        status: 'processing',
+        processing: {
+          provider: 'docupipe',
+          stdJobId: processPayload.stdJobId,
+          standardizationId: processPayload.standardizationId,
+          startedAt: new Date().toISOString(),
+        },
+      });
+      renderViewerFiles();
+      queueRefresh();
+      startProcessingPoll(docId);
+      hideTrimModal();
+    } catch (error) {
+      console.error('Failed to apply trim selection', error);
+      if (trimModalError) {
+        trimModalError.textContent = error.message || 'Unable to apply trim right now.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'apply';
+      }
+    } finally {
+      trimReviewState.isSubmitting = false;
+      restore();
+      if (trimModalCancel) {
+        trimModalCancel.disabled = false;
+      }
+    }
+  }
+
   async function deleteViewerFile(fileId) {
     if (!fileId) return;
     const confirmed = window.confirm('Are you sure you want to delete this document? This action cannot be undone.');
@@ -916,9 +1665,21 @@
     if (hasWarning) {
       const warningIcon = document.createElement('i');
       warningIcon.className = 'bi bi-exclamation-triangle-fill viewer__file-warning';
-      warningIcon.setAttribute('role', 'img');
+      warningIcon.setAttribute('role', 'button');
       warningIcon.setAttribute('aria-label', 'Long document — review trim before processing');
       warningIcon.title = 'Long document — review trim before processing';
+      warningIcon.tabIndex = 0;
+      warningIcon.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTrimReview(file, warningIcon);
+      });
+      warningIcon.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        openTrimReview(file, warningIcon);
+      });
       statusGroup.appendChild(warningIcon);
     }
     header.appendChild(statusGroup);
@@ -969,31 +1730,7 @@
         }
         const restore = withButtonSpinner(autoTrimButton, 'Auto-trimming…');
         try {
-          const response = await apiFetch('/autotrim', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ docId }),
-          });
-          const payload = await response.json().catch(() => null);
-          if (!response.ok || !payload?.ok) {
-            throw new Error(payload?.error || 'Auto-trim failed');
-          }
-          const trim = ensureObject(payload.trim);
-          const trimRequired = Boolean(payload.trimRequired);
-          applyProcessingUpdate(file, {
-            status: trimRequired ? 'idle' : 'queued',
-            processing: { provider: 'docupipe' },
-            meta: {
-              page_count_original: trim.originalPageCount ?? trim.page_count_original ?? raw.meta?.page_count_original,
-              pages_kept: trim.keptPages ?? trim.pages_kept ?? raw.meta?.pages_kept,
-              trim_required: trimRequired,
-              trim_review_state: trimRequired ? 'pending' : 'skipped',
-            },
-            ui: { warning: trimRequired },
-          });
-          if (trimRequired) {
-            appendUiMessage(file, 'Document trimmed automatically. Review before processing.');
-          }
+          await requestAutoTrim(file, docId);
           renderViewerFiles();
           queueRefresh();
         } catch (error) {
@@ -1013,7 +1750,7 @@
       reviewTrimButton.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        window.alert('Trim review coming soon.');
+        openTrimReview(file, reviewTrimButton);
       });
       actions.appendChild(reviewTrimButton);
     }
@@ -2258,6 +2995,11 @@
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (trimModal && trimModal.classList.contains('is-visible')) {
+      event.preventDefault();
+      hideTrimModal();
+      return;
+    }
     if (jsonModal && jsonModal.classList.contains('is-visible')) {
       hideJsonModal();
       return;
