@@ -238,6 +238,18 @@ function assignPeriodDateValue(period, value, dateAccessor) {
   period.Date = value;
 }
 
+function assignPeriodDateValue(period, value, dateAccessor) {
+  if (dateAccessor) return;
+
+  const dateKey = Object.keys(period).find((key) => key.toLowerCase() === 'date');
+  if (dateKey) {
+    period[dateKey] = value;
+    return;
+  }
+
+  period.Date = value;
+}
+
 async function standardizeStatement(data) {
   const period = isPlainObject(data.period) ? data.period : null;
   if (!period) throw new Error('Statement JSON missing period data');
