@@ -150,6 +150,18 @@ function assignEndPeriodValue(period, value, endAccessor) {
   period.endDate = value;
 }
 
+function assignPeriodDateValue(period, value, dateAccessor) {
+  if (dateAccessor) return;
+
+  const dateKey = Object.keys(period).find((key) => key.toLowerCase() === 'date');
+  if (dateKey) {
+    period[dateKey] = value;
+    return;
+  }
+
+  period.Date = value;
+}
+
 async function standardizeStatement(data) {
   const period = isPlainObject(data.period) ? data.period : null;
   if (!period) throw new Error('Statement JSON missing period data');
@@ -176,6 +188,7 @@ async function standardizeStatement(data) {
   }
 
   assignEndPeriodValue(period, normalized, endAccessor || null);
+  assignPeriodDateValue(period, normalized, dateAccessor || null);
 }
 
 async function standardizeDocupipePayload(payload, { docType }) {
