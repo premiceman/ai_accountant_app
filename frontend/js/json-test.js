@@ -190,6 +190,8 @@
       cancelPoll();
       trimReview.reset();
     }
+
+    return { processedPayload: payload, shouldStandardize: false };
   }
 
   async function renderResult(payload, { docType } = {}) {
