@@ -220,6 +220,8 @@
       cancelPoll();
       trimReview.reset();
     }
+
+    return { processedPayload: payload, shouldStandardize: false };
   }
 
   function renderResult(payload, { force = false } = {}) {
