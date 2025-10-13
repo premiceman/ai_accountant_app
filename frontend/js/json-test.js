@@ -7,6 +7,7 @@
   const labelBadge = document.getElementById('json-test-label');
   const asyncToggleEl = document.getElementById('asyncMode');
 
+  const trimReview = createTrimReview();
   const asyncFeatureEnabled = (window.JSON_TEST_ASYNC ?? 'true') !== 'false';
   if (asyncToggleEl && !asyncFeatureEnabled) {
     asyncToggleEl.checked = false;
@@ -76,9 +77,9 @@
 
   async function handleFile(file) {
     clearError();
-    setStatus('Processing…', true);
     labelBadge?.setAttribute('hidden', '');
     output.textContent = 'Analysing document…';
+    setStatus('Checking document…', true);
     let pollTimer = null;
     const cancelPoll = () => {
       if (pollTimer) {
@@ -92,9 +93,21 @@
       const docType = docTypeEl ? docTypeEl.value : (window.DEFAULT_DOC_TYPE || 'bank');
       const useAsync = !!(asyncToggleEl && asyncToggleEl.checked && asyncFeatureEnabled);
 
+      const fileForProcessing = await trimReview.reviewIfNeeded(file, {
+        onProgress: (message, busy = true) => setStatus(message, busy),
+      });
+
+      if (!fileForProcessing) {
+        setStatus('Ready', false);
+        output.textContent = 'Upload a document to view the parsed JSON payload.';
+        return;
+      }
+
+      setStatus(useAsync ? 'Submitting to DocuPipe…' : 'Processing…', true);
+
       if (useAsync) {
         const form = new FormData();
-        form.append('file', file);
+        form.append('file', fileForProcessing);
         form.append('docType', docType);
 
         const submitRes = await Auth.fetch('/api/json-test/submit', { method: 'POST', body: form });
@@ -150,7 +163,7 @@
         setStatus('Complete', false);
       } else {
         const form = new FormData();
-        form.append('file', file);
+        form.append('file', fileForProcessing);
         if (docType) form.append('docType', docType);
         const res = await Auth.fetch('/api/json-test/upload', {
           method: 'POST',
@@ -177,6 +190,7 @@
       setStatus('Ready', false);
     } finally {
       cancelPoll();
+      trimReview.reset();
     }
   }
 
@@ -198,164 +212,105 @@
   }
 })();
 
-(function(){
-  const trimLabSection = document.getElementById('trim-lab');
-  if (!trimLabSection) return;
-  const trimFile = document.getElementById('trimFile');
-  const btnAnalyze = document.getElementById('btnTrimAnalyze');
+function createTrimReview() {
+  const section = document.getElementById('trim-review');
+  if (!section) {
+    return {
+      async reviewIfNeeded(file) { return file; },
+      reset() {},
+    };
+  }
+
+  const meta = document.getElementById('trimMeta');
+  const pagesTable = document.getElementById('trimPages');
+  const previewFrame = document.getElementById('trimPreview');
   const btnApply = document.getElementById('btnTrimApply');
   const btnKeepAll = document.getElementById('btnTrimKeepAll');
   const btnReset = document.getElementById('btnTrimReset');
-  const trimMeta = document.getElementById('trimMeta');
-  const trimPages = document.getElementById('trimPages');
-  const trimPreview = document.getElementById('trimPreview');
-  const btnDownloadTrim = document.getElementById('btnDownloadTrim');
-  const trimThreshold = document.getElementById('trimThreshold');
-  const trimThresholdValue = document.getElementById('trimThresholdValue');
+  const btnAnalyze = document.getElementById('btnTrimAnalyze');
+  const btnDownload = document.getElementById('btnDownloadTrim');
+  const threshold = document.getElementById('trimThreshold');
+  const thresholdValue = document.getElementById('trimThresholdValue');
+  const notice = document.getElementById('trimReviewNotice');
+  const badge = document.getElementById('trimReviewBadge');
 
-  let analysis = null;
-  let suggestedPages = new Set();
-  let selectedPages = new Set();
-  let originalFile = null;
-  let trimmedBlob = null;
-  let previewUrl = null;
+  const state = {
+    active: false,
+    file: null,
+    analysis: null,
+    suggestedPages: new Set(),
+    selectedPages: new Set(),
+    resolve: null,
+    trimmedBlob: null,
+    previewUrl: null,
+    busy: false,
+  };
 
-  function updateThresholdLabel() {
-    if (trimThresholdValue && trimThreshold) {
-      trimThresholdValue.textContent = String(trimThreshold.value ?? '');
+  function resetPreview() {
+    if (state.previewUrl) {
+      try { URL.revokeObjectURL(state.previewUrl); } catch (err) { console.warn('Failed to revoke preview URL', err); }
+      state.previewUrl = null;
+    }
+    state.trimmedBlob = null;
+    if (previewFrame) previewFrame.src = '';
+    if (btnDownload) {
+      btnDownload.disabled = true;
+      btnDownload.onclick = null;
     }
   }
 
-  async function base64ToBlob(b64, mime) {
-    const bin = atob(b64);
-    const len = bin.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-    return new Blob([bytes], { type: mime || 'application/pdf' });
+  function setNotice(message, tone = 'info') {
+    if (!notice) return;
+    notice.classList.remove('alert-success', 'alert-danger', 'alert-info');
+    if (!message) {
+      notice.classList.add('alert-info');
+      notice.classList.add('d-none');
+      notice.textContent = '';
+      return;
+    }
+    if (tone === 'success') notice.classList.add('alert-success');
+    else if (tone === 'danger') notice.classList.add('alert-danger');
+    else notice.classList.add('alert-info');
+    notice.textContent = message;
+    notice.classList.remove('d-none');
   }
 
   function setMeta(message) {
-    if (!trimMeta) return;
-    trimMeta.textContent = message || '';
+    if (!meta) return;
+    meta.textContent = message || '';
   }
 
-  function resetPreview() {
-    trimmedBlob = null;
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      previewUrl = null;
+  function updateThresholdLabel() {
+    if (threshold && thresholdValue) {
+      thresholdValue.textContent = String(threshold.value ?? '');
     }
-    if (trimPreview) trimPreview.src = '';
-    if (btnDownloadTrim) {
-      btnDownloadTrim.disabled = true;
-      btnDownloadTrim.onclick = null;
-    }
+  }
+
+  function hideSection() {
+    section.classList.add('d-none');
+  }
+
+  function showSection() {
+    section.classList.remove('d-none');
   }
 
   function normaliseSelectionIndices(list) {
     const set = new Set();
-    if (!analysis || !Array.isArray(list)) return set;
-    const max = analysis.pageCount || 0;
+    const pageCount = state.analysis?.pageCount || 0;
+    if (!Array.isArray(list)) return set;
     list.forEach((value) => {
       const idx = Number(value);
-      if (Number.isInteger(idx) && idx >= 0 && idx < max) {
+      if (Number.isInteger(idx) && idx >= 0 && idx < pageCount) {
         set.add(idx);
       }
     });
     return set;
   }
 
-  function updateRowStyles() {
-    if (!analysis || !trimPages) return;
-    const rows = trimPages.querySelectorAll('tbody tr');
-    rows.forEach((row) => {
-      const input = row.querySelector('input[data-page]');
-      if (!input) return;
-      const idx = Number(input.getAttribute('data-page'));
-      const isSelected = selectedPages.has(idx);
-      const isSuggested = suggestedPages.has(idx);
-      row.classList.toggle('table-success', isSelected);
-      row.classList.toggle('table-warning', !isSelected && isSuggested);
-      const badge = row.querySelector('.trim-suggested');
-      if (badge) {
-        badge.classList.toggle('d-none', !(isSuggested && !isSelected));
-      }
-      input.checked = isSelected;
-    });
-  }
-
-  function refreshControls() {
-    updateThresholdLabel();
-    if (!analysis) {
-      if (btnApply) btnApply.disabled = true;
-      if (btnKeepAll) btnKeepAll.disabled = true;
-      if (btnReset) btnReset.disabled = true;
-      if (trimThreshold) trimThreshold.disabled = true;
-      setMeta('Select a PDF and click Analyze to review pages.');
-      return;
-    }
-    if (trimThreshold) trimThreshold.disabled = false;
-    if (btnKeepAll) btnKeepAll.disabled = false;
-    if (btnReset) btnReset.disabled = false;
-    if (btnApply) btnApply.disabled = selectedPages.size === 0;
-
-    if (trimMeta) {
-      const selectedList = Array.from(selectedPages).sort((a, b) => a - b).map((n) => n + 1).join(', ') || 'none';
-      const suggestedList = Array.from(suggestedPages).sort((a, b) => a - b).map((n) => n + 1).join(', ') || 'none';
-      const txn = analysis.transactionRange && Number.isInteger(analysis.transactionRange.start) && Number.isInteger(analysis.transactionRange.end)
-        ? ` | Transaction block: ${analysis.transactionRange.start + 1}–${analysis.transactionRange.end + 1}`
-        : '';
-      trimMeta.textContent = `Selected ${selectedPages.size}/${analysis.pageCount} pages (${selectedList}). Suggested: ${suggestedList}${txn}.`;
-    }
-    updateRowStyles();
-  }
-
-  function renderPages() {
-    if (!trimPages) return;
-    if (!analysis || !analysis.pageCount) {
-      trimPages.innerHTML = '<p class="text-muted">Analyze a bank statement PDF to inspect page scores.</p>';
-      return;
-    }
-    const scores = Array.isArray(analysis.scores) ? analysis.scores : [];
-    const flags = Array.isArray(analysis.flags) ? analysis.flags : [];
-    let html = '<table class="table table-sm align-middle mb-0"><thead><tr><th style="width:55%;">Page</th><th style="width:15%;">Score</th><th>Flags</th></tr></thead><tbody>';
-    for (let i = 0; i < analysis.pageCount; i++) {
-      const isSelected = selectedPages.has(i);
-      const isSuggested = suggestedPages.has(i);
-      const rowClass = isSelected ? 'table-success' : (isSuggested ? 'table-warning' : '');
-      const score = Number(scores[i] ?? 0);
-      const high = Number.isFinite(analysis.highThreshold) ? analysis.highThreshold : 6;
-      const low = Number.isFinite(analysis.lowThreshold) ? analysis.lowThreshold : 3;
-      let badgeClass = 'bg-secondary';
-      if (score >= high) badgeClass = 'bg-success';
-      else if (score >= low) badgeClass = 'bg-warning text-dark';
-      const scoreLabel = Number.isFinite(score) ? score.toFixed(1) : '0.0';
-      const flag = flags[i] || {};
-      const flagBadges = [];
-      if (flag.hasHeader) flagBadges.push('<span class="badge bg-primary-subtle text-primary-emphasis me-1">Header</span>');
-      if (flag.hasManyAmounts) flagBadges.push('<span class="badge bg-info-subtle text-info-emphasis me-1">Amounts</span>');
-      if (flag.hasClosingBalance) flagBadges.push('<span class="badge bg-success-subtle text-success-emphasis me-1">Closing</span>');
-      const flagsHtml = flagBadges.length ? flagBadges.join('') : '<span class="text-muted">—</span>';
-      html += `<tr class="${rowClass}"><td><label class="d-flex align-items-center gap-2 mb-0"><input type="checkbox" data-page="${i}" ${isSelected ? 'checked' : ''}> <span>Page ${i + 1}</span><span class="badge bg-warning-subtle text-dark trim-suggested${isSuggested && !isSelected ? '' : ' d-none'}">Suggested</span></label></td><td><span class="badge ${badgeClass}">${scoreLabel}</span></td><td>${flagsHtml}</td></tr>`;
-    }
-    html += '</tbody></table>';
-    trimPages.innerHTML = html;
-    trimPages.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-      input.addEventListener('change', (event) => {
-        const idx = Number(event.target.getAttribute('data-page'));
-        if (!Number.isInteger(idx)) return;
-        if (event.target.checked) selectedPages.add(idx);
-        else selectedPages.delete(idx);
-        updateRowStyles();
-        refreshControls();
-      });
-    });
-    updateRowStyles();
-  }
-
-  function computeSuggestedFromThreshold(threshold) {
+  function computeSuggestedFromThreshold(thresholdValue) {
+    const analysis = state.analysis;
     if (!analysis) return new Set();
-    const limit = Number.isFinite(threshold) ? threshold : Number(analysis.highThreshold) || 6;
+    const limit = Number.isFinite(thresholdValue) ? thresholdValue : Number(analysis.highThreshold) || 6;
     const set = new Set();
     const scores = Array.isArray(analysis.scores) ? analysis.scores : [];
     for (let i = 0; i < (analysis.pageCount || 0); i++) {
@@ -384,171 +339,383 @@
     return set;
   }
 
-  if (trimLabSection && window.Auth && typeof Auth.fetch === 'function') {
-    Auth.fetch('/api/flags', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((flags) => {
-        if (flags && flags.JSON_TEST_ENABLE_TRIMLAB === false) {
-          trimLabSection.style.display = 'none';
-        }
-      })
-      .catch(() => {});
-  }
-
-  if (trimThreshold) {
-    trimThreshold.addEventListener('input', () => {
-      updateThresholdLabel();
-      if (!analysis) return;
-      const threshold = Number(trimThreshold.value);
-      suggestedPages = computeSuggestedFromThreshold(threshold);
-      selectedPages = new Set(suggestedPages);
-      renderPages();
-      refreshControls();
+  function updateRowStyles() {
+    if (!state.analysis || !pagesTable) return;
+    const rows = pagesTable.querySelectorAll('tbody tr');
+    rows.forEach((row) => {
+      const input = row.querySelector('input[data-page]');
+      if (!input) return;
+      const idx = Number(input.getAttribute('data-page'));
+      const isSelected = state.selectedPages.has(idx);
+      const isSuggested = state.suggestedPages.has(idx);
+      row.classList.toggle('table-success', isSelected);
+      row.classList.toggle('table-warning', !isSelected && isSuggested);
+      const badgeEl = row.querySelector('.trim-suggested');
+      if (badgeEl) {
+        badgeEl.classList.toggle('d-none', !(isSuggested && !isSelected));
+      }
+      input.checked = isSelected;
     });
   }
 
-  if (btnAnalyze) {
-    btnAnalyze.addEventListener('click', async () => {
-      const file = trimFile?.files?.[0];
-      if (!file) {
-        setMeta('Choose a PDF first.');
-        return;
-      }
-      originalFile = file;
-      analysis = null;
-      suggestedPages = new Set();
-      selectedPages = new Set();
-      resetPreview();
-      if (trimPages) trimPages.innerHTML = '';
-      if (btnApply) btnApply.disabled = true;
-      if (btnKeepAll) btnKeepAll.disabled = true;
-      if (btnReset) btnReset.disabled = true;
-      if (trimThreshold) trimThreshold.disabled = true;
-      setMeta('Analyzing…');
+  function refreshControls() {
+    updateThresholdLabel();
+    const hasAnalysis = !!state.analysis;
+    if (threshold) threshold.disabled = !hasAnalysis || state.busy;
+    if (btnKeepAll) btnKeepAll.disabled = !hasAnalysis || state.busy;
+    if (btnReset) btnReset.disabled = !hasAnalysis || state.busy;
+    if (btnAnalyze) btnAnalyze.disabled = !hasAnalysis || state.busy;
+    if (btnApply) btnApply.disabled = !hasAnalysis || state.busy || state.selectedPages.size === 0;
 
-      try {
-        const form = new FormData();
-        form.append('file', file);
-        const response = await fetch('/api/pdf/analyze', { method: 'POST', body: form });
-        const payload = await response.json();
-        if (!payload?.ok) {
-          setMeta('Analyze failed: ' + (payload?.error || 'Unknown error'));
-          renderPages();
-          return;
-        }
-        const pageCount = Number(payload.pageCount) || 0;
-        const transactionRange = payload.transactionRange && Number.isInteger(payload.transactionRange.start) && Number.isInteger(payload.transactionRange.end)
-          ? { start: payload.transactionRange.start, end: payload.transactionRange.end }
-          : null;
-        analysis = {
-          pageCount,
-          scores: Array.isArray(payload.scores) ? payload.scores : [],
-          flags: Array.isArray(payload.flags) ? payload.flags : [],
-          transactionRange,
-          minFirst: Number.isFinite(Number(payload.minFirst)) ? Number(payload.minFirst) : undefined,
-          adjMargin: Number.isFinite(Number(payload.adjMargin)) ? Number(payload.adjMargin) : undefined,
-          highThreshold: Number.isFinite(Number(payload.highThreshold)) ? Number(payload.highThreshold) : undefined,
-          lowThreshold: Number.isFinite(Number(payload.lowThreshold)) ? Number(payload.lowThreshold) : undefined,
-          keepAllRatio: Number.isFinite(Number(payload.keepAllRatio)) ? Number(payload.keepAllRatio) : undefined,
-        };
-        if (trimThreshold && payload.highThreshold != null && payload.highThreshold !== '') {
-          const nextThreshold = Number(payload.highThreshold);
-          if (!Number.isNaN(nextThreshold)) {
-            trimThreshold.value = String(nextThreshold);
-          }
-        }
-        updateThresholdLabel();
-        suggestedPages = normaliseSelectionIndices(payload.suggestedKeptPages || []);
-        if (!suggestedPages.size) {
-          const threshold = Number(trimThreshold?.value);
-          suggestedPages = computeSuggestedFromThreshold(threshold);
-        }
-        selectedPages = new Set(suggestedPages);
-        renderPages();
+    if (hasAnalysis && meta) {
+      const selectedList = Array.from(state.selectedPages).sort((a, b) => a - b).map((n) => n + 1).join(', ') || 'none';
+      const suggestedList = Array.from(state.suggestedPages).sort((a, b) => a - b).map((n) => n + 1).join(', ') || 'none';
+      const txn = state.analysis.transactionRange && Number.isInteger(state.analysis.transactionRange.start) && Number.isInteger(state.analysis.transactionRange.end)
+        ? ` | Transaction block: ${state.analysis.transactionRange.start + 1}–${state.analysis.transactionRange.end + 1}`
+        : '';
+      meta.textContent = `Selected ${state.selectedPages.size}/${state.analysis.pageCount} pages (${selectedList}). Suggested: ${suggestedList}${txn}.`;
+    }
+
+    if (!hasAnalysis && meta) {
+      meta.textContent = '';
+    }
+
+    updateRowStyles();
+  }
+
+  function renderPages() {
+    if (!pagesTable) return;
+    if (!state.analysis || !state.analysis.pageCount) {
+      pagesTable.innerHTML = '<tbody><tr><td class="text-muted">No analysis available.</td></tr></tbody>';
+      return;
+    }
+    const scores = Array.isArray(state.analysis.scores) ? state.analysis.scores : [];
+    const flags = Array.isArray(state.analysis.flags) ? state.analysis.flags : [];
+    let html = '<thead><tr><th style="width:55%;">Page</th><th style="width:15%;">Score</th><th>Flags</th></tr></thead><tbody>';
+    for (let i = 0; i < state.analysis.pageCount; i++) {
+      const isSelected = state.selectedPages.has(i);
+      const isSuggested = state.suggestedPages.has(i);
+      const rowClass = isSelected ? 'table-success' : (isSuggested ? 'table-warning' : '');
+      const score = Number(scores[i] ?? 0);
+      const high = Number.isFinite(state.analysis.highThreshold) ? state.analysis.highThreshold : 6;
+      const low = Number.isFinite(state.analysis.lowThreshold) ? state.analysis.lowThreshold : 3;
+      let badgeClass = 'bg-secondary';
+      if (score >= high) badgeClass = 'bg-success';
+      else if (score >= low) badgeClass = 'bg-warning text-dark';
+      const scoreLabel = Number.isFinite(score) ? score.toFixed(1) : '0.0';
+      const flag = flags[i] || {};
+      const flagBadges = [];
+      if (flag.hasHeader) flagBadges.push('<span class="badge bg-primary-subtle text-primary-emphasis me-1">Header</span>');
+      if (flag.hasManyAmounts) flagBadges.push('<span class="badge bg-info-subtle text-info-emphasis me-1">Amounts</span>');
+      if (flag.hasClosingBalance) flagBadges.push('<span class="badge bg-success-subtle text-success-emphasis me-1">Closing</span>');
+      const flagsHtml = flagBadges.length ? flagBadges.join('') : '<span class="text-muted">—</span>';
+      html += `<tr class="${rowClass}"><td><label class="d-flex align-items-center gap-2 mb-0"><input type="checkbox" data-page="${i}" ${isSelected ? 'checked' : ''}> <span>Page ${i + 1}</span><span class="badge bg-warning-subtle text-dark trim-suggested${isSuggested && !isSelected ? '' : ' d-none'}">Suggested</span></label></td><td><span class="badge ${badgeClass}">${scoreLabel}</span></td><td>${flagsHtml}</td></tr>`;
+    }
+    html += '</tbody>';
+    pagesTable.innerHTML = html;
+    pagesTable.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+      input.addEventListener('change', (event) => {
+        if (state.busy) return;
+        const idx = Number(event.target.getAttribute('data-page'));
+        if (!Number.isInteger(idx)) return;
+        if (event.target.checked) state.selectedPages.add(idx);
+        else state.selectedPages.delete(idx);
+        updateRowStyles();
         refreshControls();
+        setNotice('', 'info');
+      });
+    });
+    updateRowStyles();
+  }
+
+  function base64ToBlob(b64, mime) {
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime || 'application/pdf' });
+  }
+
+  function enableDownload(blob, filename) {
+    if (!btnDownload) return;
+    btnDownload.disabled = false;
+    btnDownload.onclick = () => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || 'trimmed.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+  }
+
+  function setBusy(isBusy) {
+    state.busy = !!isBusy;
+    refreshControls();
+  }
+
+  async function analyseFile(file, onProgress) {
+    onProgress?.('Analysing for trim…', true);
+    const form = new FormData();
+    form.append('file', file);
+    const response = await Auth.fetch('/api/pdf/analyze', { method: 'POST', body: form });
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (err) {
+      throw new Error('Failed to parse trim analysis response.');
+    }
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'Trim analysis failed.');
+    }
+    const pageCount = Number(payload.pageCount) || 0;
+    const transactionRange = payload.transactionRange && Number.isInteger(payload.transactionRange.start) && Number.isInteger(payload.transactionRange.end)
+      ? { start: payload.transactionRange.start, end: payload.transactionRange.end }
+      : null;
+    return {
+      pageCount,
+      scores: Array.isArray(payload.scores) ? payload.scores : [],
+      flags: Array.isArray(payload.flags) ? payload.flags : [],
+      transactionRange,
+      minFirst: Number.isFinite(Number(payload.minFirst)) ? Number(payload.minFirst) : undefined,
+      adjMargin: Number.isFinite(Number(payload.adjMargin)) ? Number(payload.adjMargin) : undefined,
+      highThreshold: Number.isFinite(Number(payload.highThreshold)) ? Number(payload.highThreshold) : undefined,
+      lowThreshold: Number.isFinite(Number(payload.lowThreshold)) ? Number(payload.lowThreshold) : undefined,
+      keepAllRatio: Number.isFinite(Number(payload.keepAllRatio)) ? Number(payload.keepAllRatio) : undefined,
+      suggestedKeptPages: Array.isArray(payload.suggestedKeptPages) ? payload.suggestedKeptPages : [],
+    };
+  }
+
+  function makeTrimmedFilename(originalName) {
+    if (!originalName) return 'trimmed.pdf';
+    const dot = originalName.lastIndexOf('.');
+    if (dot === -1) return `${originalName}-trimmed.pdf`;
+    return `${originalName.slice(0, dot)}-trimmed${originalName.slice(dot)}`;
+  }
+
+  async function applySelection() {
+    if (!state.analysis) {
+      setNotice('Analyse the PDF before confirming a selection.', 'danger');
+      return;
+    }
+    if (!state.file) {
+      setNotice('Original PDF unavailable for trimming.', 'danger');
+      return;
+    }
+    const pages = Array.from(state.selectedPages).sort((a, b) => a - b);
+    if (!pages.length) {
+      setNotice('Select at least one page to keep.', 'danger');
+      return;
+    }
+
+    if (pages.length === state.analysis.pageCount) {
+      setNotice('Keeping all pages. Continuing without trimming.', 'info');
+      setMeta('All pages will be processed.');
+      resolveReview(state.file);
+      return;
+    }
+
+    setBusy(true);
+    setMeta('Building trimmed PDF…');
+    setNotice('', 'info');
+    try {
+      const form = new FormData();
+      form.append('file', state.file);
+      form.append('keptPages', JSON.stringify(pages));
+      const response = await Auth.fetch('/api/pdf/apply', { method: 'POST', body: form });
+      let payload = null;
+      try {
+        payload = await response.json();
       } catch (err) {
-        console.error('Trim analyze failed', err);
-        setMeta('Analyze failed: ' + (err?.message || 'Unexpected error'));
-        renderPages();
+        throw new Error('Failed to parse trim response.');
       }
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Unable to apply trim.');
+      }
+      resetPreview();
+      const blob = await base64ToBlob(payload.data_base64, payload.mime);
+      state.trimmedBlob = blob;
+      const filename = payload.filename || makeTrimmedFilename(state.file.name);
+      state.previewUrl = URL.createObjectURL(blob);
+      if (previewFrame) previewFrame.src = state.previewUrl;
+      enableDownload(blob, filename);
+      setMeta('Trim applied successfully.');
+      setNotice('Trim confirmed. Continuing with the trimmed document.', 'success');
+      resolveReview(new File([blob], filename, { type: blob.type || 'application/pdf' }));
+    } catch (err) {
+      console.error('Trim apply failed', err);
+      setNotice(err?.message || 'Unable to trim this PDF right now.', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reanalyse() {
+    if (!state.file) return;
+    try {
+      setBusy(true);
+      setMeta('Re-analysing pages…');
+      setNotice('', 'info');
+      const analysis = await analyseFile(state.file, null);
+      state.analysis = analysis;
+      if (threshold && analysis.highThreshold != null && analysis.highThreshold !== '') {
+        const nextThreshold = Number(analysis.highThreshold);
+        if (!Number.isNaN(nextThreshold)) {
+          threshold.value = String(nextThreshold);
+        }
+      }
+      updateThresholdLabel();
+      state.suggestedPages = normaliseSelectionIndices(analysis.suggestedKeptPages || []);
+      if (!state.suggestedPages.size) {
+        const thresholdValue = Number(threshold?.value);
+        state.suggestedPages = computeSuggestedFromThreshold(thresholdValue);
+      }
+      if (!state.suggestedPages.size && analysis.pageCount) {
+        state.suggestedPages = new Set(Array.from({ length: analysis.pageCount }, (_, i) => i));
+      }
+      state.selectedPages = new Set(state.suggestedPages);
+      renderPages();
+      refreshControls();
+      setMeta('Review suggested pages to keep.');
+      setNotice('Trim suggestions refreshed.', 'info');
+    } catch (err) {
+      console.error('Trim re-analysis failed', err);
+      setNotice(err?.message || 'Unable to refresh trim suggestions.', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function resolveReview(fileForProcessing) {
+    if (typeof state.resolve === 'function') {
+      const resolver = state.resolve;
+      state.resolve = null;
+      state.active = false;
+      resolver(fileForProcessing);
+    }
+  }
+
+  function clearState() {
+    state.active = false;
+    state.file = null;
+    state.analysis = null;
+    state.suggestedPages = new Set();
+    state.selectedPages = new Set();
+    state.resolve = null;
+    setMeta('');
+    setNotice('', 'info');
+    resetPreview();
+    if (pagesTable) pagesTable.innerHTML = '';
+    if (threshold) {
+      threshold.value = '6';
+      threshold.disabled = true;
+    }
+    if (btnApply) btnApply.disabled = true;
+    if (btnKeepAll) btnKeepAll.disabled = true;
+    if (btnReset) btnReset.disabled = true;
+    if (btnAnalyze) btnAnalyze.disabled = true;
+    if (badge) badge.textContent = 'Review required';
+    hideSection();
+  }
+
+  if (threshold) {
+    threshold.addEventListener('input', () => {
+      updateThresholdLabel();
+      if (!state.analysis || state.busy) return;
+      state.suggestedPages = computeSuggestedFromThreshold(Number(threshold.value));
+      if (!state.suggestedPages.size && state.analysis.pageCount) {
+        state.suggestedPages = new Set(Array.from({ length: state.analysis.pageCount }, (_, i) => i));
+      }
+      state.selectedPages = new Set(state.suggestedPages);
+      renderPages();
+      refreshControls();
+      setNotice('Suggestions updated for the new threshold.', 'info');
+    });
+  }
+
+  if (btnApply) {
+    btnApply.addEventListener('click', () => {
+      if (state.busy) return;
+      applySelection();
     });
   }
 
   if (btnKeepAll) {
     btnKeepAll.addEventListener('click', () => {
-      if (!analysis) return;
-      selectedPages = new Set(Array.from({ length: analysis.pageCount }, (_, i) => i));
+      if (!state.analysis || state.busy) return;
+      state.selectedPages = new Set(Array.from({ length: state.analysis.pageCount }, (_, i) => i));
       renderPages();
       refreshControls();
+      setNotice('All pages selected. Confirm to continue without trimming.', 'info');
     });
   }
 
   if (btnReset) {
     btnReset.addEventListener('click', () => {
-      if (!analysis) return;
-      selectedPages = new Set(suggestedPages);
+      if (!state.analysis || state.busy) return;
+      state.selectedPages = new Set(state.suggestedPages);
       renderPages();
       refreshControls();
+      setNotice('', 'info');
     });
   }
 
-  if (btnApply) {
-    btnApply.addEventListener('click', async () => {
-      if (!analysis) {
-        setMeta('Analyze a PDF before applying a selection.');
-        return;
-      }
-      if (!originalFile) {
-        setMeta('Please re-select the PDF to apply trimming.');
-        return;
-      }
-      const pages = Array.from(selectedPages).sort((a, b) => a - b);
-      if (!pages.length) {
-        setMeta('Select at least one page to keep.');
-        return;
-      }
-      setMeta('Building trimmed PDF…');
-      if (btnApply) btnApply.disabled = true;
+  if (btnAnalyze) {
+    btnAnalyze.addEventListener('click', () => {
+      if (state.busy) return;
+      reanalyse();
+    });
+  }
+
+  return {
+    async reviewIfNeeded(file, { onProgress } = {}) {
+      if (!file) return null;
+      clearState();
       try {
-        const form = new FormData();
-        form.append('file', originalFile);
-        form.append('keptPages', JSON.stringify(pages));
-        const response = await fetch('/api/pdf/apply', { method: 'POST', body: form });
-        const payload = await response.json();
-        if (!payload?.ok) {
-          setMeta('Apply failed: ' + (payload?.error || 'Unknown error'));
-          return;
+        const analysis = await analyseFile(file, onProgress);
+        if (!analysis.pageCount || analysis.pageCount <= 4) {
+          onProgress?.('Processing…', true);
+          return file;
         }
-        trimmedBlob = await base64ToBlob(payload.data_base64, payload.mime);
-        if (previewUrl) {
-          URL.revokeObjectURL(previewUrl);
-        }
-        previewUrl = URL.createObjectURL(trimmedBlob);
-        if (trimPreview) {
-          trimPreview.src = previewUrl;
-        }
-        if (btnDownloadTrim) {
-          btnDownloadTrim.disabled = false;
-          btnDownloadTrim.onclick = () => {
-            const link = document.createElement('a');
-            link.href = previewUrl;
-            link.download = payload.filename || 'trimmed.pdf';
-            link.click();
-          };
-        }
-        refreshControls();
-      } catch (err) {
-        console.error('Trim apply failed', err);
-        setMeta('Apply failed: ' + (err?.message || 'Unexpected error'));
-      } finally {
-        if (btnApply && analysis) {
-          btnApply.disabled = selectedPages.size === 0;
-        }
-      }
-    });
-  }
 
-  updateThresholdLabel();
-  renderPages();
-  refreshControls();
-})();
+        state.file = file;
+        state.analysis = analysis;
+        showSection();
+        if (badge) badge.textContent = `${analysis.pageCount} pages`;
+        if (threshold && analysis.highThreshold != null && analysis.highThreshold !== '') {
+          const nextThreshold = Number(analysis.highThreshold);
+          if (!Number.isNaN(nextThreshold)) {
+            threshold.value = String(nextThreshold);
+          }
+        }
+        updateThresholdLabel();
+        state.suggestedPages = normaliseSelectionIndices(analysis.suggestedKeptPages || []);
+        if (!state.suggestedPages.size) {
+          state.suggestedPages = computeSuggestedFromThreshold(Number(threshold?.value));
+        }
+        if (!state.suggestedPages.size && analysis.pageCount) {
+          state.suggestedPages = new Set(Array.from({ length: analysis.pageCount }, (_, i) => i));
+        }
+        state.selectedPages = new Set(state.suggestedPages);
+        renderPages();
+        refreshControls();
+        setMeta('Review the suggested pages to keep before continuing.');
+        setNotice('Page review required because the document is longer than 4 pages.', 'info');
+        onProgress?.('Awaiting trim review…', true);
+        state.active = true;
+        return await new Promise((resolve) => {
+          state.resolve = resolve;
+        });
+      } catch (err) {
+        clearState();
+        throw err;
+      }
+    },
+    reset() {
+      clearState();
+    },
+  };
+}
