@@ -30,6 +30,15 @@ async function callStructuredExtraction(prompt, schema, options = {}) {
   return module.callStructuredExtraction(prompt, schema, options);
 }
 
+async function callOpenAIJson(params) {
+  const module = await loadSharedClient();
+  if (!module.callOpenAIJson) {
+    throw new Error('Shared OpenAI client does not expose callOpenAIJson');
+  }
+  return module.callOpenAIJson(params);
+}
+
 module.exports = {
   callStructuredExtraction,
+  callOpenAIJson,
 };

@@ -18,6 +18,7 @@ const {
   DocumentProcessingError,
 } = require('../services/documents/pipeline/errors');
 const { postDocument, waitForJob, standardize, getStandardization } = require('../services/docupipe.standardize');
+const { standardizeDocupipePayload } = require('../services/jsonStandardization');
 
 const JSON_TEST_ENABLED = toBoolean(process.env.JSON_TEST);
 
@@ -165,6 +166,23 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+router.post('/standardize', express.json({ limit: '4mb' }), async (req, res) => {
+  try {
+    const { docType, payload } = req.body || {};
+    if (!docType || typeof docType !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Missing docType' });
+    }
+    if (payload == null || typeof payload !== 'object') {
+      return res.status(400).json({ ok: false, error: 'Missing payload' });
+    }
+
+    const result = await standardizeDocupipePayload(payload, { docType });
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message || 'JSON standardisation failed' });
   }
 });
 
