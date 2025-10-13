@@ -8,6 +8,22 @@
   const asyncToggleEl = document.getElementById('asyncMode');
 
   const trimReview = createTrimReview();
+  const jsonErrorEditor = createJsonErrorEditor({
+    onApply: (patchedPayload, { data }) => {
+      try {
+        renderResult(patchedPayload, { force: true });
+        clearError();
+        const previewSource = patchedPayload?.data ?? patchedPayload ?? data;
+        if (previewSource) {
+          output.textContent = JSON.stringify(previewSource, null, 2);
+        }
+        setStatus('Manual fixes applied', false);
+      } catch (renderErr) {
+        console.error('Failed to apply manual JSON fixes', renderErr);
+        showError(renderErr?.message || 'Unable to update JSON preview with the new data.');
+      }
+    },
+  });
   const asyncFeatureEnabled = (window.JSON_TEST_ASYNC ?? 'true') !== 'false';
   if (asyncToggleEl && !asyncFeatureEnabled) {
     asyncToggleEl.checked = false;
@@ -75,8 +91,11 @@
     errorBox.textContent = '';
   }
 
+  let lastPayload = null;
+
   async function handleFile(file) {
     clearError();
+    jsonErrorEditor.reset();
     labelBadge?.setAttribute('hidden', '');
     output.textContent = 'Analysing document…';
     setStatus('Checking document…', true);
@@ -88,9 +107,10 @@
       }
     };
 
+    const docTypeEl = document.getElementById('docType');
+    const docType = docTypeEl ? docTypeEl.value : (window.DEFAULT_DOC_TYPE || 'bank');
+
     try {
-      const docTypeEl = document.getElementById('docType');
-      const docType = docTypeEl ? docTypeEl.value : (window.DEFAULT_DOC_TYPE || 'bank');
       const useAsync = !!(asyncToggleEl && asyncToggleEl.checked && asyncFeatureEnabled);
 
       const fileForProcessing = await trimReview.reviewIfNeeded(file, {
@@ -168,23 +188,33 @@
           method: 'POST',
           body: form,
         });
-        if (!res.ok) {
-          const contentType = res.headers.get('content-type') || '';
-          let reason = res.statusText || 'Upload failed';
-          if (contentType.includes('application/json')) {
-            try { reason = (await res.json())?.error || reason; } catch { /* ignore */ }
-          } else {
-            try { reason = await res.text(); } catch { /* ignore */ }
-          }
-          throw new Error(reason || `Upload failed (${res.status})`);
-        }
-        const payload = await res.json();
-        await renderResult(payload, { docType });
+        const payload = await parseJsonTestResponse(res);
+        renderResult(payload);
+        setStatus('Complete', false);
       }
     } catch (err) {
       console.error('JSON test upload failed', err);
-      showError(err.message || 'Upload failed. Please try again.');
-      output.textContent = 'Upload a document to view the parsed JSON payload.';
+      const handled = jsonErrorEditor.openForMissingFields(err, {
+        docType,
+        sourcePayload: err?.payload || err?.data || lastPayload,
+      });
+      if (handled) {
+        showError('Required fields are missing. Complete the highlighted values to finish the JSON record.');
+        const preview = jsonErrorEditor.currentData();
+        if (preview) {
+          try {
+            output.textContent = JSON.stringify(preview, null, 2);
+          } catch (serialiseErr) {
+            console.warn('Unable to preview manual JSON data', serialiseErr);
+            output.textContent = 'Unable to preview current JSON structure.';
+          }
+        } else {
+          output.textContent = 'Fill in the required fields to generate the JSON payload.';
+        }
+      } else {
+        showError(err.message || 'Upload failed. Please try again.');
+        output.textContent = 'Upload a document to view the parsed JSON payload.';
+      }
       setStatus('Ready', false);
     } finally {
       cancelPoll();
@@ -192,43 +222,17 @@
     }
   }
 
-  async function renderResult(payload, { docType } = {}) {
+  function renderResult(payload, { force = false } = {}) {
     if (!payload) return;
-    let processedPayload = payload;
-    const shouldStandardize = typeof docType === 'string' && docType.length > 0;
-    if (shouldStandardize) {
-      setStatus('JSON standardisation in progress…', true);
-      output.textContent = 'Running JSON standardisation…';
-      const body = {
-        docType,
-        payload,
-      };
-      try {
-        const res = await Auth.fetch('/api/json-test/standardize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        let standardJson = null;
-        let parseFailed = false;
-        try {
-          standardJson = await res.json();
-        } catch (err) {
-          parseFailed = true;
-        }
-        if (!res.ok || standardJson?.ok === false) {
-          const message = standardJson?.error || res.statusText || (parseFailed ? 'JSON standardisation failed' : 'JSON standardisation failed');
-          throw new Error(message);
-        }
-        if (typeof standardJson?.data !== 'undefined') {
-          processedPayload = standardJson.data;
-        }
-        setStatus('JSON standardisation complete', false);
-      } catch (err) {
-        setStatus('JSON standardisation failed', false);
-        throw err;
-      }
+    if (!force && payload?.ok === false) {
+      const err = new Error(payload?.error || 'Processing failed');
+      err.code = payload?.code;
+      err.payload = payload;
+      err.data = payload?.data || payload?.record || payload?.payload || null;
+      throw err;
     }
+    lastPayload = payload;
+    jsonErrorEditor.reset();
     try {
       output.textContent = JSON.stringify(processedPayload, null, 2);
     } catch (err) {
@@ -247,6 +251,60 @@
       setStatus('Complete', false);
     }
     return processedPayload;
+  }
+  async function parseJsonTestResponse(res) {
+    if (!res) throw new Error('No response received');
+    const contentType = res.headers?.get?.('content-type') || '';
+    let payload = null;
+    let rawText = null;
+
+    if (contentType.includes('application/json')) {
+      try {
+        payload = await res.json();
+      } catch (err) {
+        throw new Error('Failed to parse server response.');
+      }
+    } else {
+      try {
+        rawText = await res.text();
+        if (rawText) {
+          try {
+            payload = JSON.parse(rawText);
+          } catch (jsonErr) {
+            payload = null;
+          }
+        }
+      } catch (err) {
+        rawText = null;
+      }
+    }
+
+    if (!res.ok || (payload && payload.ok === false)) {
+      const message = payload?.error
+        || payload?.message
+        || rawText
+        || res.statusText
+        || `Upload failed (${res.status})`;
+      const error = new Error(message || 'Upload failed.');
+      if (payload && typeof payload === 'object') {
+        error.payload = payload;
+        error.code = payload.code;
+        error.data = payload.data || payload.record || payload.payload || null;
+      }
+      throw error;
+    }
+
+    if (payload !== null) return payload;
+
+    if (rawText) {
+      try {
+        return JSON.parse(rawText);
+      } catch (err) {
+        return { ok: true, raw: rawText };
+      }
+    }
+
+    throw new Error('Empty response from server.');
   }
 })();
 
@@ -755,5 +813,497 @@ function createTrimReview() {
     reset() {
       clearState();
     },
+  };
+}
+
+
+function createJsonErrorEditor(options = {}) {
+  const overlay = document.getElementById('jsonErrorOverlay');
+  if (!overlay) {
+    return {
+      reset() {},
+      openForMissingFields() { return false; },
+      currentData() { return null; },
+    };
+  }
+
+  const fieldsContainer = overlay.querySelector('[data-json-error-fields]');
+  const messageEl = overlay.querySelector('#jsonErrorMessage');
+  const closeBtn = overlay.querySelector('[data-dismiss-json-error]');
+  const form = overlay.querySelector('#jsonErrorForm');
+  const addFieldBtn = overlay.querySelector('[data-add-json-field]');
+
+  const REQUIRED_FIELDS = {
+    bank: ['period.startDate', 'period.endDate'],
+    payslip: ['period.startDate', 'period.endDate', 'period.issueDate'],
+  };
+
+  const state = {
+    basePayload: null,
+    dataLocation: 'data',
+    data: {},
+    docType: null,
+    message: '',
+    addedFieldCount: 0,
+  };
+
+  function deepClone(value) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (err) {
+      console.warn('Failed to clone value', err);
+      return value;
+    }
+  }
+
+  function detectData(payload) {
+    if (payload == null) return { location: 'self', data: {} };
+    if (typeof payload === 'object') {
+      if (Object.prototype.hasOwnProperty.call(payload, 'data')) {
+        return { location: 'data', data: payload.data };
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'payload')) {
+        return { location: 'payload', data: payload.payload };
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'record')) {
+        return { location: 'record', data: payload.record };
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'result')) {
+        return { location: 'result', data: payload.result };
+      }
+      if (!payload.ok && Object.prototype.hasOwnProperty.call(payload, 'json')) {
+        return { location: 'json', data: payload.json };
+      }
+      return { location: 'self', data: payload };
+    }
+    return { location: 'self', data: payload };
+  }
+
+  function detectValueType(path, value) {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+    if (typeof value === 'object') return 'object';
+    if (typeof value === 'number') return 'number';
+    if (typeof value === 'boolean') return 'boolean';
+    if (typeof value === 'string') {
+      const lower = (path || '').toLowerCase();
+      if (lower.includes('date')) {
+        const iso = toISODate(value);
+        if (iso) return 'date';
+      }
+      return 'string';
+    }
+    return 'string';
+  }
+
+  function toISODate(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  }
+
+  function normaliseDisplayValue(value, type) {
+    if (value == null) return '';
+    if (type === 'date') {
+      const iso = toISODate(value);
+      return iso || '';
+    }
+    if (type === 'object' || type === 'array') {
+      try {
+        return JSON.stringify(value);
+      } catch (err) {
+        return String(value);
+      }
+    }
+    return String(value);
+  }
+
+  function flatten(data, prefix = '') {
+    const entries = [];
+    const pushEntry = (path, value) => {
+      entries.push({ path, value, type: detectValueType(path, value) });
+    };
+
+    if (data === null) {
+      pushEntry(prefix || '(root)', null);
+      return entries;
+    }
+
+    if (typeof data !== 'object') {
+      pushEntry(prefix || '(value)', data);
+      return entries;
+    }
+
+    if (Array.isArray(data)) {
+      if (!data.length) {
+        pushEntry(prefix || '(array)', '');
+        return entries;
+      }
+      data.forEach((value, index) => {
+        const nextPrefix = prefix ? `${prefix}[${index}]` : `[${index}]`;
+        if (value !== null && typeof value === 'object') {
+          entries.push(...flatten(value, nextPrefix));
+        } else {
+          pushEntry(nextPrefix, value);
+        }
+      });
+      return entries;
+    }
+
+    const keys = Object.keys(data);
+    if (!keys.length) {
+      pushEntry(prefix || '(root)', '');
+      return entries;
+    }
+
+    keys.forEach((key) => {
+      const value = data[key];
+      const nextPrefix = prefix ? `${prefix}.${key}` : key;
+      if (value !== null && typeof value === 'object') {
+        entries.push(...flatten(value, nextPrefix));
+      } else {
+        pushEntry(nextPrefix, value);
+      }
+    });
+    return entries;
+  }
+
+  function showOverlay() {
+    overlay.classList.remove('d-none');
+    overlay.style.display = 'flex';
+  }
+
+  function hideOverlay() {
+    overlay.classList.add('d-none');
+    overlay.style.display = 'none';
+    state.basePayload = null;
+    state.dataLocation = 'data';
+    state.data = {};
+    state.docType = null;
+    state.message = '';
+    state.addedFieldCount = 0;
+    if (fieldsContainer) fieldsContainer.innerHTML = '';
+  }
+
+  function splitPath(path) {
+    const segments = [];
+    let buffer = '';
+    let inBracket = false;
+    for (let i = 0; i < path.length; i += 1) {
+      const char = path[i];
+      if (char === '.' && !inBracket) {
+        if (buffer) {
+          segments.push(buffer);
+          buffer = '';
+        }
+        continue;
+      }
+      if (char === '[') {
+        if (buffer) {
+          segments.push(buffer);
+          buffer = '';
+        }
+        inBracket = true;
+        continue;
+      }
+      if (char === ']') {
+        if (buffer) {
+          segments.push(buffer);
+          buffer = '';
+        }
+        inBracket = false;
+        continue;
+      }
+      buffer += char;
+    }
+    if (buffer) segments.push(buffer);
+    return segments;
+  }
+
+  function setByPath(target, path, value) {
+    const segments = splitPath(path);
+    if (!segments.length) return;
+    let current = target;
+    segments.forEach((segment, index) => {
+      const isLast = index === segments.length - 1;
+      const nextSegment = segments[index + 1];
+      const nextIsIndex = nextSegment != null && !Number.isNaN(Number(nextSegment));
+      const isIndex = !Number.isNaN(Number(segment));
+      if (isLast) {
+        if (isIndex && Array.isArray(current)) {
+          current[Number(segment)] = value;
+        } else {
+          current[segment] = value;
+        }
+        return;
+      }
+      if (isIndex) {
+        const idx = Number(segment);
+        if (!Array.isArray(current)) {
+          if (typeof current[segment] !== 'object') {
+            current[segment] = nextIsIndex ? [] : {};
+          }
+          current = current[segment];
+        } else {
+          if (!current[idx] || typeof current[idx] !== 'object') {
+            current[idx] = nextIsIndex ? [] : {};
+          }
+          current = current[idx];
+        }
+      } else {
+        if (!current[segment] || typeof current[segment] !== 'object') {
+          current[segment] = nextIsIndex ? [] : {};
+        }
+        current = current[segment];
+      }
+    });
+  }
+
+  function parseValue(inputValue, type) {
+    if (type === 'number') {
+      const number = Number(inputValue);
+      return Number.isNaN(number) ? null : number;
+    }
+    if (type === 'boolean') {
+      if (typeof inputValue === 'string') {
+        const normalised = inputValue.trim().toLowerCase();
+        if (normalised === 'true') return true;
+        if (normalised === 'false') return false;
+      }
+      return !!inputValue;
+    }
+    if (type === 'date') {
+      return inputValue ? new Date(inputValue).toISOString().slice(0, 10) : '';
+    }
+    if (type === 'json') {
+      try {
+        return JSON.parse(inputValue);
+      } catch (err) {
+        return inputValue;
+      }
+    }
+    if (type === 'null') {
+      return inputValue ? inputValue : null;
+    }
+    if (!type || type === 'auto') {
+      if (inputValue === 'true' || inputValue === 'false') return inputValue === 'true';
+      const number = Number(inputValue);
+      if (!Number.isNaN(number) && inputValue !== '') return number;
+      return inputValue;
+    }
+    return inputValue;
+  }
+
+  function buildFieldRow(entry, required) {
+    const row = document.createElement('div');
+    row.className = 'json-error-field-row';
+
+    const label = document.createElement('label');
+    label.className = 'form-label';
+    label.textContent = entry.path;
+    label.setAttribute('for', `json-error-field-${state.addedFieldCount}`);
+    if (required) {
+      const badge = document.createElement('span');
+      badge.className = 'badge bg-danger-subtle text-danger-emphasis ms-2';
+      badge.textContent = 'Required';
+      label.appendChild(badge);
+    }
+
+    const inputWrapper = document.createElement('div');
+    inputWrapper.className = 'd-flex gap-2 align-items-center';
+
+    const valueInput = document.createElement('input');
+    valueInput.className = 'form-control';
+    valueInput.dataset.type = entry.type;
+    valueInput.dataset.valueInput = 'true';
+    valueInput.id = `json-error-field-${state.addedFieldCount}`;
+    valueInput.placeholder = 'Enter value';
+    valueInput.value = normaliseDisplayValue(entry.value, entry.type);
+    if (required) valueInput.required = true;
+    if (entry.type === 'number') valueInput.type = 'number';
+    else if (entry.type === 'date') valueInput.type = 'date';
+    else valueInput.type = 'text';
+
+    if (entry.type === 'boolean') {
+      valueInput.placeholder = 'true / false';
+    }
+
+    const hiddenPath = document.createElement('input');
+    hiddenPath.type = 'hidden';
+    hiddenPath.dataset.pathInput = 'true';
+    hiddenPath.value = entry.path;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-link text-danger p-0 ms-2';
+    removeBtn.innerHTML = '<i class="bi bi-x-circle"></i>';
+    removeBtn.title = 'Remove field';
+    removeBtn.addEventListener('click', () => row.remove());
+    removeBtn.hidden = required;
+
+    inputWrapper.append(valueInput, removeBtn, hiddenPath);
+    row.append(label, inputWrapper);
+    state.addedFieldCount += 1;
+    return row;
+  }
+
+  function buildCustomFieldRow() {
+    const row = document.createElement('div');
+    row.className = 'json-error-field-row';
+    row.dataset.customField = 'true';
+
+    const label = document.createElement('label');
+    label.className = 'form-label';
+    label.textContent = 'New field';
+    label.setAttribute('for', `json-error-custom-${state.addedFieldCount}`);
+
+    const pathInput = document.createElement('input');
+    pathInput.className = 'form-control';
+    pathInput.placeholder = 'e.g. period.startDate';
+    pathInput.dataset.customPath = 'true';
+    pathInput.required = true;
+
+    const valueInput = document.createElement('input');
+    valueInput.className = 'form-control';
+    valueInput.placeholder = 'Value';
+    valueInput.dataset.type = 'auto';
+    valueInput.dataset.valueInput = 'true';
+    valueInput.id = `json-error-custom-${state.addedFieldCount}`;
+    valueInput.required = true;
+
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'form-select';
+    typeSelect.dataset.typeSelect = 'true';
+    ['string', 'number', 'boolean', 'date', 'json'].forEach((type) => {
+      const option = document.createElement('option');
+      option.value = type;
+      option.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+      typeSelect.appendChild(option);
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-link text-danger p-0';
+    removeBtn.innerHTML = '<i class="bi bi-x-circle"></i>';
+    removeBtn.title = 'Remove field';
+    removeBtn.addEventListener('click', () => row.remove());
+
+    const valueRow = document.createElement('div');
+    valueRow.className = 'd-flex flex-wrap gap-2';
+    valueRow.append(valueInput, typeSelect, removeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'd-flex flex-column gap-2';
+    body.append(pathInput, valueRow);
+
+    row.append(label, body);
+    state.addedFieldCount += 1;
+    return row;
+  }
+
+  function gatherData() {
+    const result = state.data && typeof state.data === 'object' ? deepClone(state.data) : {};
+    if (!fieldsContainer) return result;
+    const rows = fieldsContainer.querySelectorAll('.json-error-field-row');
+    rows.forEach((row) => {
+      const pathInput = row.querySelector('input[data-path-input="true"]');
+      const customPath = row.querySelector('input[data-custom-path="true"]');
+      const select = row.querySelector('select[data-type-select="true"]');
+      const valueInput = row.querySelector('input[data-value-input="true"]');
+      const path = customPath ? customPath.value.trim() : pathInput?.value?.trim();
+      if (!path) return;
+      const type = select ? select.value : valueInput?.dataset.type || 'string';
+      const value = parseValue(valueInput?.value ?? '', type);
+      setByPath(result, path, value);
+    });
+    state.data = deepClone(result);
+    return result;
+  }
+
+  function buildEntries(data, requiredFields) {
+    if (!fieldsContainer) return;
+    fieldsContainer.innerHTML = '';
+    state.addedFieldCount = 0;
+    const entries = flatten(data);
+    const requiredSet = new Set(requiredFields || []);
+    requiredSet.forEach((path) => {
+      if (!entries.some((entry) => entry.path === path)) {
+        entries.push({ path, value: '', type: detectValueType(path, '') });
+      }
+    });
+    entries.forEach((entry) => {
+      const required = requiredSet.has(entry.path);
+      fieldsContainer.appendChild(buildFieldRow(entry, required));
+    });
+  }
+
+  function openForMissingFields(error, { docType = 'bank', sourcePayload = null } = {}) {
+    const message = (error?.message || '').toLowerCase();
+    if (!message) return false;
+    if (!message.includes('missing') && !message.includes('required')) return false;
+
+    const payload = sourcePayload && typeof sourcePayload === 'object'
+      ? deepClone(sourcePayload)
+      : (error?.payload && typeof error.payload === 'object' ? deepClone(error.payload) : null);
+
+    const { location, data } = detectData(payload || {});
+    state.basePayload = payload || {};
+    state.dataLocation = location;
+    state.data = data && typeof data === 'object' ? deepClone(data) : {};
+    state.docType = docType;
+    state.message = error?.message || 'Required fields missing';
+
+    if (messageEl) messageEl.textContent = state.message;
+
+    const requiredList = new Set(REQUIRED_FIELDS[docType] || []);
+    if (message.includes('period')) {
+      requiredList.add('period.startDate');
+      requiredList.add('period.endDate');
+    }
+
+    buildEntries(state.data, Array.from(requiredList));
+    showOverlay();
+    return true;
+  }
+
+  function currentData() {
+    return deepClone(state.data);
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    const updated = gatherData();
+    const payloadClone = state.basePayload ? deepClone(state.basePayload) : {};
+    if (!payloadClone || typeof payloadClone !== 'object' || state.dataLocation === 'self') {
+      options.onApply?.(updated, { data: updated });
+    } else {
+      if (state.dataLocation === 'data') payloadClone.data = updated;
+      else if (state.dataLocation === 'payload') payloadClone.payload = updated;
+      else if (state.dataLocation === 'record') payloadClone.record = updated;
+      else if (state.dataLocation === 'result') payloadClone.result = updated;
+      else if (state.dataLocation === 'json') payloadClone.json = updated;
+      else payloadClone[state.dataLocation] = updated;
+      if (payloadClone && payloadClone.ok === false) payloadClone.ok = true;
+      delete payloadClone.error;
+      delete payloadClone.code;
+      options.onApply?.(payloadClone, { data: updated });
+    }
+    hideOverlay();
+  }
+
+  function handleAddField() {
+    if (!fieldsContainer) return;
+    fieldsContainer.appendChild(buildCustomFieldRow());
+  }
+
+  if (closeBtn) closeBtn.addEventListener('click', hideOverlay);
+  if (form) form.addEventListener('submit', handleSubmit);
+  if (addFieldBtn) addFieldBtn.addEventListener('click', handleAddField);
+
+  return {
+    openForMissingFields,
+    reset: hideOverlay,
+    currentData,
   };
 }

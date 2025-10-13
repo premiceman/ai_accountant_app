@@ -90,6 +90,68 @@
       color: var(--brand);
       font-weight: 600;
     }
+
+    .json-error-overlay {
+      position: fixed;
+      inset: 0;
+      background: color-mix(in srgb, rgba(16, 24, 40, 0.85) 85%, transparent);
+      backdrop-filter: blur(4px);
+      z-index: 1050;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(16px, 4vw, 48px);
+    }
+
+    .json-error-modal {
+      width: min(960px, 100%);
+      max-height: 90vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .json-error-scroll {
+      overflow: auto;
+      padding-right: 4px;
+      max-height: 50vh;
+    }
+
+    .json-error-field-row {
+      border: 1px solid var(--bd-hairline);
+      border-radius: 12px;
+      padding: 1rem;
+      background: var(--bg-surface-2);
+    }
+
+    .json-error-field-row + .json-error-field-row {
+      margin-top: 0.75rem;
+    }
+
+    .json-error-field-row .badge {
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .json-error-field-row .form-label {
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: baseline;
+    }
+
+    .json-error-actions {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .json-error-actions .btn-add-field {
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -177,6 +239,36 @@
       <div class="alert alert-info mt-3 d-none" id="trimReviewNotice"></div>
     </section>
   </main>
+
+  <div class="json-error-overlay d-none" id="jsonErrorOverlay" role="dialog" aria-modal="true" aria-labelledby="jsonErrorTitle">
+    <div class="test-card json-error-modal">
+      <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+          <p class="text-uppercase text-muted fw-semibold mb-1">Manual data completion</p>
+          <h2 class="h4 mb-2" id="jsonErrorTitle">Required JSON fields missing</h2>
+          <p class="text-muted mb-0" id="jsonErrorMessage">Some required fields were missing from the processed JSON. Complete the highlighted items to continue.</p>
+        </div>
+        <button type="button" class="btn btn-outline-secondary" data-dismiss-json-error>
+          <i class="bi bi-x-lg me-1"></i>Close
+        </button>
+      </div>
+      <div class="json-error-scroll" data-json-error-fields></div>
+      <form class="json-error-actions" id="jsonErrorForm">
+        <div class="d-flex flex-wrap align-items-center gap-2 text-muted small">
+          <span class="badge bg-danger-subtle text-danger-emphasis">Required</span>
+          <span>Fields marked as required must be completed before saving.</span>
+        </div>
+        <div class="d-flex flex-wrap gap-2 ms-auto">
+          <button type="button" class="btn btn-outline-secondary btn-add-field" data-add-json-field>
+            <i class="bi bi-plus-lg me-1"></i>Add field
+          </button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check2-circle me-1"></i>Save fixes
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="/js/nav.js" defer></script>
   <script src="/js/mobile-sidebar.js" defer></script>
