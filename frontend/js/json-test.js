@@ -161,7 +161,7 @@
               }
               if (statusJson?.state === 'completed') {
                 cancelPoll();
-                renderResult(statusJson.data);
+                await renderResult(statusJson.data, { docType });
                 resolve();
                 return;
               }
@@ -180,7 +180,6 @@
           poll();
         });
 
-        setStatus('Complete', false);
       } else {
         const form = new FormData();
         form.append('file', fileForProcessing);
@@ -235,18 +234,23 @@
     lastPayload = payload;
     jsonErrorEditor.reset();
     try {
-      output.textContent = JSON.stringify(payload, null, 2);
+      output.textContent = JSON.stringify(processedPayload, null, 2);
     } catch (err) {
       output.textContent = 'Unable to serialise payload.';
     }
-    const label = payload?.classification?.label
-      || payload?.classification?.entry?.label
-      || payload?.classification?.entry?.key
+    const labelSource = processedPayload && typeof processedPayload === 'object' ? processedPayload : payload;
+    const label = labelSource?.classification?.label
+      || labelSource?.classification?.entry?.label
+      || labelSource?.classification?.entry?.key
       || null;
     if (label && labelBadge) {
       labelBadge.textContent = label;
       labelBadge.removeAttribute('hidden');
     }
+    if (!shouldStandardize) {
+      setStatus('Complete', false);
+    }
+    return processedPayload;
   }
   async function parseJsonTestResponse(res) {
     if (!res) throw new Error('No response received');
