@@ -142,29 +142,39 @@
       <pre class="json-output" id="json-test-output">Upload a document to view the parsed JSON payload.</pre>
     </section>
 
-    <section id="trim-lab" style="margin-top:2rem;">
-      <h3>Trim Lab (testing only – does not affect current upload flow)</h3>
-      <input type="file" id="trimFile" accept="application/pdf" />
-      <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.5rem;">
-        <button id="btnTrimAnalyze">Analyze</button>
-        <button id="btnTrimApply" disabled>Apply Selection</button>
-        <button id="btnTrimKeepAll" disabled>Keep all</button>
-        <button id="btnTrimReset" disabled>Reset</button>
+    <section class="test-card mt-4 d-none" id="trim-review">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Trim document</h2>
+          <p class="text-muted mb-0">Long PDFs require a quick page review before we continue processing.</p>
+        </div>
+        <span class="badge bg-warning-subtle text-dark" id="trimReviewBadge">Review required</span>
       </div>
-      <div style="margin-top:0.5rem;">
-        <label for="trimThreshold" class="small">Threshold: <span id="trimThresholdValue">6</span></label>
-        <input type="range" id="trimThreshold" min="0" max="12" value="6" style="width:100%;">
-      </div>
-      <div id="trimMeta" class="mono small" style="margin-top:0.5rem;"></div>
-      <div id="trimPages" class="mono small" style="margin-top:0.5rem;"></div>
-      <div style="display:flex; gap:1rem; margin-top:0.5rem;">
-        <div style="flex:1;">
-          <h4>Trimmed Preview</h4>
-          <iframe id="trimPreview" style="width:100%;height:480px;border:1px solid #ddd;"></iframe>
-          <button id="btnDownloadTrim" disabled>Download trimmed PDF</button>
+      <p id="trimMeta" class="small text-muted mb-3"></p>
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <div class="table-responsive border rounded" style="max-height:320px;">
+            <table class="table table-sm align-middle mb-0" id="trimPages"></table>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <button class="btn btn-primary" id="btnTrimApply" disabled>Confirm selection &amp; continue</button>
+            <button class="btn btn-outline-secondary" id="btnTrimKeepAll" disabled>Keep all pages</button>
+            <button class="btn btn-outline-secondary" id="btnTrimReset" disabled>Reset to suggestions</button>
+            <button class="btn btn-outline-secondary" id="btnTrimAnalyze" disabled>Re-run suggestions</button>
+          </div>
+          <div class="mt-3">
+            <label for="trimThreshold" class="form-label small mb-1">Suggestion sensitivity: <span id="trimThresholdValue">6</span></label>
+            <input type="range" class="form-range" id="trimThreshold" min="0" max="12" value="6" disabled>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="ratio ratio-3x4 border rounded overflow-hidden bg-white">
+            <iframe id="trimPreview" title="Trim preview" allowfullscreen></iframe>
+          </div>
+          <button class="btn btn-outline-primary w-100 mt-3" id="btnDownloadTrim" disabled>Download trimmed PDF</button>
         </div>
       </div>
-      <p class="small">Once validated here, we can pair trimming + standardization as a single workflow.</p>
+      <div class="alert alert-info mt-3 d-none" id="trimReviewNotice"></div>
     </section>
   </main>
 
