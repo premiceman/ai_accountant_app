@@ -1,6 +1,8 @@
 'use strict';
 const express = require('express');
 const multer = require('multer');
+const dayjs = require('dayjs');
+const path = require('path');
 const { postDocument, startStandardize, getJob, getStandardization } = require('../services/docupipe.async');
 const { putObject, buildObjectKey, keyToFileId } = require('../lib/r2'); // reuse existing helpers
 
@@ -22,8 +24,16 @@ router.post('/submit', upload.single('file'), async (req, res) => {
     if (!schemaId) return res.json({ ok:false, error:`Unsupported docType '${docType}' or missing schema env` });
 
     // Save ORIGINAL to R2 (unchanged)
-    const key = buildObjectKey({ originalname: file.originalname || 'document.pdf' });
-    await putObject(key, file.buffer, { contentType: 'application/pdf' });
+    const parsedName = path.parse(file.originalname || 'document.pdf');
+    const key = buildObjectKey({
+      userId: req.user?.id || 'anon',
+      userPrefix: 'json-test',
+      collectionSegment: 'JSON TEST',
+      sessionPrefix: dayjs().format('YYYYMMDD'),
+      originalName: parsedName.name || 'document',
+      extension: parsedName.ext || '.pdf',
+    });
+    await putObject({ key, body: file.buffer, contentType: 'application/pdf' });
     const fileId = keyToFileId(key);
 
     // Start parse
