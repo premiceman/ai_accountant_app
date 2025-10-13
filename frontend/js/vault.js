@@ -4,7 +4,36 @@
   const POLL_INTERVAL_UPLOAD = 3000;
   const POLL_INTERVAL_TILES = 10000;
   const POLL_INTERVAL_LISTS = 15000;
-  const LIGHT_LABELS = { red: 'Waiting', amber: 'Processing', green: 'Complete' };
+  const PROCESS_POLL_INTERVAL = 3000;
+  const STATUS_LABELS = {
+    idle: 'Ready',
+    queued: 'Queued',
+    processing: 'Processing…',
+    completed: 'Completed',
+    failed: 'Failed',
+  };
+  const STATUS_ICONS = {
+    idle: 'bi-pause-circle',
+    queued: 'bi-clock-history',
+    completed: 'bi-check-circle',
+    failed: 'bi-x-octagon',
+  };
+  const LEGACY_STATUS_MAP = {
+    red: 'queued',
+    amber: 'processing',
+    yellow: 'processing',
+    orange: 'processing',
+    green: 'completed',
+    complete: 'completed',
+    completed: 'completed',
+    success: 'completed',
+    error: 'failed',
+    failed: 'failed',
+    waiting: 'queued',
+    pending: 'queued',
+    ready: 'idle',
+  };
+  const TRIM_AUTOTRIM_MESSAGE = 'Document trimmed automatically. Review before processing.';
   const STORAGE_KEY = 'vault.uploadSessions.v1';
 
   const BRAND_THEMES = [
@@ -91,6 +120,8 @@
     viewer: { type: null, context: null, files: [], selectedFileId: null },
   };
 
+  const processingPollers = new Map();
+
   let unauthorised = false;
   let viewerPreviewUrl = null;
   let viewerPreviewToken = 0;
@@ -102,6 +133,29 @@
   let jsonModalClose = null;
   let jsonModalReturnFocus = null;
   let jsonModalStylesInjected = false;
+
+  let trimModal = null;
+  let trimModalDialog = null;
+  let trimModalTitle = null;
+  let trimModalMeta = null;
+  let trimModalList = null;
+  let trimModalLoading = null;
+  let trimModalError = null;
+  let trimModalForm = null;
+  let trimModalApply = null;
+  let trimModalCancel = null;
+  let trimModalClose = null;
+  let trimModalReturnFocus = null;
+  let trimModalStylesInjected = false;
+
+  const trimReviewState = {
+    docId: null,
+    file: null,
+    pageCount: 0,
+    keptPages: new Set(),
+    isLoading: false,
+    isSubmitting: false,
+  };
 
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
@@ -166,6 +220,397 @@
     const number = toNumberLike(value);
     if (number == null) return value == null ? '—' : String(value);
     return number.toLocaleString();
+  }
+
+  function normalisePageCount(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return null;
+    return Math.max(1, Math.round(number));
+  }
+
+  function pickFirstNumber(values) {
+    if (!Array.isArray(values)) return null;
+    for (const value of values) {
+      const number = normalisePageCount(value);
+      if (number != null) return number;
+    }
+    return null;
+  }
+
+  function normalisePageNumbers(value) {
+    const pages = [];
+
+    const addPage = (page) => {
+      const number = Number(page);
+      if (!Number.isFinite(number)) return;
+      const rounded = Math.round(number);
+      if (rounded >= 1) {
+        pages.push(rounded);
+      }
+    };
+
+    const addRange = (start, end) => {
+      const startNumber = Number(start);
+      const endNumber = Number(end);
+      if (!Number.isFinite(startNumber) || !Number.isFinite(endNumber)) return;
+      const startRounded = Math.round(startNumber);
+      const endRounded = Math.round(endNumber);
+      if (startRounded === endRounded) {
+        addPage(startRounded);
+        return;
+      }
+      const step = startRounded < endRounded ? 1 : -1;
+      for (let current = startRounded; step > 0 ? current <= endRounded : current >= endRounded; current += step) {
+        addPage(current);
+      }
+    };
+
+    const parseToken = (token) => {
+      const trimmed = String(token || '').trim();
+      if (!trimmed) return;
+      const rangeMatch = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (rangeMatch) {
+        addRange(Number(rangeMatch[1]), Number(rangeMatch[2]));
+        return;
+      }
+      addPage(trimmed);
+    };
+
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        if (Array.isArray(entry)) {
+          entry.forEach(parseToken);
+          return;
+        }
+        if (entry && typeof entry === 'object') {
+          if ('start' in entry && 'end' in entry) {
+            addRange(entry.start, entry.end);
+            return;
+          }
+          if ('page' in entry) {
+            addPage(entry.page);
+            return;
+          }
+        }
+        parseToken(entry);
+      });
+    } else if (value && typeof value === 'object') {
+      if ('start' in value && 'end' in value) {
+        addRange(value.start, value.end);
+      } else if ('page' in value) {
+        addPage(value.page);
+      } else if (Symbol.iterator in value) {
+        Array.from(value).forEach(parseToken);
+      }
+    } else if (typeof value === 'string') {
+      value.split(/[\s,]+/).forEach(parseToken);
+    } else {
+      parseToken(value);
+    }
+
+    const unique = Array.from(new Set(pages)).filter((page) => page >= 1);
+    unique.sort((a, b) => a - b);
+    return unique;
+  }
+
+  function ensureObject(value) {
+    return value && typeof value === 'object' ? value : {};
+  }
+
+  function ensureFileMeta(file) {
+    if (!file) return {};
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    const meta = ensureObject(raw.meta);
+    raw.meta = meta;
+    return meta;
+  }
+
+  function normaliseStatus(value, fallback = 'queued') {
+    if (!value && value !== 0) return fallback;
+    if (typeof value === 'object' && value !== null) {
+      const statusValue = value.status || value.state || value.phase;
+      if (statusValue) return normaliseStatus(statusValue, fallback);
+    }
+    const input = String(value || '').trim().toLowerCase();
+    if (!input) return fallback;
+    if (STATUS_LABELS[input]) return input;
+    if (LEGACY_STATUS_MAP[input]) return LEGACY_STATUS_MAP[input];
+    return fallback;
+  }
+
+  function normaliseProcessingState(value, fallback = 'queued') {
+    const info = ensureObject(typeof value === 'object' ? value : {});
+    info.status = normaliseStatus(value && typeof value === 'object' ? value.status || value.state || value : value, fallback);
+    return info;
+  }
+
+  function createStatusIndicator(label, stateValue) {
+    const info = normaliseProcessingState(stateValue, 'queued');
+    const statusValue = info.status || 'queued';
+    const indicator = document.createElement('span');
+    indicator.className = 'status-indicator';
+    indicator.dataset.state = statusValue;
+    indicator.setAttribute('role', 'status');
+    indicator.setAttribute('tabindex', '0');
+    const labelText = `${label}: ${STATUS_LABELS[statusValue] || STATUS_LABELS.queued}`;
+    indicator.setAttribute('aria-label', labelText);
+    indicator.title = labelText;
+
+    let icon;
+    if (statusValue === 'processing') {
+      icon = document.createElement('span');
+      icon.className = 'spinner-border spinner-border-sm';
+      icon.setAttribute('role', 'presentation');
+      icon.setAttribute('aria-hidden', 'true');
+    } else {
+      icon = document.createElement('i');
+      const iconClass = STATUS_ICONS[statusValue] || STATUS_ICONS.queued;
+      icon.className = `bi ${iconClass}`;
+      icon.setAttribute('aria-hidden', 'true');
+    }
+
+    const text = document.createElement('span');
+    text.className = 'status-indicator__label';
+    text.textContent = STATUS_LABELS[statusValue] || STATUS_LABELS.queued;
+
+    indicator.append(icon, text);
+    return indicator;
+  }
+
+  function resolveDocId(input) {
+    if (!input) return null;
+    const source = input.raw && typeof input.raw === 'object' ? input.raw : input;
+    const candidates = [
+      input.docId,
+      input.documentId,
+      input.id,
+      source?.docId,
+      source?.documentId,
+      source?.id,
+      source?.fileId,
+      source?.storage?.fileId,
+      source?.processing?.docId,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return null;
+  }
+
+  function resolveDocClass(input) {
+    if (!input) return null;
+    const source = input.raw && typeof input.raw === 'object' ? input.raw : input;
+    const candidates = [
+      source?.meta?.docClass,
+      source?.meta?.doc_class,
+      source?.docClass,
+      source?.doc_class,
+      source?.classification?.docClass,
+      source?.classification?.doc_class,
+      source?.docType,
+      source?.documentType,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim().toLowerCase();
+      }
+    }
+    return null;
+  }
+
+  function docHasWarning(input) {
+    const source = input && input.raw && typeof input.raw === 'object' ? input.raw : input;
+    if (!source) return false;
+    if (source.ui && source.ui.warning) return true;
+    const meta = ensureObject(source.meta);
+    const trimRequired = meta.trim_required;
+    const reviewState = String(meta.trim_review_state || '').trim().toLowerCase();
+    if (trimRequired === false || reviewState === 'completed') return false;
+    if (trimRequired === true) return true;
+    if (reviewState === 'pending' || reviewState === 'required') return true;
+    const pageCount = pickFirstNumber([
+      meta.page_count_original,
+      meta.pageCountOriginal,
+      meta.originalPageCount,
+      meta.original_page_count,
+      meta.page_count,
+      meta.pageCount,
+      meta.total_pages,
+      meta.totalPages,
+    ]);
+    return pageCount != null && pageCount > 5;
+  }
+
+  function getViewerFiles() {
+    return Array.isArray(state.viewer.files) ? state.viewer.files : [];
+  }
+
+  function findViewerFileByDocId(docId) {
+    if (!docId) return null;
+    const normalised = String(docId).trim();
+    if (!normalised) return null;
+    return getViewerFiles().find((file) => resolveDocId(file) === normalised) || null;
+  }
+
+  function applyProcessingUpdate(target, updates = {}) {
+    const file = typeof target === 'string' ? findViewerFileByDocId(target) : target;
+    if (!file) return null;
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    const processing = normaliseProcessingState(raw.processing || file.processingInfo || {}, 'queued');
+    if (updates.processing && typeof updates.processing === 'object') {
+      Object.assign(processing, updates.processing);
+    }
+    if (updates.status) {
+      processing.status = normaliseStatus(updates.status, processing.status || 'queued');
+    }
+    processing.status = normaliseStatus(processing.status, 'queued');
+    raw.processing = processing;
+    file.processingInfo = processing;
+    file.processingStatus = processing.status;
+    file.processing = processing.status;
+    if (updates.meta && typeof updates.meta === 'object') {
+      raw.meta = { ...ensureObject(raw.meta), ...updates.meta };
+    }
+    if (updates.result && typeof updates.result === 'object') {
+      raw.result = { ...ensureObject(raw.result), ...updates.result };
+    }
+    if (updates.ui && typeof updates.ui === 'object') {
+      raw.ui = { ...ensureObject(raw.ui), ...updates.ui };
+    }
+    return file;
+  }
+
+  function appendUiMessage(file, message) {
+    if (!file || !message) return;
+    const raw = ensureObject(file.raw);
+    const ui = ensureObject(raw.ui);
+    const messages = Array.isArray(ui.messages) ? ui.messages.slice() : [];
+    if (!messages.includes(message)) {
+      messages.push(message);
+      ui.messages = messages;
+      raw.ui = ui;
+    }
+  }
+
+  function clearTrimWarning(file) {
+    if (!file) return;
+    const raw = ensureObject(file.raw);
+    const ui = ensureObject(raw.ui);
+    if (Array.isArray(ui.messages)) {
+      ui.messages = ui.messages.filter((message) => message !== TRIM_AUTOTRIM_MESSAGE);
+    }
+    ui.warning = false;
+    raw.ui = ui;
+  }
+
+  function withButtonSpinner(button, label) {
+    if (!button) return () => {};
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ${label}`;
+    return () => {
+      button.innerHTML = original;
+      button.disabled = false;
+    };
+  }
+
+  async function requestAutoTrim(file, docId) {
+    if (!docId) {
+      throw new Error('Document identifier unavailable for trimming.');
+    }
+    const response = await apiFetch('/autotrim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docId }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || 'Auto-trim failed');
+    }
+    const trim = ensureObject(payload.trim);
+    const trimRequired = Boolean(payload.trimRequired);
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    applyProcessingUpdate(file, {
+      status: trimRequired ? 'idle' : 'queued',
+      processing: { provider: 'docupipe' },
+      meta: {
+        page_count_original: trim.originalPageCount ?? trim.page_count_original ?? raw.meta?.page_count_original,
+        pages_kept: trim.keptPages ?? trim.pages_kept ?? raw.meta?.pages_kept,
+        trim_required: trimRequired,
+        trim_review_state: trimRequired ? 'pending' : 'skipped',
+      },
+      ui: { warning: trimRequired },
+    });
+    if (trimRequired) {
+      appendUiMessage(file, TRIM_AUTOTRIM_MESSAGE);
+    }
+    return { trim, trimRequired };
+  }
+
+  function stopProcessingPoll(docId) {
+    if (!docId) return;
+    const timer = processingPollers.get(docId);
+    if (timer) {
+      clearTimeout(timer);
+      processingPollers.delete(docId);
+    }
+  }
+
+  function stopAllProcessingPolls() {
+    processingPollers.forEach((timer) => clearTimeout(timer));
+    processingPollers.clear();
+  }
+
+  function scheduleProcessingPoll(docId) {
+    stopProcessingPoll(docId);
+    const timer = setTimeout(() => {
+      pollProcessingStatus(docId).catch((error) => console.warn('Processing poll error', error));
+    }, PROCESS_POLL_INTERVAL);
+    processingPollers.set(docId, timer);
+  }
+
+  async function pollProcessingStatus(docId) {
+    if (!docId) return;
+    stopProcessingPoll(docId);
+    const file = findViewerFileByDocId(docId);
+    if (!file) return;
+    try {
+      const response = await apiFetch(`/status?docId=${encodeURIComponent(docId)}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || response.statusText || 'Status check failed');
+      }
+      if (payload?.state === 'completed') {
+        applyProcessingUpdate(file, { status: 'completed' });
+        renderViewerFiles();
+        return;
+      }
+      if (payload?.state === 'failed' || payload?.ok === false) {
+        const errorMessage = payload?.error || 'Processing failed';
+        applyProcessingUpdate(file, {
+          status: 'failed',
+          processing: { error: errorMessage },
+        });
+        appendUiMessage(file, errorMessage);
+        renderViewerFiles();
+        return;
+      }
+      scheduleProcessingPoll(docId);
+    } catch (error) {
+      console.warn('Processing status poll failed', error);
+      appendUiMessage(file, error?.message || 'Processing status check failed');
+      renderViewerFiles();
+    }
+  }
+
+  function startProcessingPoll(docId) {
+    if (!docId) return;
+    pollProcessingStatus(docId).catch((error) => console.warn('Initial processing poll failed', error));
   }
 
   function pickMetric(metrics, keys) {
@@ -256,8 +701,8 @@
     }
 
     const records = Array.from(state.files.values());
-    const uploadCompleted = records.filter((file) => file.upload === 'green').length;
-    const processingCompleted = records.filter((file) => file.processing === 'green').length;
+    const uploadCompleted = records.filter((file) => normaliseStatus(file.upload, 'completed') === 'completed').length;
+    const processingCompleted = records.filter((file) => normaliseStatus(file.processing, 'queued') === 'completed').length;
 
     if (uploadCompleted < totalFiles) {
       const phase = `Uploading files (${uploadCompleted}/${totalFiles})`;
@@ -278,6 +723,7 @@
   function closeViewer() {
     if (!viewerRoot) return;
     viewerPreviewToken += 1;
+    stopAllProcessingPolls();
     viewerRoot.setAttribute('aria-hidden', 'true');
     if (viewerFrame) {
       viewerFrame.src = 'about:blank';
@@ -363,7 +809,9 @@
       .vault-json-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
       .vault-json-modal__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px; }
       .vault-json-modal__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
-      .vault-json-modal__meta { padding: 12px 20px 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); display: flex; flex-wrap: wrap; gap: 8px 12px; }
+      .vault-json-modal__meta { padding: 12px 20px 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); display: flex; flex-direction: column; gap: 12px; max-height: 160px; overflow: auto; }
+      .vault-json-modal__meta-item { display: flex; flex-direction: column; gap: 4px; }
+      .vault-json-modal__meta-item code { display: block; white-space: pre-wrap; font-size: 0.75rem; }
       .vault-json-modal__content { flex: 1; margin: 0; padding: 16px 20px 20px; background: rgba(15, 23, 42, 0.03); font-family: 'SFMono-Regular', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.85rem; line-height: 1.45; overflow: auto; white-space: pre-wrap; word-break: break-word; color: inherit; }
     `;
     document.head.appendChild(style);
@@ -465,6 +913,73 @@
     return Object.keys(payload).length ? payload : null;
   }
 
+  async function showProcessedJson(file, trigger) {
+    const docId = resolveDocId(file);
+    if (!docId) {
+      window.alert('Processed JSON is unavailable for this document.');
+      return;
+    }
+
+    const restore = trigger ? withButtonSpinner(trigger, 'Loading…') : () => {};
+    try {
+      const response = await apiFetch(`/json?docId=${encodeURIComponent(docId)}`, { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok || typeof payload.json === 'undefined') {
+        throw new Error(payload?.error || 'Processed JSON unavailable');
+      }
+
+      const modal = ensureJsonModal();
+      if (!modal || !jsonModalContent) {
+        throw new Error('Unable to display JSON right now.');
+      }
+
+      if (jsonModalTitle) {
+        jsonModalTitle.textContent = file?.title ? `${file.title} — Processed JSON` : 'Processed JSON';
+      }
+      if (jsonModalMeta) {
+        jsonModalMeta.innerHTML = '';
+        const sections = [
+          ['Meta', ensureObject(file.raw?.meta)],
+          ['Processing', ensureObject(file.raw?.processing)],
+          ['Result', ensureObject(file.raw?.result)],
+        ];
+        sections.forEach(([label, data]) => {
+          if (!data || !Object.keys(data).length) return;
+          const item = document.createElement('div');
+          item.className = 'vault-json-modal__meta-item';
+          const name = document.createElement('strong');
+          name.textContent = `${label}:`;
+          const value = document.createElement('code');
+          value.textContent = JSON.stringify(data, null, 2);
+          item.append(name, value);
+          jsonModalMeta.appendChild(item);
+        });
+        jsonModalMeta.hidden = jsonModalMeta.childElementCount === 0;
+        jsonModalMeta.scrollTop = 0;
+      }
+
+      try {
+        jsonModalContent.textContent = JSON.stringify(payload.json, null, 2);
+      } catch (error) {
+        console.error('Failed to serialise processed JSON payload', error);
+        jsonModalContent.textContent = 'Unable to serialise processed JSON payload.';
+      }
+      jsonModalContent.scrollTop = 0;
+
+      jsonModalReturnFocus = trigger || null;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      if (jsonModalClose) {
+        jsonModalClose.focus();
+      }
+    } catch (error) {
+      console.error('Processed JSON preview failed', error);
+      window.alert(error.message || 'Unable to load processed JSON right now.');
+    } finally {
+      restore();
+    }
+  }
+
   function showJsonForFile(file, trigger) {
     if (!jsonTestEnabled) return;
     const payload = buildJsonPayload(file);
@@ -509,6 +1024,573 @@
     }
   }
 
+  function injectTrimModalStyles() {
+    if (trimModalStylesInjected) return;
+    trimModalStylesInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .vault-trim-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: var(--viewer-overlay, rgba(15, 23, 42, 0.45)); z-index: 1250; }
+      .vault-trim-modal.is-visible { display: flex; }
+      .vault-trim-modal__dialog { position: relative; width: min(520px, 100%); max-height: min(90vh, 640px); background: var(--viewer-bg, rgba(255, 255, 255, 0.98)); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid var(--vault-border, rgba(15, 23, 42, 0.08)); box-shadow: var(--vault-shadow, 0 16px 48px rgba(15, 23, 42, 0.12)); display: flex; flex-direction: column; outline: none; }
+      .vault-trim-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      .vault-trim-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
+      .vault-trim-modal__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; padding: 4px; cursor: pointer; }
+      .vault-trim-modal__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
+      .vault-trim-modal__form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+      .vault-trim-modal__body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; flex: 1; overflow: hidden; }
+      .vault-trim-modal__description { margin: 0; font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); }
+      .vault-trim-modal__meta { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .vault-trim-modal__loading { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .vault-trim-modal__error { margin: 0; font-size: 0.85rem; color: var(--light-red, #ef4444); }
+      .vault-trim-modal__pages { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; padding: 12px; border-radius: 12px; border: 1px solid rgba(15, 23, 42, 0.08); background: rgba(15, 23, 42, 0.03); overflow: auto; min-height: 120px; }
+      .vault-trim-modal__page { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; }
+      .vault-trim-modal__page input { cursor: pointer; }
+      .vault-trim-modal__empty { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .vault-trim-modal__footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 20px; border-top: 1px solid rgba(15, 23, 42, 0.08); }
+      @media (max-width: 600px) { .vault-trim-modal { padding: 16px; } .vault-trim-modal__dialog { width: 100%; max-height: 100vh; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureTrimModal() {
+    if (trimModal) return trimModal;
+    injectTrimModalStyles();
+
+    let modal = document.getElementById('vault-trim-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.className = 'vault-trim-modal';
+      modal.id = 'vault-trim-modal';
+      modal.setAttribute('aria-hidden', 'true');
+      modal.setAttribute('hidden', '');
+
+      const dialog = document.createElement('div');
+      dialog.className = 'vault-trim-modal__dialog';
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', 'vault-trim-modal-title');
+      dialog.setAttribute('aria-describedby', 'vault-trim-modal-description');
+      dialog.tabIndex = -1;
+
+      const header = document.createElement('header');
+      header.className = 'vault-trim-modal__header';
+
+      const title = document.createElement('h4');
+      title.className = 'vault-trim-modal__title';
+      title.id = 'vault-trim-modal-title';
+      title.textContent = 'Review Trim';
+
+      const closeButton = document.createElement('button');
+      closeButton.type = 'button';
+      closeButton.className = 'vault-trim-modal__close';
+      closeButton.setAttribute('aria-label', 'Close trim review');
+      closeButton.textContent = '×';
+
+      header.append(title, closeButton);
+
+      const form = document.createElement('form');
+      form.className = 'vault-trim-modal__form';
+      form.id = 'vault-trim-modal-form';
+
+      const body = document.createElement('div');
+      body.className = 'vault-trim-modal__body';
+
+      const description = document.createElement('p');
+      description.className = 'vault-trim-modal__description';
+      description.id = 'vault-trim-modal-description';
+      description.textContent = 'Choose which pages to keep before processing. Unselected pages will be removed.';
+
+      const meta = document.createElement('p');
+      meta.className = 'vault-trim-modal__meta muted';
+      meta.hidden = true;
+
+      const loading = document.createElement('p');
+      loading.className = 'vault-trim-modal__loading muted';
+      loading.hidden = true;
+      loading.textContent = 'Loading page suggestions…';
+
+      const error = document.createElement('p');
+      error.className = 'vault-trim-modal__error';
+      error.hidden = true;
+
+      const pages = document.createElement('div');
+      pages.className = 'vault-trim-modal__pages';
+
+      body.append(description, meta, loading, error, pages);
+
+      const footer = document.createElement('footer');
+      footer.className = 'vault-trim-modal__footer';
+
+      const cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.className = 'btn btn-outline-secondary vault-trim-modal__cancel';
+      cancelButton.textContent = 'Cancel';
+
+      const applyButton = document.createElement('button');
+      applyButton.type = 'submit';
+      applyButton.className = 'btn btn-primary vault-trim-modal__apply';
+      applyButton.textContent = 'Apply & Queue';
+      applyButton.disabled = true;
+
+      footer.append(cancelButton, applyButton);
+      form.append(body, footer);
+      dialog.append(header, form);
+      modal.appendChild(dialog);
+      document.body.appendChild(modal);
+    }
+
+    trimModal = modal;
+    trimModalDialog = modal.querySelector('.vault-trim-modal__dialog');
+    if (trimModalDialog && !trimModalDialog.hasAttribute('tabindex')) {
+      trimModalDialog.tabIndex = -1;
+    }
+    trimModalTitle = modal.querySelector('.vault-trim-modal__title');
+    trimModalMeta = modal.querySelector('.vault-trim-modal__meta');
+    trimModalList = modal.querySelector('.vault-trim-modal__pages');
+    trimModalLoading = modal.querySelector('.vault-trim-modal__loading');
+    trimModalError = modal.querySelector('.vault-trim-modal__error');
+    trimModalForm = modal.querySelector('.vault-trim-modal__form');
+    trimModalApply = modal.querySelector('.vault-trim-modal__apply') || modal.querySelector('.vault-trim-modal__form button[type="submit"]');
+    trimModalCancel = modal.querySelector('.vault-trim-modal__cancel');
+    trimModalClose = modal.querySelector('.vault-trim-modal__close');
+
+    if (!modal.dataset.trimInitialised) {
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+          hideTrimModal();
+        }
+      });
+      if (trimModalCancel) {
+        trimModalCancel.addEventListener('click', (event) => {
+          event.preventDefault();
+          hideTrimModal();
+        });
+      }
+      if (trimModalClose) {
+        trimModalClose.addEventListener('click', (event) => {
+          event.preventDefault();
+          hideTrimModal();
+        });
+      }
+      if (trimModalForm) {
+        trimModalForm.addEventListener('submit', (event) => {
+          event.preventDefault();
+          submitTrimReview();
+        });
+      }
+      modal.dataset.trimInitialised = 'true';
+    }
+
+    return modal;
+  }
+
+  function updateTrimModalMeta() {
+    if (!trimModalMeta) return;
+    const file = trimReviewState.file;
+    const raw = ensureObject(file?.raw);
+    const parts = [];
+    const docParts = [];
+    if (file?.title) docParts.push(file.title);
+    if (file?.subtitle) docParts.push(file.subtitle);
+    if (!docParts.length && raw?.originalName) docParts.push(raw.originalName);
+    if (!docParts.length && file?.originalName) docParts.push(file.originalName);
+    if (docParts.length) {
+      parts.push(docParts.join(' — '));
+    }
+    const pageCount = trimReviewState.pageCount;
+    if (pageCount) {
+      parts.push(`${pageCount} page${pageCount === 1 ? '' : 's'}`);
+    }
+    const keptCount = trimReviewState.keptPages instanceof Set ? trimReviewState.keptPages.size : 0;
+    if (keptCount) {
+      parts.push(`Keeping ${keptCount} page${keptCount === 1 ? '' : 's'}`);
+    }
+    trimModalMeta.textContent = parts.join(' • ');
+    trimModalMeta.hidden = parts.length === 0;
+  }
+
+  function updateTrimModalApplyState() {
+    if (trimModalApply) {
+      trimModalApply.disabled = trimReviewState.keptPages.size === 0 || trimReviewState.isSubmitting;
+    }
+    if (trimModalError && trimModalError.dataset && trimModalError.dataset.trimContext === 'selection' && trimReviewState.keptPages.size > 0) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      trimModalError.dataset.trimContext = '';
+    }
+  }
+
+  function renderTrimModalPages() {
+    if (!trimModalList) return;
+    trimModalList.innerHTML = '';
+    if (!(trimReviewState.keptPages instanceof Set)) {
+      trimReviewState.keptPages = new Set();
+    }
+    const { pageCount, keptPages } = trimReviewState;
+    if (!pageCount || pageCount < 1) {
+      const empty = document.createElement('p');
+      empty.className = 'vault-trim-modal__empty';
+      empty.textContent = 'Page information unavailable.';
+      trimModalList.appendChild(empty);
+      updateTrimModalApplyState();
+      updateTrimModalMeta();
+      return;
+    }
+
+    for (let page = 1; page <= pageCount; page += 1) {
+      const label = document.createElement('label');
+      label.className = 'vault-trim-modal__page';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = String(page);
+      checkbox.checked = keptPages.has(page);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          keptPages.add(page);
+        } else {
+          keptPages.delete(page);
+        }
+        updateTrimModalMeta();
+        updateTrimModalApplyState();
+      });
+
+      const caption = document.createElement('span');
+      caption.textContent = `Page ${page}`;
+
+      label.append(checkbox, caption);
+      trimModalList.appendChild(label);
+    }
+
+    updateTrimModalMeta();
+    updateTrimModalApplyState();
+  }
+
+  function focusFirstTrimCheckbox() {
+    if (!trimModalList) return;
+    const target =
+      trimModalList.querySelector('input[type="checkbox"]:checked') ||
+      trimModalList.querySelector('input[type="checkbox"]');
+    if (target && typeof target.focus === 'function') {
+      requestAnimationFrame(() => {
+        try {
+          target.focus();
+        } catch (error) {
+          console.warn('Failed to focus trim checkbox', error);
+        }
+      });
+    }
+  }
+
+  async function prepareTrimReviewData(file, docId) {
+    const resolvedFile = findViewerFileByDocId(docId) || file;
+    if (!resolvedFile) {
+      throw new Error('Document unavailable for trim review.');
+    }
+    const meta = ensureFileMeta(resolvedFile);
+
+    let pageCount = pickFirstNumber([
+      meta.page_count_original,
+      meta.pageCountOriginal,
+      meta.originalPageCount,
+      meta.original_page_count,
+      meta.page_count,
+      meta.pageCount,
+      meta.total_pages,
+      meta.totalPages,
+    ]);
+
+    let keptPages = normalisePageNumbers(
+      meta.pages_kept ?? meta.pagesKept ?? meta.keptPages ?? meta.trim_pages_kept ?? meta.trimPagesKept ?? meta.pages
+    );
+
+    if ((!pageCount || !keptPages.length) && docId) {
+      const { trim } = await requestAutoTrim(resolvedFile, docId);
+      const refreshedMeta = ensureFileMeta(resolvedFile);
+      pageCount =
+        pickFirstNumber([
+          refreshedMeta.page_count_original,
+          refreshedMeta.pageCountOriginal,
+          refreshedMeta.originalPageCount,
+          refreshedMeta.original_page_count,
+          trim?.originalPageCount,
+          trim?.page_count_original,
+        ]) || pageCount;
+      const updatedPages =
+        refreshedMeta.pages_kept ??
+        refreshedMeta.pagesKept ??
+        refreshedMeta.keptPages ??
+        trim?.keptPages ??
+        trim?.pages_kept;
+      keptPages = normalisePageNumbers(updatedPages);
+      renderViewerFiles();
+      queueRefresh();
+    }
+
+    if (keptPages.length) {
+      const maxPage = Math.max(...keptPages);
+      if (!pageCount || maxPage > pageCount) {
+        pageCount = maxPage;
+      }
+    }
+
+    if (!pageCount) {
+      const fallbackCount = pickFirstNumber([
+        meta.page_count_trimmed,
+        meta.pageCountTrimmed,
+        meta.pages_total,
+        meta.pagesTotal,
+      ]);
+      if (fallbackCount) pageCount = fallbackCount;
+    }
+
+    if (!pageCount) {
+      throw new Error('Page information unavailable for this document.');
+    }
+
+    if (!keptPages.length) {
+      keptPages = Array.from({ length: pageCount }, (_, index) => index + 1);
+    }
+
+    return { file: resolvedFile, pageCount, keptPages };
+  }
+
+  function hideTrimModal() {
+    if (!trimModal) return;
+    trimModal.classList.remove('is-visible');
+    trimModal.setAttribute('aria-hidden', 'true');
+    trimModal.setAttribute('hidden', '');
+    if (trimModalForm) {
+      trimModalForm.hidden = true;
+    }
+    if (trimModalLoading) {
+      trimModalLoading.hidden = true;
+    }
+    if (trimModalError) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      if (trimModalError.dataset) trimModalError.dataset.trimContext = '';
+    }
+    if (trimModalMeta) {
+      trimModalMeta.hidden = true;
+      trimModalMeta.textContent = '';
+    }
+    if (trimModalList) {
+      trimModalList.innerHTML = '';
+    }
+    trimReviewState.docId = null;
+    trimReviewState.file = null;
+    trimReviewState.pageCount = 0;
+    trimReviewState.keptPages = new Set();
+    trimReviewState.isLoading = false;
+    trimReviewState.isSubmitting = false;
+    const returnTarget = trimModalReturnFocus;
+    trimModalReturnFocus = null;
+    if (returnTarget && typeof returnTarget.focus === 'function') {
+      requestAnimationFrame(() => {
+        try {
+          returnTarget.focus();
+        } catch (error) {
+          console.warn('Failed to restore focus after closing trim review', error);
+        }
+      });
+    }
+  }
+
+  async function openTrimReview(file, trigger) {
+    if (trimReviewState.isLoading) return;
+    const docId = resolveDocId(file);
+    if (!docId) {
+      window.alert('Unable to review trim because the document identifier is unavailable.');
+      return;
+    }
+
+    const modal = ensureTrimModal();
+    if (!modal) {
+      window.alert('Trim review unavailable right now.');
+      return;
+    }
+
+    trimReviewState.isLoading = true;
+    trimReviewState.docId = docId;
+    trimReviewState.file = findViewerFileByDocId(docId) || file;
+    trimReviewState.pageCount = 0;
+    trimReviewState.keptPages = new Set();
+    trimReviewState.isSubmitting = false;
+
+    trimModalReturnFocus = trigger || document.activeElement || null;
+
+    if (trimModalTitle) {
+      trimModalTitle.textContent = 'Review Trim';
+    }
+    if (trimModalError) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      if (trimModalError.dataset) trimModalError.dataset.trimContext = '';
+    }
+    if (trimModalLoading) {
+      trimModalLoading.hidden = false;
+      trimModalLoading.textContent = 'Loading page suggestions…';
+    }
+    if (trimModalForm) {
+      trimModalForm.hidden = true;
+    }
+    if (trimModalApply) {
+      trimModalApply.disabled = true;
+    }
+    if (trimModalCancel) {
+      trimModalCancel.disabled = false;
+    }
+    if (trimModalMeta) {
+      trimModalMeta.textContent = '';
+      trimModalMeta.hidden = true;
+    }
+
+    updateTrimModalMeta();
+
+    modal.classList.add('is-visible');
+    modal.removeAttribute('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    if (trimModalDialog) {
+      trimModalDialog.focus();
+    }
+
+    try {
+      const { file: resolvedFile, pageCount, keptPages } = await prepareTrimReviewData(trimReviewState.file, docId);
+      trimReviewState.file = resolvedFile;
+      trimReviewState.pageCount = pageCount;
+      trimReviewState.keptPages = new Set(keptPages);
+      if (trimModalLoading) {
+        trimModalLoading.hidden = true;
+      }
+      if (trimModalForm) {
+        trimModalForm.hidden = false;
+      }
+      renderTrimModalPages();
+      focusFirstTrimCheckbox();
+    } catch (error) {
+      console.error('Failed to load trim review data', error);
+      if (trimModalLoading) {
+        trimModalLoading.hidden = true;
+      }
+      if (trimModalError) {
+        trimModalError.textContent = error.message || 'Unable to load trim suggestions right now.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'load';
+      }
+      updateTrimModalApplyState();
+    } finally {
+      trimReviewState.isLoading = false;
+    }
+  }
+
+  async function submitTrimReview() {
+    if (trimReviewState.isSubmitting) return;
+    const docId = trimReviewState.docId;
+    if (!docId) {
+      hideTrimModal();
+      return;
+    }
+    const kept = Array.from(trimReviewState.keptPages).sort((a, b) => a - b);
+    if (!kept.length) {
+      if (trimModalError) {
+        trimModalError.textContent = 'Select at least one page to keep.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'selection';
+      }
+      updateTrimModalApplyState();
+      return;
+    }
+
+    const file = findViewerFileByDocId(docId) || trimReviewState.file;
+    if (!file) {
+      if (trimModalError) {
+        trimModalError.textContent = 'Document unavailable for trim review.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'apply';
+      }
+      return;
+    }
+
+    trimReviewState.isSubmitting = true;
+    if (trimModalError) {
+      trimModalError.hidden = true;
+      trimModalError.textContent = '';
+      if (trimModalError.dataset) trimModalError.dataset.trimContext = '';
+    }
+    const restore = trimModalApply ? withButtonSpinner(trimModalApply, 'Applying…') : () => {};
+    if (trimModalCancel) {
+      trimModalCancel.disabled = true;
+    }
+
+    try {
+      const response = await apiFetch('/trim/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId, keptPages: kept }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Unable to apply trim');
+      }
+
+      const pageCount = trimReviewState.pageCount || (kept.length ? Math.max(...kept) : null);
+      const metaUpdates = {
+        pages_kept: kept,
+        trim_required: false,
+        trim_review_state: 'completed',
+      };
+      if (pageCount) {
+        metaUpdates.page_count_original = pageCount;
+      }
+
+      clearTrimWarning(file);
+      applyProcessingUpdate(file, {
+        meta: metaUpdates,
+        ui: { warning: false },
+      });
+      renderViewerFiles();
+      queueRefresh();
+
+      const processResponse = await apiFetch('/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docId }),
+      });
+      const processPayload = await processResponse.json().catch(() => null);
+      if (!processResponse.ok || !processPayload?.ok) {
+        throw new Error(processPayload?.error || 'Unable to queue processing');
+      }
+
+      applyProcessingUpdate(file, {
+        status: 'processing',
+        processing: {
+          provider: 'docupipe',
+          stdJobId: processPayload.stdJobId,
+          standardizationId: processPayload.standardizationId,
+          startedAt: new Date().toISOString(),
+        },
+      });
+      renderViewerFiles();
+      queueRefresh();
+      startProcessingPoll(docId);
+      hideTrimModal();
+    } catch (error) {
+      console.error('Failed to apply trim selection', error);
+      if (trimModalError) {
+        trimModalError.textContent = error.message || 'Unable to apply trim right now.';
+        trimModalError.hidden = false;
+        if (trimModalError.dataset) trimModalError.dataset.trimContext = 'apply';
+      }
+    } finally {
+      trimReviewState.isSubmitting = false;
+      restore();
+      if (trimModalCancel) {
+        trimModalCancel.disabled = false;
+      }
+    }
+  }
+
   async function deleteViewerFile(fileId) {
     if (!fileId) return;
     const confirmed = window.confirm('Are you sure you want to delete this document? This action cannot be undone.');
@@ -548,18 +1630,59 @@
       card.classList.add('is-selected');
     }
 
+    const raw = ensureObject(file.raw);
+    file.raw = raw;
+    const processing = normaliseProcessingState(file.processingInfo || raw.processing || file.processing || {}, 'idle');
+    file.processingInfo = processing;
+    file.processingStatus = processing.status;
+    file.processing = processing.status;
+    const docId = resolveDocId(file);
+    if (docId) {
+      card.dataset.docId = docId;
+    }
+    const docClass = resolveDocClass(file);
+    const hasWarning = docHasWarning(file);
+
     const header = document.createElement('div');
     header.className = 'viewer__file-header';
+    const titleGroup = document.createElement('div');
+    titleGroup.className = 'viewer__file-titles';
     const title = document.createElement('h4');
     title.className = 'viewer__file-title';
     title.textContent = file.title || 'Document';
-    header.appendChild(title);
+    titleGroup.appendChild(title);
     if (file.subtitle) {
       const subtitle = document.createElement('span');
       subtitle.className = 'viewer__file-subtitle muted';
       subtitle.textContent = file.subtitle;
-      header.appendChild(subtitle);
+      titleGroup.appendChild(subtitle);
     }
+    header.appendChild(titleGroup);
+
+    const statusGroup = document.createElement('div');
+    statusGroup.className = 'viewer__file-status';
+    statusGroup.appendChild(createStatusIndicator('Processing status', processing));
+    if (hasWarning) {
+      const warningIcon = document.createElement('i');
+      warningIcon.className = 'bi bi-exclamation-triangle-fill viewer__file-warning';
+      warningIcon.setAttribute('role', 'button');
+      warningIcon.setAttribute('aria-label', 'Long document — review trim before processing');
+      warningIcon.title = 'Long document — review trim before processing';
+      warningIcon.tabIndex = 0;
+      warningIcon.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTrimReview(file, warningIcon);
+      });
+      warningIcon.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        openTrimReview(file, warningIcon);
+      });
+      statusGroup.appendChild(warningIcon);
+    }
+    header.appendChild(statusGroup);
     card.appendChild(header);
 
     if (Array.isArray(file.summary) && file.summary.length) {
@@ -588,6 +1711,114 @@
       selectViewerFile(file.fileId, { preview: true });
     });
     actions.appendChild(previewButton);
+
+    const canAutoTrim = docClass === 'bank_statement';
+    if (canAutoTrim) {
+      const autoTrimButton = document.createElement('button');
+      autoTrimButton.type = 'button';
+      autoTrimButton.textContent = 'Auto-trim';
+      if (!docId) {
+        autoTrimButton.disabled = true;
+        autoTrimButton.title = 'Document identifier unavailable for trimming.';
+      }
+      autoTrimButton.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!docId) {
+          window.alert('Unable to trim this document because it is missing an identifier.');
+          return;
+        }
+        const restore = withButtonSpinner(autoTrimButton, 'Auto-trimming…');
+        try {
+          await requestAutoTrim(file, docId);
+          renderViewerFiles();
+          queueRefresh();
+        } catch (error) {
+          console.error('Auto-trim failed', error);
+          window.alert(error.message || 'Unable to auto-trim this document right now.');
+        } finally {
+          restore();
+        }
+      });
+      actions.appendChild(autoTrimButton);
+    }
+
+    if (hasWarning) {
+      const reviewTrimButton = document.createElement('button');
+      reviewTrimButton.type = 'button';
+      reviewTrimButton.textContent = 'Review Trim';
+      reviewTrimButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openTrimReview(file, reviewTrimButton);
+      });
+      actions.appendChild(reviewTrimButton);
+    }
+
+    const processableClasses = new Set(['bank_statement', 'payslip']);
+    if (processableClasses.has(docClass)) {
+      const processButton = document.createElement('button');
+      processButton.type = 'button';
+      processButton.textContent = processing.status === 'processing' ? 'Processing…' : 'Process';
+      if (!docId) {
+        processButton.disabled = true;
+        processButton.title = 'Document identifier unavailable for processing.';
+      }
+      if (processing.status === 'processing') {
+        processButton.disabled = true;
+      }
+      processButton.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!docId) {
+          window.alert('Unable to process this document because it is missing an identifier.');
+          return;
+        }
+        const restore = withButtonSpinner(processButton, 'Processing…');
+        try {
+          const response = await apiFetch('/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ docId }),
+          });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.ok) {
+            throw new Error(payload?.error || 'Process failed');
+          }
+          applyProcessingUpdate(file, {
+            status: 'processing',
+            processing: {
+              stdJobId: payload.stdJobId,
+              standardizationId: payload.standardizationId,
+              startedAt: new Date().toISOString(),
+            },
+          });
+          renderViewerFiles();
+          queueRefresh();
+          startProcessingPoll(docId);
+        } catch (error) {
+          console.error('Processing failed', error);
+          window.alert(error.message || 'Unable to process this document right now.');
+        } finally {
+          restore();
+        }
+      });
+      actions.appendChild(processButton);
+    }
+
+    const processedJsonButton = document.createElement('button');
+    processedJsonButton.type = 'button';
+    processedJsonButton.textContent = 'Processed JSON';
+    if (processing.status !== 'completed' || !docId) {
+      processedJsonButton.disabled = true;
+      processedJsonButton.title = 'Available after processing completes.';
+    }
+    processedJsonButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showProcessedJson(file, processedJsonButton);
+    });
+    actions.appendChild(processedJsonButton);
 
     const downloadButton = document.createElement('button');
     downloadButton.type = 'button';
@@ -622,17 +1853,16 @@
     });
     actions.appendChild(downloadButton);
 
-    let jsonButton = null;
-    if (jsonTestEnabled) {
-      jsonButton = document.createElement('button');
-      jsonButton.type = 'button';
-      jsonButton.textContent = 'JSON';
-      jsonButton.addEventListener('click', (event) => {
+    if (jsonTestEnabled && (!docId || processing.status !== 'completed')) {
+      const debugJsonButton = document.createElement('button');
+      debugJsonButton.type = 'button';
+      debugJsonButton.textContent = 'Debug JSON';
+      debugJsonButton.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        showJsonForFile(file, jsonButton);
+        showJsonForFile(file, debugJsonButton);
       });
-      actions.appendChild(jsonButton);
+      actions.appendChild(debugJsonButton);
     }
 
     const deleteButton = document.createElement('button');
@@ -644,6 +1874,18 @@
     });
     actions.appendChild(deleteButton);
     card.appendChild(actions);
+
+    const uiMessages = Array.isArray(raw.ui?.messages) ? raw.ui.messages.filter((msg) => typeof msg === 'string' && msg.trim()) : [];
+    if (uiMessages.length) {
+      const messageBox = document.createElement('div');
+      messageBox.className = 'viewer__file-messages';
+      uiMessages.forEach((msg) => {
+        const line = document.createElement('p');
+        line.textContent = msg;
+        messageBox.appendChild(line);
+      });
+      card.appendChild(messageBox);
+    }
 
     const details = document.createElement('div');
     details.className = 'viewer__file-details';
@@ -754,8 +1996,8 @@
             const record = normaliseFileRecord(entry.sessionId, {
               fileId: file.fileId,
               originalName: file.originalName,
-              upload: file.upload || 'amber',
-              processing: file.processing || 'red',
+              upload: file.upload || 'queued',
+              processing: file.processing || 'queued',
               message: file.message || '',
             });
             session.files.set(file.fileId, record);
@@ -877,13 +2119,13 @@
     name.textContent = file.originalName;
     row.appendChild(name);
 
-    const uploadLight = createLight('Upload', file.upload || 'amber');
-    const processingLight = createLight('Processing', file.processing || 'red');
+    const uploadIndicator = createStatusIndicator('Upload', file.upload || 'completed');
+    const processingIndicator = createStatusIndicator('Processing', file.processing || 'queued');
 
-    const lights = document.createElement('div');
-    lights.className = 'lights';
-    lights.append(uploadLight, processingLight);
-    row.appendChild(lights);
+    const indicators = document.createElement('div');
+    indicators.className = 'status-list';
+    indicators.append(uploadIndicator, processingIndicator);
+    row.appendChild(indicators);
 
     const message = document.createElement('div');
     message.className = 'message muted';
@@ -900,11 +2142,11 @@
     name.textContent = entry.originalName;
     row.appendChild(name);
 
-    const lights = document.createElement('div');
-    lights.className = 'lights';
-    lights.appendChild(createLight('Upload', 'red'));
-    lights.appendChild(createLight('Processing', 'red'));
-    row.appendChild(lights);
+    const indicators = document.createElement('div');
+    indicators.className = 'status-list';
+    indicators.appendChild(createStatusIndicator('Upload', 'queued'));
+    indicators.appendChild(createStatusIndicator('Processing', 'queued'));
+    row.appendChild(indicators);
 
     const message = document.createElement('div');
     message.className = 'message muted';
@@ -913,36 +2155,28 @@
     return row;
   }
 
-  function createLight(label, stateValue) {
-    const light = document.createElement('span');
-    light.className = 'light';
-    light.dataset.state = stateValue;
-    light.setAttribute('role', 'status');
-    light.setAttribute('tabindex', '0');
-    light.setAttribute('aria-label', `${label}: ${LIGHT_LABELS[stateValue] || stateValue}`);
-    return light;
-  }
+  // createStatusIndicator defined earlier
 
   function normaliseFileRecord(sessionId, file) {
     const record = state.files.get(file.fileId) || {
       sessionId,
       fileId: file.fileId,
-      upload: 'amber',
-      processing: 'red',
+      upload: 'queued',
+      processing: 'queued',
       message: '',
     };
     if (file.originalName) {
       record.originalName = file.originalName;
     }
     if (file.upload) {
-      record.upload = file.upload;
+      record.upload = normaliseStatus(file.upload, 'completed');
     } else if (!record.upload) {
-      record.upload = 'amber';
+      record.upload = 'queued';
     }
     if (file.processing) {
-      record.processing = file.processing;
+      record.processing = normaliseStatus(file.processing, 'queued');
     } else if (!record.processing) {
-      record.processing = 'red';
+      record.processing = 'queued';
     }
     if (file.message != null) {
       record.message = file.message;
@@ -970,7 +2204,7 @@
     if (Array.isArray(payload.files)) {
       payload.files.forEach((file) => {
         if (!file.fileId) return;
-        const record = normaliseFileRecord(sessionId, { ...file, upload: 'green', processing: 'red' });
+        const record = normaliseFileRecord(sessionId, { ...file, upload: 'completed', processing: 'queued' });
         session.files.set(file.fileId, record);
       });
     }
@@ -1079,16 +2313,16 @@
       const data = await response.json();
       const record = state.files.get(fileId);
       if (!record) return;
-      const previousProcessing = record.processing;
-      record.upload = data.upload || record.upload;
-      record.processing = data.processing || record.processing;
+      const previousProcessing = normaliseStatus(record.processing, 'queued');
+      record.upload = normaliseStatus(data.upload || record.upload, 'completed');
+      record.processing = normaliseStatus(data.processing || record.processing, 'queued');
       record.message = data.message || '';
       const session = state.sessions.get(record.sessionId);
       if (session) {
         session.files.set(fileId, record);
       }
       renderSessionPanel();
-      if (previousProcessing !== 'green' && record.processing === 'green') {
+      if (previousProcessing !== 'completed' && record.processing === 'completed') {
         queueRefresh();
       }
     } catch (error) {
@@ -1761,6 +2995,11 @@
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
+    if (trimModal && trimModal.classList.contains('is-visible')) {
+      event.preventDefault();
+      hideTrimModal();
+      return;
+    }
     if (jsonModal && jsonModal.classList.contains('is-visible')) {
       hideJsonModal();
       return;

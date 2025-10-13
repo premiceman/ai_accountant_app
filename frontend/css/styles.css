@@ -171,13 +171,26 @@ html.app-bento-open, body.app-bento-open{ overflow:hidden; height:100%; }
 @media (max-width: 991.98px){
   #sidebar-container{ display:none !important; }
   .app-bento-toggle{ display:inline-flex; }
+}
+
+#topbar-container{
+  position:relative;
+  z-index:1020;
+}
+#topbar-container .container-fluid{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  padding-inline:clamp(1rem, 4vw, 1.75rem);
+}
+#topbar-container .container-fluid > *:last-child{ margin-left:auto; }
+
+@media (min-width: 992px){
   #topbar-container .container-fluid{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:.75rem;
+    padding-left:calc(var(--sidebar-collapsed) + clamp(1.25rem, 3vw, 2.5rem));
+    padding-right:clamp(1.25rem, 3vw, 2.5rem);
   }
-  #topbar-container .container-fluid > *:last-child{ margin-left:auto; }
 }
 
 @media (max-width: 575.98px){
@@ -199,9 +212,11 @@ html.app-bento-open, body.app-bento-open{ overflow:hidden; height:100%; }
   border-bottom:1px solid color-mix(in oklab, var(--brand) 14%, var(--bd-hairline));
   box-shadow:0 14px 42px rgba(12,21,32,0.12);
   backdrop-filter:blur(14px);
-  position:sticky;
+  position:fixed;
   top:0;
-  z-index:1020;
+  left:0;
+  right:0;
+  z-index:1040;
 }
 
 .topbar-actions{ flex-wrap:wrap; justify-content:flex-end; }
@@ -706,7 +721,9 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
 .app-nav-item.signout i{ color: var(--danger); }
 
 /* Main page content spacing */
-body{ padding-top: var(--topbar-h); padding-left: var(--sidebar-collapsed); }
+body{ padding-top:0; padding-left:0; }
+body.has-topbar{ padding-top: var(--topbar-h); }
+body.has-sidebar{ padding-left: var(--sidebar-collapsed); }
 /* On hover we overlay the expanded sidebar (no content shift). If you prefer pushing content,
    uncomment the rule below to push when expanded:
    .app-sidebar:hover ~ main, .app-sidebar:hover ~ .container { margin-left: calc(var(--sidebar-expanded) - var(--sidebar-collapsed)); }
@@ -714,7 +731,7 @@ body{ padding-top: var(--topbar-h); padding-left: var(--sidebar-collapsed); }
 
 /* Mobile: sidebar slides over content when open */
 @media (max-width: 991.98px){
-  body{ padding-left: 0; }            /* no reserved rail on mobile */
+  body.has-sidebar{ padding-left: 0; }            /* no reserved rail on mobile */
   .app-sidebar{
     transform: translateX(-100%);
     width: var(--sidebar-expanded);   /* open width on mobile */
@@ -816,6 +833,70 @@ body{ padding-top: var(--topbar-h); padding-left: var(--sidebar-collapsed); }
 .app-nav-sep{
   height:1px; background:var(--bd-hairline);
   margin:8px 10px; border-radius:1px; opacity:.9;
+}
+
+.app-nav-section{
+  position:relative;
+}
+
+.app-nav-items{
+  display:flex;
+  flex-direction:column;
+  gap:0;
+}
+
+.app-nav-toggle{
+  pointer-events:auto;
+  cursor:pointer;
+  width:100%;
+  border:0;
+  background:transparent;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 12px;
+  margin-top:6px;
+  margin-bottom:2px;
+  color:var(--fg-2);
+  font-size:.78rem;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  text-align:left;
+  user-select:none;
+}
+
+.app-nav-toggle .app-nav-title-content{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.app-nav-toggle .label{
+  white-space:nowrap;
+}
+
+.app-nav-toggle-icon{
+  margin-left:auto;
+  transition:transform .18s ease;
+  color:var(--fg-3, var(--fg-2));
+  width:auto;
+  min-width:unset;
+  font-size:.95rem;
+}
+
+.app-nav-section[data-expanded="false"] .app-nav-toggle-icon{
+  transform:rotate(-90deg);
+}
+
+.app-nav-section[data-expanded="false"] .app-nav-items{
+  display:none;
+}
+
+.app-nav-toggle:focus-visible{
+  outline:2px solid var(--brand);
+  outline-offset:-2px;
 }
 
 /* Active item highlight (subtle brand tint + vertical bar) */

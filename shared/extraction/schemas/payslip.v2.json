@@ -29,7 +29,15 @@
           "pension_employee": { "type": ["number","string","null"] },
           "pension_employer": { "type": ["number","string","null"] }
         },
-        "required": []
+        "required": [
+          "gross",
+          "net",
+          "tax",
+          "national_insurance",
+          "student_loan",
+          "pension_employee",
+          "pension_employer"
+        ]
       },
       "gross_pay": {
         "type": "object",
@@ -38,7 +46,7 @@
           "period": { "type": ["number","null"] },
           "ytd": { "type": ["number","null"] }
         },
-        "required": ["period"]
+        "required": ["period","ytd"]
       }
     },
     "required": ["pay_date","gross","net"]

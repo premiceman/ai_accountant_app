@@ -46,7 +46,25 @@ async function copyRecursive(src, dest) {
   try {
     await fs.promises.rm(targetDir, { recursive: true, force: true });
     await copyRecursive(sourceDir, targetDir);
-    console.log(`copy-shared: copied ${sourceDir} -> ${targetDir}`);
+    const packageJsonPath = path.join(targetDir, 'package.json');
+    const packageJson = {
+      /**
+       * Ensure copied shared helpers continue to be treated as CommonJS modules.
+       *
+       * Some packages (e.g. the worker) run in ESM mode ("type": "module") and
+       * would otherwise interpret these copied `.js` files as ES modules,
+       * breaking `exports` assignments at runtime.
+       */
+      type: 'commonjs',
+    };
+    await fs.promises.writeFile(
+      packageJsonPath,
+      `${JSON.stringify(packageJson, null, 2)}\n`,
+      'utf8'
+    );
+    console.log(
+      `copy-shared: copied ${sourceDir} -> ${targetDir} (package.json written to enforce CommonJS)`
+    );
   } catch (err) {
     console.error('copy-shared: failed to copy shared directory', err);
     process.exitCode = 1;

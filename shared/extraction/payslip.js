@@ -139,7 +139,7 @@ async function llmPayslipExtraction(text) {
                         period: { type: ['number', 'null'] },
                         ytd: { type: ['number', 'null'] },
                     },
-                    required: ['period'],
+                    required: ['period', 'ytd'],
                 },
                 net_pay: {
                     type: 'object',
@@ -148,6 +148,7 @@ async function llmPayslipExtraction(text) {
                         period: { type: ['number', 'null'] },
                         ytd: { type: ['number', 'null'] },
                     },
+                    required: ['period', 'ytd'],
                 },
                 deductions: {
                     type: 'array',

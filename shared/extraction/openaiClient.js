@@ -30,17 +30,24 @@ async function postChatCompletion(body) {
         return null;
     }
 }
+function ensureJsonInstruction(source, append) {
+    if (!source)
+        return append.trim();
+    return source.toLowerCase().includes('json') ? source : `${source}${append}`;
+}
 async function callStructuredExtraction(prompt, schema, options = {}) {
     const fetch = fetchImpl;
     if (!fetch || !OPENAI_API_KEY)
         return null;
     try {
-        const systemPrompt = options.systemPrompt || 'You are a meticulous financial analyst that extracts structured payroll data.';
+        const baseSystemPrompt = options.systemPrompt || 'You are a meticulous financial analyst that extracts structured payroll data as json.';
+        const systemPrompt = ensureJsonInstruction(baseSystemPrompt, ' Always respond with valid json.');
+        const userPrompt = ensureJsonInstruction(prompt, '\n\nReturn the results as valid json.');
         const makeBody = (format) => ({
             model: OPENAI_EXTRACTION_MODEL,
             messages: [
                 { role: 'system', content: systemPrompt },
-                { role: 'user', content: prompt },
+                { role: 'user', content: userPrompt },
             ],
             temperature: 0,
             response_format: format,
@@ -72,11 +79,13 @@ async function callStructuredExtraction(prompt, schema, options = {}) {
 }
 exports.callStructuredExtraction = callStructuredExtraction;
 async function callOpenAIJson({ system, user, schema, maxTokens }) {
+    const systemPrompt = ensureJsonInstruction(system, ' Always respond with valid json.');
+    const userPrompt = ensureJsonInstruction(user, '\n\nReturn the results as valid json.');
     const makeBody = (format) => ({
         model: OPENAI_EXTRACTION_MODEL,
         messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
         ],
         temperature: 0,
         response_format: format,

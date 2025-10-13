@@ -43,6 +43,11 @@ async function postChatCompletion(body: Record<string, unknown>) {
   }
 }
 
+function ensureJsonInstruction(source: string, append: string) {
+  if (!source) return append.trim();
+  return source.toLowerCase().includes('json') ? source : `${source}${append}`;
+}
+
 export async function callStructuredExtraction<T = unknown>(
   prompt: string,
   schema?: ExtractionSchema | null,
@@ -51,13 +56,15 @@ export async function callStructuredExtraction<T = unknown>(
   const fetch = fetchImpl;
   if (!fetch || !OPENAI_API_KEY) return null;
   try {
-    const systemPrompt =
-      options.systemPrompt || 'You are a meticulous financial analyst that extracts structured payroll data.';
+    const baseSystemPrompt =
+      options.systemPrompt || 'You are a meticulous financial analyst that extracts structured payroll data as json.';
+    const systemPrompt = ensureJsonInstruction(baseSystemPrompt, ' Always respond with valid json.');
+    const userPrompt = ensureJsonInstruction(prompt, '\n\nReturn the results as valid json.');
     const makeBody = (format: Record<string, unknown>) => ({
       model: OPENAI_EXTRACTION_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
+        { role: 'user', content: userPrompt },
       ],
       temperature: 0,
       response_format: format,
@@ -89,11 +96,13 @@ export async function callStructuredExtraction<T = unknown>(
 }
 
 export async function callOpenAIJson<T = unknown>({ system, user, schema, maxTokens }: JsonRequest): Promise<T | null> {
+  const systemPrompt = ensureJsonInstruction(system, ' Always respond with valid json.');
+  const userPrompt = ensureJsonInstruction(user, '\n\nReturn the results as valid json.');
   const makeBody = (format: Record<string, unknown>) => ({
     model: OPENAI_EXTRACTION_MODEL,
     messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
     ],
     temperature: 0,
     response_format: format,
