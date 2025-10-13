@@ -222,6 +222,29 @@
     }
   }
 
+  function normalisePayloadForDisplay(payload) {
+    if (payload == null) {
+      return { processedPayload: payload, shouldStandardize: false };
+    }
+
+    if (typeof payload === 'object') {
+      if (Object.prototype.hasOwnProperty.call(payload, 'data') && typeof payload.data !== 'undefined') {
+        return { processedPayload: payload.data, shouldStandardize: false };
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'record') && typeof payload.record !== 'undefined') {
+        return { processedPayload: payload.record, shouldStandardize: false };
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'payload') && typeof payload.payload !== 'undefined') {
+        return { processedPayload: payload.payload, shouldStandardize: false };
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'result') && typeof payload.result !== 'undefined') {
+        return { processedPayload: payload.result, shouldStandardize: false };
+      }
+    }
+
+    return { processedPayload: payload, shouldStandardize: false };
+  }
+
   function renderResult(payload, { force = false } = {}) {
     if (!payload) return;
     if (!force && payload?.ok === false) {
@@ -231,10 +254,17 @@
       err.data = payload?.data || payload?.record || payload?.payload || null;
       throw err;
     }
+    const { processedPayload, shouldStandardize } = normalisePayloadForDisplay(payload);
     lastPayload = payload;
     jsonErrorEditor.reset();
     try {
-      output.textContent = JSON.stringify(processedPayload, null, 2);
+      const preview = JSON.stringify(processedPayload, null, 2);
+      if (preview != null) {
+        output.textContent = preview;
+      } else {
+        const fallbackPreview = JSON.stringify(payload, null, 2);
+        output.textContent = fallbackPreview != null ? fallbackPreview : String(payload);
+      }
     } catch (err) {
       output.textContent = 'Unable to serialise payload.';
     }
