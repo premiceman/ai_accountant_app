@@ -39,7 +39,10 @@ router.post('/submit', upload.single('file'), async (req, res) => {
     // Start parse
     const { documentId, jobId: parseJobId } = await postDocument({ buffer: file.buffer, filename: file.originalname || 'document.pdf' });
 
-    // Start standardize (no waiting)
+    // Wait for parse to complete before starting standardization
+    await waitForParseCompletion(parseJobId);
+
+    // Start standardize after parse completes
     const { jobId: stdJobId, standardizationIds } = await startStandardize({ documentId, schemaId, stdVersion: process.env.DOCUPIPE_STD_VERSION });
     const standardizationId = Array.isArray(standardizationIds) ? standardizationIds[0] : standardizationIds;
 
@@ -79,3 +82,31 @@ router.get('/status', async (req, res) => {
 });
 
 module.exports = router;
+
+async function waitForParseCompletion(jobId, { timeoutMs = 60000, initialDelay = 800 } = {}) {
+  let delay = initialDelay;
+  let elapsed = 0;
+
+  while (true) {
+    const job = await getJob(jobId);
+
+    if (job?.status === 'failed') {
+      const message = job?.error || job?.message || 'DocuPipe parse job failed';
+      const err = new Error(message);
+      err.code = 'DOCUPIPE_PARSE_FAILED';
+      err.job = job;
+      throw err;
+    }
+
+    if (job?.status === 'completed') return job;
+
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    elapsed += delay;
+    if (elapsed >= timeoutMs) {
+      const err = new Error('DocuPipe parse job timed out');
+      err.code = 'DOCUPIPE_PARSE_TIMEOUT';
+      throw err;
+    }
+    delay = Math.min(Math.round(delay * 1.75), 8000);
+  }
+}
