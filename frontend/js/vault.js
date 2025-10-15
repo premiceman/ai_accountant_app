@@ -11,12 +11,16 @@
     processing: 'Processing…',
     completed: 'Completed',
     failed: 'Failed',
+    needs_trim: 'Manual trim required',
+    awaiting_manual_json: 'Manual JSON required',
   };
   const STATUS_ICONS = {
     idle: 'bi-pause-circle',
     queued: 'bi-clock-history',
     completed: 'bi-check-circle',
     failed: 'bi-x-octagon',
+    needs_trim: 'bi-exclamation-triangle',
+    awaiting_manual_json: 'bi-pencil-square',
   };
   const LEGACY_STATUS_MAP = {
     red: 'queued',
@@ -1964,6 +1968,8 @@
             originalName: file.originalName,
             upload: file.upload,
             processing: file.processing,
+            state: file.state,
+            classification: file.classification || null,
             message: file.message || '',
           })),
           rejected: Array.isArray(session.rejected)
@@ -1997,7 +2003,9 @@
               fileId: file.fileId,
               originalName: file.originalName,
               upload: file.upload || 'queued',
-              processing: file.processing || 'queued',
+              processing: file.processing || file.state || 'queued',
+              state: file.state || file.processing || 'queued',
+              classification: file.classification || null,
               message: file.message || '',
             });
             session.files.set(file.fileId, record);
@@ -2114,6 +2122,12 @@
   function renderFileRow(file) {
     const row = document.createElement('div');
     row.className = 'session-row';
+    if (file.state) {
+      row.dataset.state = file.state;
+      if (file.state === 'needs_trim' || file.state === 'awaiting_manual_json' || file.state === 'failed') {
+        row.classList.add('session-row--attention');
+      }
+    }
     const name = document.createElement('div');
     name.className = 'filename';
     name.textContent = file.originalName;
@@ -2129,7 +2143,11 @@
 
     const message = document.createElement('div');
     message.className = 'message muted';
-    message.textContent = file.message || '';
+    const classificationLabel = file.classification?.label || file.classification?.key || '';
+    const parts = [];
+    if (classificationLabel) parts.push(classificationLabel);
+    if (file.message) parts.push(file.message);
+    message.textContent = parts.join(' • ');
     row.appendChild(message);
     return row;
   }
@@ -2164,6 +2182,7 @@
       upload: 'queued',
       processing: 'queued',
       message: '',
+      state: 'queued',
     };
     if (file.originalName) {
       record.originalName = file.originalName;
@@ -2173,15 +2192,28 @@
     } else if (!record.upload) {
       record.upload = 'queued';
     }
-    if (file.processing) {
+    if (file.state) {
+      record.state = String(file.state);
+      record.processing = normaliseStatus(file.state, 'queued');
+    } else if (file.processing) {
       record.processing = normaliseStatus(file.processing, 'queued');
     } else if (!record.processing) {
       record.processing = 'queued';
+    }
+    if (file.classification) {
+      record.classification = file.classification;
     }
     if (file.message != null) {
       record.message = file.message;
     } else if (record.message == null) {
       record.message = '';
+    }
+    if (!record.message) {
+      if (record.state === 'needs_trim') {
+        record.message = 'Manual trim required before processing.';
+      } else if (record.state === 'awaiting_manual_json') {
+        record.message = 'Manual JSON input required before processing.';
+      }
     }
     state.files.set(file.fileId, record);
     return record;
@@ -2204,7 +2236,13 @@
     if (Array.isArray(payload.files)) {
       payload.files.forEach((file) => {
         if (!file.fileId) return;
-        const record = normaliseFileRecord(sessionId, { ...file, upload: 'completed', processing: 'queued' });
+        const initialState = file.state || file.processing || 'queued';
+        const record = normaliseFileRecord(sessionId, {
+          ...file,
+          upload: 'completed',
+          processing: initialState,
+          state: initialState,
+        });
         session.files.set(file.fileId, record);
       });
     }
@@ -2315,8 +2353,25 @@
       if (!record) return;
       const previousProcessing = normaliseStatus(record.processing, 'queued');
       record.upload = normaliseStatus(data.upload || record.upload, 'completed');
-      record.processing = normaliseStatus(data.processing || record.processing, 'queued');
-      record.message = data.message || '';
+      if (data.state) {
+        record.state = String(data.state);
+        record.processing = normaliseStatus(data.state, 'queued');
+      } else if (data.processing) {
+        record.processing = normaliseStatus(data.processing, 'queued');
+      }
+      if (data.classification) {
+        record.classification = data.classification;
+      }
+      const serverMessage = typeof data.message === 'string' ? data.message : '';
+      if (serverMessage) {
+        record.message = serverMessage;
+      } else if (record.state === 'needs_trim') {
+        record.message = 'Manual trim required before processing.';
+      } else if (record.state === 'awaiting_manual_json') {
+        record.message = 'Manual JSON input required before processing.';
+      } else if (!record.message) {
+        record.message = '';
+      }
       const session = state.sessions.get(record.sessionId);
       if (session) {
         session.files.set(fileId, record);

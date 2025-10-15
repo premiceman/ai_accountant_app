@@ -7,19 +7,36 @@ const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const DocumentInsight = require('../models/DocumentInsight');
 const UploadSession = require('../models/UploadSession');
-const UserDocumentJob = require('../models/UserDocumentJob');
+const VaultDocumentJob = require('../models/VaultDocumentJob');
 const Account = require('../models/Account');
 const { handleUpload } = require('../src/services/vault/storage');
-const { registerUpload } = require('../src/services/vault/jobService');
+const { extractPdfText } = require('../src/services/documents/pipeline/textExtractor');
+const { classifyDocument } = require('../src/services/documents/pipeline');
+const { trimBankStatement } = require('../src/services/pdf/trimBankStatement');
 const VaultCollection = require('../models/VaultCollection');
 const User = require('../models/User');
-const { getObject, deleteObject, fileIdToKey } = require('../src/lib/r2');
+const { getObject, deleteObject, putObject, fileIdToKey } = require('../src/lib/r2');
+const { dispatch: dispatchDocupipe, readR2Buffer } = require('../src/services/vault/docupipeDispatcher');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const router = express.Router();
 
 router.use(auth);
+
+const TRIM_PAGE_THRESHOLD = Number.isFinite(Number(process.env.VAULT_TRIM_WARN_PAGES))
+  ? Number(process.env.VAULT_TRIM_WARN_PAGES)
+  : 5;
+
+const CLASSIFICATION_SCHEMA_MAP = {
+  payslip: process.env.DOCUPIPE_PAYSLIP_SCHEMA_ID,
+  current_account_statement: process.env.DOCUPIPE_BANK_SCHEMA_ID,
+  savings_account_statement: process.env.DOCUPIPE_BANK_SCHEMA_ID,
+  isa_statement: process.env.DOCUPIPE_BANK_SCHEMA_ID,
+  investment_statement: process.env.DOCUPIPE_INVESTMENT_SCHEMA_ID || process.env.DOCUPIPE_BANK_SCHEMA_ID,
+  pension_statement: process.env.DOCUPIPE_PENSION_SCHEMA_ID || process.env.DOCUPIPE_BANK_SCHEMA_ID,
+  hmrc_correspondence: process.env.DOCUPIPE_HMRC_SCHEMA_ID || process.env.DOCUPIPE_BANK_SCHEMA_ID,
+};
 
 const TILE_KEY_MAP = {
   payslips: ['payslip'],
@@ -94,17 +111,30 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     }
     const userPrefix = await resolveUserStoragePrefix(userObjectId, userId);
     const { sessionId, files } = await handleUpload({ userId, userPrefix, file: req.file, collectionId });
-    const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
+
+    await recordUploadSession({ userId: userObjectId, sessionId, files });
+
+    const acceptedFiles = files.filter((file) => !file.error);
+    const rejected = files
+      .filter((file) => file.error)
+      .map((file) => ({ originalName: file.originalName, reason: file.error }));
+
+    const jobs = await createJobsForUploadedFiles({
+      userId: userObjectId,
+      sessionId,
+      files: acceptedFiles,
+      collectionId,
+    });
 
     res.status(201).json({
       sessionId,
-      files: files
-        .filter((file) => !file.error)
-        .map((file) => ({ fileId: file.fileId, originalName: file.originalName })),
-      rejected: files
-        .filter((file) => file.error)
-        .map((file) => ({ originalName: file.originalName, reason: file.error })),
-      jobIds: jobs.map((job) => job.jobId),
+      files: jobs.map((job) => ({
+        fileId: job.fileId,
+        originalName: job.originalName,
+        state: job.state,
+        classification: job.classification,
+      })),
+      rejected,
     });
   } catch (error) {
     console.error('upload error', error);
@@ -132,14 +162,17 @@ router.get('/upload-sessions/:sessionId', async (req, res) => {
 
 router.get('/files/:fileId/status', async (req, res) => {
   const { fileId } = req.params;
-  const job = await UserDocumentJob.findOne({ fileId, userId: new mongoose.Types.ObjectId(req.user.id) });
+  const job = await VaultDocumentJob.findOne({ fileId, userId: new mongoose.Types.ObjectId(req.user.id) });
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
   }
-  const upload = mapLight(job.uploadState);
-  const processing = mapLight(job.processState);
-  const message = job.lastError?.message || null;
-  res.json({ upload, processing, message });
+  res.json({
+    upload: 'green',
+    processing: mapVaultStateToLight(job.state),
+    state: job.state,
+    classification: job.classification || null,
+    message: latestErrorMessage(job),
+  });
 });
 
 router.get('/files/:fileId/view', async (req, res) => {
@@ -177,7 +210,7 @@ router.delete('/files/:fileId', async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   await DocumentInsight.deleteMany({ userId: userObjectId, fileId });
-  await UserDocumentJob.deleteMany({ userId: userObjectId, fileId });
+  await VaultDocumentJob.deleteMany({ userId: userObjectId, fileId });
   try {
     await deleteObject(key);
   } catch (error) {
@@ -208,7 +241,7 @@ router.delete('/tiles/:tileId', async (req, res) => {
 
   await DocumentInsight.deleteMany({ userId: userObjectId, catalogueKey: { $in: catalogueKeys } });
   if (fileIds.length) {
-    await UserDocumentJob.deleteMany({ userId: userObjectId, fileId: { $in: fileIds } });
+    await VaultDocumentJob.deleteMany({ userId: userObjectId, fileId: { $in: fileIds } });
   }
 
   let removedFromR2 = 0;
@@ -237,9 +270,9 @@ router.get('/tiles', async (req, res) => {
     },
   ]);
 
-  const jobsInFlight = await UserDocumentJob.countDocuments({
+  const jobsInFlight = await VaultDocumentJob.countDocuments({
     userId: userObjectId,
-    processState: { $in: ['pending', 'in_progress'] },
+    state: { $in: ['queued', 'processing'] },
   });
 
   const map = Object.fromEntries(
@@ -338,8 +371,8 @@ router.get('/statements/institutions/:institutionId/files', async (req, res) => 
     ].filter(Boolean),
   }).sort({ documentMonth: -1 });
 
-  const jobs = await UserDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
-    'fileId uploadState processState lastError'
+  const jobs = await VaultDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
+    'fileId state errors classification'
   );
   const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
 
@@ -403,8 +436,8 @@ router.get('/statements/accounts/:accountId/files', async (req, res) => {
   }
   const userObjectId = new mongoose.Types.ObjectId(req.user.id);
   const documents = await DocumentInsight.find({ userId: userObjectId, 'metadata.accountId': account._id }).sort({ documentMonth: -1 });
-  const jobs = await UserDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
-    'fileId uploadState processState lastError'
+  const jobs = await VaultDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
+    'fileId state errors classification'
   );
   const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
   res.json({
@@ -474,7 +507,7 @@ router.get('/collections/:collectionId/files', async (req, res) => {
   }
   const collectionObjectId = new mongoose.Types.ObjectId(collectionId);
   const insights = await DocumentInsight.find({ userId: userObjectId, collectionId: collectionObjectId }).sort({ updatedAt: -1 });
-  const jobs = await UserDocumentJob.find({ userId: userObjectId, collectionId: collectionObjectId }).select('fileId uploadState processState lastError');
+  const jobs = await VaultDocumentJob.find({ userId: userObjectId, collectionId: collectionObjectId }).select('fileId state errors classification');
   const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
   res.json({
     collection: {
@@ -502,16 +535,26 @@ router.post('/collections/:collectionId/upload', upload.single('file'), async (r
     }
     const userPrefix = await resolveUserStoragePrefix(userObjectId, userId);
     const { sessionId, files } = await handleUpload({ userId, userPrefix, file: req.file, collectionId });
-    const { jobs } = await registerUpload({ userId: userObjectId, sessionId, files });
+    await recordUploadSession({ userId: userObjectId, sessionId, files });
+    const acceptedFiles = files.filter((file) => !file.error);
+    const rejected = files
+      .filter((file) => file.error)
+      .map((file) => ({ originalName: file.originalName, reason: file.error }));
+    const jobs = await createJobsForUploadedFiles({
+      userId: userObjectId,
+      sessionId,
+      files: acceptedFiles,
+      collectionId: collection._id.toString(),
+    });
     res.status(201).json({
       sessionId,
-      files: files
-        .filter((file) => !file.error)
-        .map((file) => ({ fileId: file.fileId, originalName: file.originalName })),
-      rejected: files
-        .filter((file) => file.error)
-        .map((file) => ({ originalName: file.originalName, reason: file.error })),
-      jobIds: jobs.map((job) => job.jobId),
+      files: jobs.map((job) => ({
+        fileId: job.fileId,
+        originalName: job.originalName,
+        state: job.state,
+        classification: job.classification,
+      })),
+      rejected,
     });
   } catch (error) {
     console.error('collection upload error', error);
@@ -557,7 +600,7 @@ router.delete('/collections/:collectionId', async (req, res) => {
     return res.status(404).json({ error: 'Collection not found' });
   }
   await DocumentInsight.updateMany({ userId: userObjectId, collectionId }, { $set: { collectionId: null } });
-  await UserDocumentJob.updateMany({ userId: userObjectId, collectionId }, { $set: { collectionId: null } });
+  await VaultDocumentJob.updateMany({ userId: userObjectId, collectionId }, { $set: { collectionId: null } });
   await VaultCollection.deleteOne({ _id: collectionId, userId: userObjectId });
   res.json({ ok: true });
 });
@@ -610,6 +653,213 @@ router.get('/collections/:collectionId/archive', async (req, res) => {
   await archive.finalize();
 });
 
+async function recordUploadSession({ userId, sessionId, files }) {
+  if (!sessionId) return null;
+  const now = new Date();
+  const total = Array.isArray(files) ? files.length : 0;
+  const accepted = Array.isArray(files) ? files.filter((file) => !file.error).length : 0;
+  const rejected = total - accepted;
+  return UploadSession.findOneAndUpdate(
+    { userId, sessionId },
+    {
+      $setOnInsert: { createdAt: now },
+      $set: {
+        updatedAt: now,
+        summary: { total, accepted, rejected },
+        files: (files || []).map((file) => ({
+          fileId: file.fileId,
+          originalName: file.originalName,
+          status: file.error ? 'rejected' : 'uploaded',
+          reason: file.error || null,
+        })),
+      },
+    },
+    { new: true, upsert: true }
+  );
+}
+
+async function createJobsForUploadedFiles({ userId, sessionId, files, collectionId }) {
+  const jobs = [];
+  if (!Array.isArray(files)) return jobs;
+  for (const file of files) {
+    // eslint-disable-next-line no-await-in-loop
+    const job = await createJobForFile({ userId, sessionId, file, collectionId });
+    jobs.push(job);
+    if (job.state === 'queued' || job.state === 'needs_trim') {
+      dispatchDocupipe(job);
+    }
+  }
+  return jobs;
+}
+
+function shouldTrimForClass(classKey) {
+  return typeof classKey === 'string' && classKey.includes('statement');
+}
+
+function resolveSchemaIdForClass(classKey) {
+  if (!classKey) return null;
+  const direct = CLASSIFICATION_SCHEMA_MAP[classKey];
+  if (direct) return direct;
+  if (classKey.includes('statement')) {
+    return process.env.DOCUPIPE_BANK_SCHEMA_ID || null;
+  }
+  return null;
+}
+
+function buildTrimmedKey(pdfKey) {
+  if (!pdfKey) return null;
+  if (pdfKey.endsWith('.pdf')) {
+    return `${pdfKey.slice(0, -4)}.trimmed.pdf`;
+  }
+  return `${pdfKey}.trimmed.pdf`;
+}
+
+async function updateUploadSessionFileStatus({ userId, fileId, status, reason = null }) {
+  if (!fileId) return;
+  const update = { 'files.$.status': status };
+  if (reason) {
+    update['files.$.reason'] = reason;
+  }
+  await UploadSession.updateOne({ userId, 'files.fileId': fileId }, { $set: update });
+}
+
+function mapJobStateToSessionStatus(state) {
+  switch (state) {
+    case 'completed':
+      return 'done';
+    case 'failed':
+      return 'rejected';
+    case 'needs_trim':
+    case 'awaiting_manual_json':
+      return 'processing';
+    case 'queued':
+    case 'processing':
+    default:
+      return 'processing';
+  }
+}
+
+function mapVaultStateToLight(state) {
+  switch (state) {
+    case 'completed':
+      return 'green';
+    case 'failed':
+    case 'needs_trim':
+    case 'awaiting_manual_json':
+      return 'red';
+    case 'processing':
+    case 'queued':
+    default:
+      return 'amber';
+  }
+}
+
+function latestErrorMessage(job) {
+  if (!job?.errors || job.errors.length === 0) return null;
+  const last = job.errors[job.errors.length - 1];
+  return last?.message || null;
+}
+
+async function createJobForFile({ userId, sessionId, file, collectionId }) {
+  const collectionObjectId = collectionId ? new mongoose.Types.ObjectId(collectionId) : null;
+  const baseDoc = {
+    userId,
+    sessionId,
+    fileId: file.fileId,
+    originalName: file.originalName,
+    collectionId: collectionObjectId,
+    classification: {},
+    storage: {
+      pdfKey: file.key,
+      size: file.size || null,
+      contentHash: file.contentHash || null,
+    },
+    docupipe: {},
+    state: 'queued',
+    trim: {},
+  };
+
+  try {
+    const buffer = await readR2Buffer(file.key);
+    const text = await extractPdfText(buffer);
+    const classification = classifyDocument({ text, originalName: file.originalName });
+    if (!classification?.key) {
+      const err = new Error('Unable to classify document');
+      err.code = 'VAULT_CLASSIFICATION_FAILED';
+      throw err;
+    }
+    const schemaId = resolveSchemaIdForClass(classification.key);
+    if (!schemaId) {
+      const err = new Error(`No schema configured for ${classification.key}`);
+      err.code = 'DOCUPIPE_SCHEMA_MISSING';
+      throw err;
+    }
+
+    baseDoc.classification = {
+      key: classification.key,
+      label: classification.label || classification.key,
+      confidence: classification.confidence || null,
+      schemaId,
+    };
+    baseDoc.docupipe = {
+      schemaId,
+    };
+
+    if (shouldTrimForClass(classification.key)) {
+      try {
+        const trimResult = await trimBankStatement(buffer, {});
+        if (trimResult) {
+          const { keptPages, originalPageCount, buffer: trimmedBuffer } = trimResult;
+          const trimRequired = Number(originalPageCount || 0) > TRIM_PAGE_THRESHOLD;
+          const trimmedKey = trimmedBuffer ? buildTrimmedKey(file.key) : null;
+          if (trimmedKey && trimmedBuffer) {
+            await putObject({ key: trimmedKey, body: trimmedBuffer, contentType: 'application/pdf' });
+            baseDoc.storage.trimmedKey = trimmedKey;
+          }
+          baseDoc.trim = {
+            originalPageCount: originalPageCount || null,
+            keptPages: Array.isArray(keptPages) ? keptPages : [],
+            required: trimRequired,
+          };
+          if (trimRequired) {
+            baseDoc.state = 'needs_trim';
+          }
+        }
+      } catch (trimError) {
+        console.warn('Trim analysis failed', trimError);
+      }
+    }
+
+    const jobDoc = await VaultDocumentJob.create(baseDoc);
+    await updateUploadSessionFileStatus({
+      userId,
+      fileId: jobDoc.fileId,
+      status: mapJobStateToSessionStatus(jobDoc.state),
+    });
+    return jobDoc;
+  } catch (error) {
+    const failure = {
+      ...baseDoc,
+      state: 'failed',
+      errors: [
+        {
+          message: error.message || 'Processing failed',
+          code: error.code || 'PROCESSING_FAILED',
+          at: new Date(),
+        },
+      ],
+    };
+    const jobDoc = await VaultDocumentJob.create(failure);
+    await updateUploadSessionFileStatus({
+      userId,
+      fileId: jobDoc.fileId,
+      status: mapJobStateToSessionStatus(jobDoc.state),
+      reason: error.message || 'Processing failed',
+    });
+    return jobDoc;
+  }
+}
+
 async function resolveUserStoragePrefix(userObjectId, userId) {
   try {
     const user = await User.findById(userObjectId).select('firstName lastName').lean();
@@ -639,12 +889,6 @@ function buildUserPrefix(user, fallbackId) {
 }
 
 module.exports = router;
-
-function mapLight(state) {
-  if (state === 'succeeded') return 'green';
-  if (state === 'in_progress' || state === 'pending') return 'amber';
-  return 'red';
-}
 
 function normaliseTile(entry) {
   if (!entry) {
@@ -683,8 +927,6 @@ function mapDocumentForResponse(doc, job = null) {
       metadata.accountId = metadata.accountId.toString();
     }
   }
-  const uploadState = job?.uploadState || 'succeeded';
-  const processState = job?.processState || 'succeeded';
   const uploadedAt = metadata.uploadedAt || doc.updatedAt || doc.createdAt || null;
   const size = metadata.fileSize || metadata.size || metadata.bytes || metrics.fileSize || metrics.bytes || null;
   const displayName =
@@ -714,8 +956,10 @@ function mapDocumentForResponse(doc, job = null) {
     employerName: metadata.employerName || null,
     viewUrl: `/api/vault/files/${encodeURIComponent(doc.fileId)}/view`,
     downloadUrl: `/api/vault/files/${encodeURIComponent(doc.fileId)}/download`,
-    upload: mapLight(uploadState),
-    processing: mapLight(processState),
-    message: job?.lastError?.message || null,
+    upload: 'green',
+    processing: mapVaultStateToLight(job?.state || 'completed'),
+    state: job?.state || 'completed',
+    classification: job?.classification || null,
+    message: latestErrorMessage(job),
   };
 }
