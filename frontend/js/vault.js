@@ -631,6 +631,140 @@
     return trimmed.replace(/^statement\s+/i, '').trim() || trimmed;
   }
 
+  function normalisePayslipViewerFiles(files, { employerName = '', includeEmployerInSummary = false } = {}) {
+    const employerLabel = employerName || '';
+    const normalised = Array.isArray(files) ? files : [];
+    const mapped = normalised.map((file) => {
+      const metrics = file?.metrics || {};
+      const currency = metrics.currency || metrics.currencyCode || 'GBP';
+      const payDateValue = metrics.payDate || file.documentDate || file.documentMonth;
+      const sortDate = toDateLike(payDateValue);
+      const totalEarnings = pickMetric(metrics, ['totalEarnings', 'gross', 'grossPay']);
+      const totalDeductions = pickMetric(metrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']);
+      const netPay = pickMetric(metrics, ['net', 'netPay', 'takeHome']);
+      const details = [];
+      const periodStart = metrics.periodStart || metrics.period?.start || metrics.periodStartDate || metrics.period?.from;
+      const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.periodEndDate || metrics.period?.to;
+      if (periodStart) details.push({ label: 'Period start', value: formatDate(periodStart) });
+      if (periodEnd) details.push({ label: 'Period end', value: formatDate(periodEnd) });
+      if (metrics.payFrequency) details.push({ label: 'Pay frequency', value: metrics.payFrequency });
+      if (metrics.taxCode) details.push({ label: 'Tax code', value: metrics.taxCode });
+      if (metrics.tax != null) details.push({ label: 'Income tax', value: formatMoney(metrics.tax, currency) });
+      if (metrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(metrics.ni, currency) });
+      if (metrics.pension != null) details.push({ label: 'Pension', value: formatMoney(metrics.pension, currency) });
+      if (metrics.studentLoan != null) details.push({ label: 'Student loan', value: formatMoney(metrics.studentLoan, currency) });
+
+      const subtitleParts = [];
+      if (includeEmployerInSummary && employerLabel) subtitleParts.push(employerLabel);
+      if (metrics.payFrequency) subtitleParts.push(`${metrics.payFrequency} payslip`);
+
+      const summary = [
+        { label: 'Date of payslip', value: formatDate(payDateValue) },
+        { label: 'Total earnings', value: formatMoney(totalEarnings, currency) },
+        { label: 'Total deductibles', value: formatMoney(totalDeductions, currency) },
+        { label: 'Net pay', value: formatMoney(netPay, currency) },
+      ];
+      if (includeEmployerInSummary) {
+        summary.unshift({ label: 'Employer', value: employerLabel || file?.metadata?.employerName || '—' });
+      }
+
+      const viewerFile = {
+        fileId: file.fileId,
+        title: formatDate(payDateValue) || 'Payslip',
+        subtitle: subtitleParts.join(' · ') || (metrics.payFrequency ? `${metrics.payFrequency} payslip` : 'Payslip'),
+        summary,
+        details,
+        metrics,
+        raw: file,
+        currency,
+        isExpanded: false,
+      };
+      viewerFile._sortValue = sortDate ? sortDate.getTime() : 0;
+      return viewerFile;
+    });
+
+    return mapped
+      .sort((a, b) => (b._sortValue || 0) - (a._sortValue || 0))
+      .map((file) => {
+        delete file._sortValue;
+        return file;
+      });
+  }
+
+  function normaliseStatementViewerFiles(accounts, { institutionName = '', includeInstitutionInSummary = false } = {}) {
+    const list = Array.isArray(accounts) ? accounts : [];
+    const files = [];
+    const institutionLabel = normaliseStatementName(institutionName || '');
+
+    list.forEach((account) => {
+      const accountName = account?.displayName || institutionLabel;
+      const maskedNumber = account?.accountNumberMasked || null;
+      const accountType = account?.accountType || null;
+      const accountFiles = Array.isArray(account?.files) ? account.files : [];
+
+      accountFiles.forEach((file) => {
+        const metrics = file?.metrics || {};
+        const currency = metrics.currency || metrics.currencyCode || 'GBP';
+        const totalIn = pickMetric(metrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']);
+        const totalOut = pickMetric(metrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']);
+        const periodStart = metrics.periodStart || metrics.period?.start || metrics.period?.from || metrics.statementPeriod?.start;
+        const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.period?.to || metrics.statementPeriod?.end;
+        const openingBalance = pickMetric(metrics, ['openingBalance', 'startingBalance']);
+        const closingBalance = pickMetric(metrics, ['closingBalance', 'endingBalance']);
+        const summary = [
+          { label: 'Account number', value: file.accountNumberMasked || maskedNumber || '—' },
+          { label: 'Total in', value: formatMoney(totalIn, currency) },
+          { label: 'Total out', value: formatMoney(totalOut, currency) },
+        ];
+        if (includeInstitutionInSummary) {
+          summary.unshift({ label: 'Institution', value: institutionLabel || '—' });
+        }
+
+        const details = [];
+        if (periodStart) details.push({ label: 'Period start', value: formatDate(periodStart) });
+        if (periodEnd) details.push({ label: 'Period end', value: formatDate(periodEnd) });
+        if (openingBalance != null) details.push({ label: 'Opening balance', value: formatMoney(openingBalance, currency) });
+        if (closingBalance != null) details.push({ label: 'Closing balance', value: formatMoney(closingBalance, currency) });
+        if (metrics.currency) details.push({ label: 'Currency', value: metrics.currency });
+        if (accountType) details.push({ label: 'Account type', value: accountType });
+
+        const subtitleParts = [];
+        if (includeInstitutionInSummary && institutionLabel) {
+          subtitleParts.push(institutionLabel);
+        }
+        if (periodEnd) {
+          subtitleParts.push(`Statement ending ${formatDate(periodEnd)}`);
+        } else if (file.documentDate) {
+          subtitleParts.push(`Statement ${formatDate(file.documentDate)}`);
+        } else if (file.documentMonth) {
+          subtitleParts.push(`Statement ${formatDate(file.documentMonth)}`);
+        }
+
+        const viewerFile = {
+          fileId: file.fileId,
+          title: accountName || 'Statement',
+          subtitle: subtitleParts.join(' · ') || institutionLabel || 'Statement',
+          summary,
+          details,
+          metrics,
+          raw: file,
+          currency,
+          isExpanded: false,
+        };
+        const sortDate = toDateLike(periodEnd || file.documentDate || file.documentMonth);
+        viewerFile._sortValue = sortDate ? sortDate.getTime() : 0;
+        files.push(viewerFile);
+      });
+    });
+
+    return files
+      .sort((a, b) => (b._sortValue || 0) - (a._sortValue || 0))
+      .map((file) => {
+        delete file._sortValue;
+        return file;
+      });
+  }
+
   function getSelectedCollection() {
     if (!state.selectedCollectionId) return null;
     return state.collections.find((col) => col.id === state.selectedCollectionId) || null;
@@ -2466,6 +2600,29 @@
       const card = document.createElement('article');
       card.className = 'tile';
       card.dataset.tileId = tile.id;
+      card.dataset.tileCount = String(tile.count ?? 0);
+
+      const isInteractive = tile.id === 'payslips' || tile.id === 'statements';
+      if (isInteractive) {
+        card.classList.add('tile--interactive');
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-label', `View ${tile.label} documents`);
+        card.tabIndex = 0;
+        const handleOpen = (event) => {
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          if (card.classList.contains('tile-is-busy')) return;
+          handleTileOpen(tile, card);
+        };
+        card.addEventListener('click', handleOpen);
+        card.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            handleOpen(event);
+          }
+        });
+      }
 
       const header = document.createElement('div');
       header.className = 'tile-header';
@@ -2518,6 +2675,165 @@
       pill.textContent = `${data.processing} processing…`;
       tilesGrid.prepend(pill);
     }
+  }
+
+  function withTileLoading(card, label = 'Loading…') {
+    if (!card) return () => {};
+    let overlay = card.querySelector('.tile-loading');
+    if (overlay) {
+      overlay.remove();
+    }
+    overlay = document.createElement('div');
+    overlay.className = 'tile-loading';
+    overlay.innerHTML = `
+      <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+      <span>${label}</span>
+    `;
+    card.appendChild(overlay);
+    card.classList.add('tile-is-busy');
+    card.setAttribute('aria-busy', 'true');
+    return () => {
+      card.classList.remove('tile-is-busy');
+      card.removeAttribute('aria-busy');
+      if (overlay && overlay.isConnected) {
+        overlay.remove();
+      }
+    };
+  }
+
+  async function handleTileOpen(tile, card) {
+    if (!tile || !card) return;
+    const cleanup = withTileLoading(card);
+    try {
+      if (tile.id === 'payslips') {
+        await openPayslipTile();
+      } else if (tile.id === 'statements') {
+        await openStatementTile();
+      }
+    } catch (error) {
+      console.error('Tile open failed', error);
+      window.alert(error.message || `Unable to load ${tile.label || 'documents'} right now.`);
+    } finally {
+      cleanup();
+    }
+  }
+
+  async function openPayslipTile() {
+    const response = await apiFetch('/payslips/employers');
+    if (response.status === 401) {
+      handleUnauthorised('Please sign in again to view your payslips.');
+      return;
+    }
+    if (!response.ok) {
+      const payload = await safeJson(response);
+      throw new Error(payload?.error || 'Unable to load payslips.');
+    }
+
+    const data = await response.json();
+    const employers = Array.isArray(data?.employers) ? data.employers : [];
+    if (!employers.length) {
+      showViewer({ type: 'payslip', title: 'Payslips', subtitle: 'No documents yet', files: [] });
+      return;
+    }
+
+    const files = [];
+    for (const employer of employers) {
+      const employerId = employer?.employerId;
+      if (!employerId) continue;
+      const detailResponse = await apiFetch(`/payslips/employers/${encodeURIComponent(employerId)}/files`);
+      if (detailResponse.status === 401) {
+        handleUnauthorised('Please sign in again to view your payslips.');
+        return;
+      }
+      if (!detailResponse.ok) {
+        const payload = await safeJson(detailResponse);
+        const name = employer?.name || 'employer';
+        throw new Error(payload?.error || `Unable to load payslips for ${name}.`);
+      }
+      const detailData = await detailResponse.json();
+      const employerName = employer?.name || detailData?.employer || 'Employer';
+      const viewerFiles = normalisePayslipViewerFiles(detailData?.files, {
+        employerName,
+        includeEmployerInSummary: true,
+      });
+      files.push(...viewerFiles);
+    }
+
+    const subtitleParts = [];
+    if (files.length) {
+      subtitleParts.push(`${files.length} document${files.length === 1 ? '' : 's'}`);
+    }
+    subtitleParts.push(`${employers.length} employer${employers.length === 1 ? '' : 's'}`);
+
+    const subtitle = files.length ? subtitleParts.join(' · ') : 'No documents yet';
+    showViewer({
+      type: 'payslip',
+      title: 'Payslips',
+      subtitle,
+      files,
+    });
+  }
+
+  async function openStatementTile() {
+    const response = await apiFetch('/statements/institutions');
+    if (response.status === 401) {
+      handleUnauthorised('Please sign in again to view your statements.');
+      return;
+    }
+    if (!response.ok) {
+      const payload = await safeJson(response);
+      throw new Error(payload?.error || 'Unable to load statements.');
+    }
+
+    const data = await response.json();
+    const institutions = Array.isArray(data?.institutions) ? data.institutions : [];
+    if (!institutions.length) {
+      showViewer({ type: 'statement', title: 'Statements', subtitle: 'No documents yet', files: [] });
+      return;
+    }
+
+    const files = [];
+    let totalAccounts = 0;
+    for (const institution of institutions) {
+      const institutionId = institution?.institutionId;
+      if (!institutionId) continue;
+      const detailResponse = await apiFetch(`/statements/institutions/${encodeURIComponent(institutionId)}/files`);
+      if (detailResponse.status === 401) {
+        handleUnauthorised('Please sign in again to view your statements.');
+        return;
+      }
+      if (!detailResponse.ok) {
+        const payload = await safeJson(detailResponse);
+        const name = institution?.name || 'institution';
+        throw new Error(payload?.error || `Unable to load statements for ${name}.`);
+      }
+      const detailData = await detailResponse.json();
+      const accounts = Array.isArray(detailData?.accounts) ? detailData.accounts : [];
+      totalAccounts += accounts.length;
+      const institutionName = normaliseStatementName(institution?.name || detailData?.institution?.name);
+      const viewerFiles = normaliseStatementViewerFiles(accounts, {
+        institutionName,
+        includeInstitutionInSummary: true,
+      });
+      files.push(...viewerFiles);
+    }
+
+    const subtitleParts = [];
+    if (files.length) {
+      subtitleParts.push(`${files.length} document${files.length === 1 ? '' : 's'}`);
+    }
+    if (totalAccounts) {
+      subtitleParts.push(`${totalAccounts} account${totalAccounts === 1 ? '' : 's'}`);
+    }
+    subtitleParts.push(`${institutions.length} institution${institutions.length === 1 ? '' : 's'}`);
+
+    const subtitle = files.length ? subtitleParts.join(' · ') : 'No documents yet';
+    showViewer({
+      type: 'statement',
+      title: 'Statements',
+      subtitle,
+      files,
+    });
   }
 
   async function handleTileDelete(tile, card, button) {
@@ -2581,44 +2897,8 @@
         throw new Error(text?.error || 'Unable to load payslips');
       }
       const data = await response.json();
-      const files = Array.isArray(data?.files)
-        ? data.files.map((file) => {
-            const metrics = file?.metrics || {};
-            const currency = metrics.currency || metrics.currencyCode || 'GBP';
-            const payDate = metrics.payDate || file.documentDate || file.documentMonth;
-            const totalEarnings = pickMetric(metrics, ['totalEarnings', 'gross', 'grossPay']);
-            const totalDeductions = pickMetric(metrics, ['totalDeductions', 'totalDeductibles', 'deductionsTotal']);
-            const netPay = pickMetric(metrics, ['net', 'netPay', 'takeHome']);
-            const details = [];
-            const periodStart = metrics.periodStart || metrics.period?.start || metrics.periodStartDate || metrics.period?.from;
-            const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.periodEndDate || metrics.period?.to;
-            if (periodStart) details.push({ label: 'Period start', value: formatDate(periodStart) });
-            if (periodEnd) details.push({ label: 'Period end', value: formatDate(periodEnd) });
-            if (metrics.payFrequency) details.push({ label: 'Pay frequency', value: metrics.payFrequency });
-            if (metrics.taxCode) details.push({ label: 'Tax code', value: metrics.taxCode });
-            if (metrics.tax != null) details.push({ label: 'Income tax', value: formatMoney(metrics.tax, currency) });
-            if (metrics.ni != null) details.push({ label: 'National Insurance', value: formatMoney(metrics.ni, currency) });
-            if (metrics.pension != null) details.push({ label: 'Pension', value: formatMoney(metrics.pension, currency) });
-            if (metrics.studentLoan != null) details.push({ label: 'Student loan', value: formatMoney(metrics.studentLoan, currency) });
-            return {
-              fileId: file.fileId,
-              title: formatDate(payDate) || 'Payslip',
-              subtitle: metrics.payFrequency ? `${metrics.payFrequency} payslip` : 'Payslip',
-              summary: [
-                { label: 'Date of payslip', value: formatDate(payDate) },
-                { label: 'Total earnings', value: formatMoney(totalEarnings, currency) },
-                { label: 'Total deductibles', value: formatMoney(totalDeductions, currency) },
-                { label: 'Net pay', value: formatMoney(netPay, currency) },
-              ],
-              details,
-              metrics,
-              raw: file,
-              currency,
-              isExpanded: false,
-            };
-          })
-        : [];
       const employerName = employer.name || data?.employer || 'Employer';
+      const files = normalisePayslipViewerFiles(data?.files, { employerName, includeEmployerInSummary: false });
       showViewer({
         type: 'payslip',
         title: employerName,
@@ -2684,49 +2964,15 @@
         throw new Error(text?.error || 'Unable to load statements');
       }
       const data = await response.json();
-      const files = [];
       const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
-      accounts.forEach((account) => {
-        const accountName = account.displayName || normaliseStatementName(data?.institution?.name || institution.name);
-        const maskedNumber = account.accountNumberMasked || null;
-        const accountType = account.accountType || null;
-        const accountFiles = Array.isArray(account.files) ? account.files : [];
-        accountFiles.forEach((file) => {
-          const metrics = file?.metrics || {};
-          const currency = metrics.currency || metrics.currencyCode || 'GBP';
-          const totalIn = pickMetric(metrics, ['totalIn', 'totalCredit', 'totalCredits', 'sumCredits', 'creditsTotal']);
-          const totalOut = pickMetric(metrics, ['totalOut', 'totalDebit', 'totalDebits', 'sumDebits', 'debitsTotal']);
-          const periodStart = metrics.periodStart || metrics.period?.start || metrics.period?.from || metrics.statementPeriod?.start;
-          const periodEnd = metrics.periodEnd || metrics.period?.end || metrics.period?.to || metrics.statementPeriod?.end;
-          const openingBalance = pickMetric(metrics, ['openingBalance', 'startingBalance']);
-          const closingBalance = pickMetric(metrics, ['closingBalance', 'endingBalance']);
-          const details = [];
-          if (periodStart) details.push({ label: 'Period start', value: formatDate(periodStart) });
-          if (periodEnd) details.push({ label: 'Period end', value: formatDate(periodEnd) });
-          if (openingBalance != null) details.push({ label: 'Opening balance', value: formatMoney(openingBalance, currency) });
-          if (closingBalance != null) details.push({ label: 'Closing balance', value: formatMoney(closingBalance, currency) });
-          if (metrics.currency) details.push({ label: 'Currency', value: metrics.currency });
-          if (accountType) details.push({ label: 'Account type', value: accountType });
-          files.push({
-            fileId: file.fileId,
-            title: accountName || 'Statement',
-            subtitle: periodEnd ? `Statement ending ${formatDate(periodEnd)}` : (file.documentDate ? `Statement ${formatDate(file.documentDate)}` : 'Statement'),
-            summary: [
-              { label: 'Account number', value: file.accountNumberMasked || maskedNumber || '—' },
-              { label: 'Total in', value: formatMoney(totalIn, currency) },
-              { label: 'Total out', value: formatMoney(totalOut, currency) },
-            ],
-            details,
-            metrics,
-            raw: file,
-            currency,
-            isExpanded: false,
-          });
-        });
+      const institutionName = normaliseStatementName(institution.name || data?.institution?.name);
+      const files = normaliseStatementViewerFiles(accounts, {
+        institutionName,
+        includeInstitutionInSummary: false,
       });
       showViewer({
         type: 'statement',
-        title: normaliseStatementName(institution.name || data?.institution?.name),
+        title: institutionName,
         subtitle: files.length ? `${files.length} document${files.length === 1 ? '' : 's'}` : 'No documents yet',
         files,
       });
