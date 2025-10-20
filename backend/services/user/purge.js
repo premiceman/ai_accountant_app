@@ -269,6 +269,7 @@ async function purgeCollections(userId) {
     try {
       const res = await action();
       mongo[label] = res?.deletedCount ?? 0;
+      delete mongo[`${label}Error`];
     } catch (err) {
       console.error(`Failed to delete ${label} for user`, { userId: String(userId), error: err });
       mongo[label] = 0;
@@ -287,6 +288,7 @@ async function purgeCollections(userId) {
   await remove('userOverrides', () => UserOverride.deleteMany({ userId }));
   await remove('vaultCollections', () => VaultCollection.deleteMany({ userId }));
   await remove('vaultFiles', () => VaultFile.deleteMany({ userId }));
+  await remove('paymentMethods', () => PaymentMethod.deleteMany({ userId }));
 
   return mongo;
 }
@@ -325,6 +327,7 @@ async function deleteUserAccount(userIdOrDoc) {
     try {
       const res = await action();
       mongo[label] = res?.deletedCount ?? 0;
+      delete mongo[`${label}Error`];
     } catch (err) {
       console.error(`Failed to delete ${label} for user`, { userId: String(existingUser._id), error: err });
       mongo[label] = 0;
@@ -332,7 +335,11 @@ async function deleteUserAccount(userIdOrDoc) {
     }
   }
 
-  await remove('paymentMethods', () => PaymentMethod.deleteMany({ userId: existingUser._id }));
+  const hasPaymentMethodCount = Object.prototype.hasOwnProperty.call(mongo, 'paymentMethods');
+  const hasPaymentMethodError = Object.prototype.hasOwnProperty.call(mongo, 'paymentMethodsError');
+  if (!hasPaymentMethodCount || hasPaymentMethodError) {
+    await remove('paymentMethods', () => PaymentMethod.deleteMany({ userId: existingUser._id }));
+  }
   await remove('subscriptions', () => Subscription.deleteMany({ userId: existingUser._id }));
 
   let removedUser = 0;
