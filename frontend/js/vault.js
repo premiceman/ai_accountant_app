@@ -2328,7 +2328,11 @@
     const title = document.createElement('div');
     title.className = 'session-row__title';
     const name = document.createElement('strong');
+    name.className = 'session-row__name';
     name.textContent = file.originalName || 'Document';
+    if (name.textContent) {
+      name.title = name.textContent;
+    }
     title.appendChild(name);
 
     const classificationLabel = file.classification?.label || file.classification?.key || '';
@@ -2382,7 +2386,11 @@
     const title = document.createElement('div');
     title.className = 'session-row__title';
     const name = document.createElement('strong');
+    name.className = 'session-row__name';
     name.textContent = entry.originalName || 'Upload rejected';
+    if (name.textContent) {
+      name.title = name.textContent;
+    }
     title.appendChild(name);
     const tag = document.createElement('span');
     tag.className = 'session-row__tag';
