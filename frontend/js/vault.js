@@ -11,6 +11,7 @@
     processing: 'Processing…',
     completed: 'Completed',
     failed: 'Failed',
+    rejected: 'Rejected',
     needs_trim: 'Manual trim required',
     awaiting_manual_json: 'Manual JSON required',
   };
@@ -19,6 +20,7 @@
     queued: 'bi-clock-history',
     completed: 'bi-check-circle',
     failed: 'bi-x-octagon',
+    rejected: 'bi-x-octagon',
     needs_trim: 'bi-exclamation-triangle',
     awaiting_manual_json: 'bi-pencil-square',
   };
@@ -165,6 +167,9 @@
   const fileInput = document.getElementById('file-input');
   const sessionRows = document.getElementById('session-rows');
   const sessionEmpty = document.getElementById('session-empty');
+  const sessionActions = document.getElementById('session-actions');
+  const sessionClearBtn = document.getElementById('session-clear');
+  const sessionReminder = document.getElementById('session-reminder');
   const tilesGrid = document.getElementById('tiles-grid');
   const payslipGrid = document.getElementById('payslip-grid');
   const statementGrid = document.getElementById('statement-grid');
@@ -2094,24 +2099,26 @@
   function persistState() {
     if (typeof localStorage === 'undefined') return;
     try {
-      const payload = {
-        sessions: Array.from(state.sessions.entries()).map(([sessionId, session]) => ({
-          sessionId,
-          files: Array.from(session.files.values()).map((file) => ({
-            fileId: file.fileId,
-            originalName: file.originalName,
-            upload: file.upload,
-            processing: file.processing,
-            state: file.state,
-            classification: file.classification || null,
-            message: file.message || '',
-          })),
-          rejected: Array.isArray(session.rejected)
-            ? session.rejected.map((entry) => ({ originalName: entry.originalName, reason: entry.reason }))
-            : [],
+      const sessionsPayload = Array.from(state.sessions.entries()).map(([sessionId, session]) => ({
+        sessionId,
+        files: Array.from(session.files.values()).map((file) => ({
+          fileId: file.fileId,
+          originalName: file.originalName,
+          upload: file.upload,
+          processing: file.processing,
+          state: file.state,
+          classification: file.classification || null,
+          message: file.message || '',
         })),
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        rejected: Array.isArray(session.rejected)
+          ? session.rejected.map((entry) => ({ originalName: entry.originalName, reason: entry.reason }))
+          : [],
+      }));
+      if (sessionsPayload.length) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions: sessionsPayload }));
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     } catch (error) {
       console.warn('Failed to persist vault sessions', error);
     }
@@ -2230,80 +2237,196 @@
     });
   }
 
+  function setSessionReminder(message) {
+    if (!sessionReminder) return;
+    const text = message && String(message).trim();
+    if (text) {
+      sessionReminder.hidden = false;
+      sessionReminder.textContent = text;
+    } else {
+      sessionReminder.hidden = true;
+      sessionReminder.textContent = '';
+    }
+  }
+
+  function removeDropzoneHighlight() {
+    if (dropzone) {
+      dropzone.classList.remove('dropzone--highlight');
+    }
+  }
+
+  function clearSessionHistory() {
+    state.sessions.clear();
+    state.files.clear();
+    renderSessionPanel();
+  }
+
+  function dismissRejected(sessionId, index) {
+    const session = state.sessions.get(sessionId);
+    if (!session || !Array.isArray(session.rejected)) return;
+    if (index < 0 || index >= session.rejected.length) return;
+    session.rejected.splice(index, 1);
+    if (session.rejected.length === 0 && (!session.files || session.files.size === 0)) {
+      state.sessions.delete(sessionId);
+    }
+    renderSessionPanel();
+    setSessionReminder('');
+    removeDropzoneHighlight();
+  }
+
+  function promptRetryUpload(originalName) {
+    if (!fileInput || !dropzone) return;
+    const name = originalName && String(originalName).trim();
+    const label = name ? `Select a replacement for “${name}”.` : 'Select a replacement document to try again.';
+    setSessionReminder(label);
+    dropzone.classList.add('dropzone--highlight');
+    window.setTimeout(() => {
+      if (!fileInput.isConnected) return;
+      try { fileInput.focus(); } catch {}
+      try { fileInput.click(); } catch {}
+    }, 20);
+  }
+
   function renderSessionPanel() {
     if (!(sessionRows && sessionEmpty)) return;
     sessionRows.innerHTML = '';
     let rowCount = 0;
-    for (const session of state.sessions.values()) {
+    for (const [sessionId, session] of state.sessions.entries()) {
       for (const file of session.files.values()) {
         rowCount += 1;
         sessionRows.appendChild(renderFileRow(file));
       }
-      for (const rejected of session.rejected) {
+      session.rejected.forEach((entry, index) => {
         rowCount += 1;
-        sessionRows.appendChild(renderRejectedRow(rejected));
-      }
+        sessionRows.appendChild(renderRejectedRow(sessionId, entry, index));
+      });
+    }
+    if (sessionEmpty) {
+      sessionEmpty.hidden = rowCount !== 0;
+    }
+    if (sessionActions) {
+      sessionActions.hidden = rowCount === 0;
     }
     if (rowCount === 0) {
-      sessionEmpty.style.display = '';
-    } else {
-      sessionEmpty.style.display = 'none';
+      setSessionReminder('');
     }
     updateProgressUI();
     persistState();
   }
 
   function renderFileRow(file) {
-    const row = document.createElement('div');
+    const row = document.createElement('article');
     row.className = 'session-row';
+    row.setAttribute('role', 'listitem');
     if (file.state) {
       row.dataset.state = file.state;
       if (file.state === 'needs_trim' || file.state === 'awaiting_manual_json' || file.state === 'failed') {
         row.classList.add('session-row--attention');
       }
     }
-    const name = document.createElement('div');
-    name.className = 'filename';
-    name.textContent = file.originalName;
-    row.appendChild(name);
+
+    const title = document.createElement('div');
+    title.className = 'session-row__title';
+    const name = document.createElement('strong');
+    name.className = 'session-row__name';
+    name.textContent = file.originalName || 'Document';
+    if (name.textContent) {
+      name.title = name.textContent;
+    }
+    title.appendChild(name);
+
+    const classificationLabel = file.classification?.label || file.classification?.key || '';
+    if (classificationLabel) {
+      const tag = document.createElement('span');
+      tag.className = 'session-row__tag';
+      tag.textContent = classificationLabel;
+      title.appendChild(tag);
+    }
 
     const uploadIndicator = createStatusIndicator('Upload', file.upload || 'completed');
     const processingIndicator = createStatusIndicator('Processing', file.processing || 'queued');
-
     const indicators = document.createElement('div');
-    indicators.className = 'status-list';
+    indicators.className = 'status-list session-row__statuses';
     indicators.append(uploadIndicator, processingIndicator);
-    row.appendChild(indicators);
 
-    const message = document.createElement('div');
-    message.className = 'message muted';
-    const classificationLabel = file.classification?.label || file.classification?.key || '';
+    row.append(title, indicators);
+
     const parts = [];
-    if (classificationLabel) parts.push(classificationLabel);
     if (file.message) parts.push(file.message);
-    message.textContent = parts.join(' • ');
-    row.appendChild(message);
+    if (!parts.length) {
+      const statusValue = normaliseStatus(file.processing || file.state, 'queued');
+      if (statusValue === 'queued') {
+        parts.push('Waiting to start processing.');
+      } else if (statusValue === 'processing') {
+        parts.push('Processing in progress…');
+      } else if (statusValue === 'completed') {
+        parts.push('Document processed successfully.');
+      } else if (statusValue === 'failed') {
+        parts.push('Processing failed.');
+      } else if (statusValue === 'idle') {
+        parts.push('Upload ready.');
+      }
+    }
+    if (parts.length) {
+      const message = document.createElement('p');
+      message.className = 'session-row__message';
+      message.textContent = parts.join(' ');
+      row.appendChild(message);
+    }
+
     return row;
   }
 
-  function renderRejectedRow(entry) {
-    const row = document.createElement('div');
-    row.className = 'session-row';
-    const name = document.createElement('div');
-    name.className = 'filename';
-    name.textContent = entry.originalName;
-    row.appendChild(name);
+  function renderRejectedRow(sessionId, entry, index) {
+    const row = document.createElement('article');
+    row.className = 'session-row session-row--attention';
+    row.dataset.state = 'failed';
+    row.setAttribute('role', 'listitem');
+
+    const title = document.createElement('div');
+    title.className = 'session-row__title';
+    const name = document.createElement('strong');
+    name.className = 'session-row__name';
+    name.textContent = entry.originalName || 'Upload rejected';
+    if (name.textContent) {
+      name.title = name.textContent;
+    }
+    title.appendChild(name);
+    const tag = document.createElement('span');
+    tag.className = 'session-row__tag';
+    tag.textContent = 'Rejected';
+    title.appendChild(tag);
 
     const indicators = document.createElement('div');
-    indicators.className = 'status-list';
-    indicators.appendChild(createStatusIndicator('Upload', 'queued'));
-    indicators.appendChild(createStatusIndicator('Processing', 'queued'));
-    row.appendChild(indicators);
+    indicators.className = 'status-list session-row__statuses';
+    indicators.appendChild(createStatusIndicator('Upload', 'failed'));
+    indicators.appendChild(createStatusIndicator('Processing', 'failed'));
 
-    const message = document.createElement('div');
-    message.className = 'message muted';
-    message.textContent = entry.reason || 'Rejected';
-    row.appendChild(message);
+    const message = document.createElement('p');
+    message.className = 'session-row__message';
+    message.textContent = entry.reason || 'The file could not be uploaded. Please try again.';
+
+    const actions = document.createElement('div');
+    actions.className = 'session-row__actions';
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'btn btn-sm btn-primary';
+    retryBtn.textContent = 'Upload again';
+    retryBtn.addEventListener('click', () => {
+      promptRetryUpload(entry.originalName);
+    });
+    actions.appendChild(retryBtn);
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'btn btn-sm btn-outline-secondary';
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.addEventListener('click', () => {
+      dismissRejected(sessionId, index);
+    });
+    actions.appendChild(dismissBtn);
+
+    row.append(title, indicators, message, actions);
     return row;
   }
 
@@ -2428,11 +2551,17 @@
   }
 
   function handleFiles(fileList) {
-    if (!fileList || !fileList.length) return;
+    if (!fileList || !fileList.length) {
+      setSessionReminder('');
+      removeDropzoneHighlight();
+      return;
+    }
+    setSessionReminder('');
     Array.from(fileList).forEach((file) => {
       const ext = (file.name || '').toLowerCase();
       if (!(ext.endsWith('.pdf') || ext.endsWith('.zip'))) {
         showError('We only accept PDF or ZIP uploads.');
+        removeDropzoneHighlight();
         return;
       }
       const phase = ext.endsWith('.zip') ? 'Extracting zip' : 'Uploading files';
@@ -2440,6 +2569,7 @@
       uploadFile(file, { placeholderId });
     });
     fileInput.value = '';
+    removeDropzoneHighlight();
   }
 
   function setupDropzone() {
@@ -2454,13 +2584,30 @@
       event.preventDefault();
       dropzone.classList.add('drag-active');
     });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-active'));
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('drag-active');
+      removeDropzoneHighlight();
+    });
     dropzone.addEventListener('drop', (event) => {
       event.preventDefault();
       dropzone.classList.remove('drag-active');
       handleFiles(event.dataTransfer.files);
     });
     fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+  }
+
+  if (sessionClearBtn) {
+    sessionClearBtn.addEventListener('click', () => {
+      if (!state.sessions.size) {
+        clearSessionHistory();
+        return;
+      }
+      const confirmClear = window.confirm('Clear upload history? This only removes the queue from this device.');
+      if (!confirmClear) return;
+      clearSessionHistory();
+      setSessionReminder('');
+      removeDropzoneHighlight();
+    });
   }
 
   async function pollFileStatus(fileId) {
