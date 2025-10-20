@@ -285,6 +285,86 @@ router.get('/files/:fileId/download', async (req, res) => {
   await streamFile(res, key, { inline: false });
 });
 
+router.get('/json', async (req, res) => {
+  const docId = String(req.query?.docId || '').trim();
+  if (!docId) {
+    return res.status(400).json({ ok: false, error: 'DOC_ID_REQUIRED' });
+  }
+
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+
+  try {
+    const job = await VaultDocumentJob.findOne({ userId: userObjectId, fileId: docId }).lean();
+    let payload = null;
+    let meta = null;
+    let processing = null;
+    let result = null;
+
+    if (job) {
+      meta = {
+        fileId: job.fileId,
+        state: job.state,
+        classification: job.classification || null,
+        errors: Array.isArray(job.errors) ? job.errors : [],
+        trim: job.trim || null,
+      };
+      processing = {
+        documentId: job.docupipe?.documentId || null,
+        stdJobId: job.docupipe?.stdJobId || null,
+        standardizationId: job.docupipe?.standardizationId || null,
+        schemaId: job.docupipe?.schemaId || job.classification?.schemaId || null,
+        completedAt: job.completedAt || null,
+      };
+      result = {
+        json_key: job.storage?.jsonKey || null,
+        pdf_key: job.storage?.pdfKey || null,
+        trimmed_key: job.storage?.trimmedKey || null,
+      };
+
+      const jsonKey = job?.storage?.jsonKey;
+      if (jsonKey) {
+        try {
+          const buffer = await readR2Buffer(jsonKey);
+          if (buffer && buffer.length) {
+            payload = JSON.parse(buffer.toString('utf8'));
+          }
+        } catch (error) {
+          console.warn('processed json fetch failed', error);
+        }
+      }
+    }
+
+    if (!payload) {
+      const insight = await DocumentInsight.findOne({ userId: userObjectId, fileId: docId }).lean();
+      if (insight) {
+        payload = {
+          metadata: insight.metadata || {},
+          metrics: insight.metrics || {},
+          transactions: Array.isArray(insight.transactions) ? insight.transactions : [],
+          narrative: Array.isArray(insight.narrative) ? insight.narrative : [],
+        };
+        if (!meta) {
+          meta = {
+            fileId: insight.fileId,
+            catalogueKey: insight.catalogueKey || null,
+            documentDate: insight.documentDate || null,
+            documentMonth: insight.documentMonth || null,
+          };
+        }
+      }
+    }
+
+    if (!payload) {
+      return res.json({ ok: false, error: 'JSON_NOT_READY' });
+    }
+
+    res.json({ ok: true, json: payload, meta, processing, result });
+  } catch (error) {
+    console.error('processed json error', error);
+    res.status(500).json({ ok: false, error: 'JSON_FETCH_FAILED' });
+  }
+});
+
 router.delete('/files/:fileId', async (req, res) => {
   const { fileId } = req.params;
   const userObjectId = new mongoose.Types.ObjectId(req.user.id);
