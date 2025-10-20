@@ -47,6 +47,92 @@ const TILE_KEY_MAP = {
   hmrc: ['hmrc_correspondence'],
 };
 
+const STATEMENT_CATALOGUE_KEYS = [
+  'current_account_statement',
+  'savings_account_statement',
+  'isa_statement',
+];
+
+const FALLBACK_EMPLOYER_NAME = 'Other employer';
+const FALLBACK_INSTITUTION_NAME = 'Financial institution';
+
+function encodeBase64Url(value) {
+  return Buffer.from(String(value ?? '')).toString('base64url');
+}
+
+function decodeBase64Url(value) {
+  try {
+    return Buffer.from(String(value ?? ''), 'base64url').toString('utf8');
+  } catch (error) {
+    return '';
+  }
+}
+
+function coerceTrimmedString(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value).trim();
+  if (typeof value === 'object' && typeof value.toString === 'function') {
+    const str = value.toString();
+    if (str && str !== '[object Object]') {
+      return str.trim();
+    }
+  }
+  return '';
+}
+
+function normaliseInstitutionLabel(source, fallback = FALLBACK_INSTITUTION_NAME) {
+  if (!source) return fallback;
+  const candidates = [];
+  if (typeof source === 'string') {
+    candidates.push(source);
+  } else if (typeof source === 'object') {
+    candidates.push(
+      source.institutionName,
+      source.institution,
+      source.bankName,
+      source.providerName,
+      source.provider,
+      source.organisation,
+      source.orgName,
+      source.name
+    );
+  }
+  for (const candidate of candidates) {
+    const trimmed = coerceTrimmedString(candidate);
+    if (trimmed) return trimmed;
+  }
+  return fallback;
+}
+
+function normaliseAccountKey(meta) {
+  if (!meta || typeof meta !== 'object') return '';
+  const candidates = [
+    meta.accountId,
+    meta.accountNumberMasked,
+    meta.accountNumber,
+    meta.iban,
+    meta.sortCode,
+    meta.accountName,
+    meta.account,
+  ];
+  for (const candidate of candidates) {
+    const trimmed = coerceTrimmedString(candidate);
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
+
+function normaliseAccountDisplay(meta, fallback = 'Account') {
+  if (!meta || typeof meta !== 'object') return fallback;
+  const candidates = [meta.accountName, meta.accountNumberMasked, meta.accountNumber, meta.iban];
+  for (const candidate of candidates) {
+    const trimmed = coerceTrimmedString(candidate);
+    if (trimmed) return trimmed;
+  }
+  return fallback;
+}
+
 function validateFileOwnership(userId, key) {
   if (!key) return false;
   const normalizedKey = String(key);
@@ -304,23 +390,39 @@ router.get('/payslips/employers', async (req, res) => {
       },
     },
   ]);
-  res.json({
-    employers: rows
-      .filter((row) => row._id)
-      .map((row) => ({
-        employerId: Buffer.from(String(row._id)).toString('base64url'),
-        name: row._id,
-        count: row.count,
-        lastPayDate: row.lastPayDate,
-      })),
+
+  const employers = rows.map((row) => {
+    const rawName = coerceTrimmedString(row?._id);
+    const displayName = rawName || FALLBACK_EMPLOYER_NAME;
+    return {
+      employerId: encodeBase64Url(displayName),
+      name: displayName,
+      count: row.count,
+      lastPayDate: row.lastPayDate,
+    };
   });
+
+  res.json({ employers });
 });
 
 router.get('/payslips/employers/:employerId/files', async (req, res) => {
-  const employerName = Buffer.from(req.params.employerId, 'base64url').toString('utf8');
-  const documents = await DocumentInsight.find({ userId: new mongoose.Types.ObjectId(req.user.id), catalogueKey: 'payslip', 'metadata.employerName': employerName }).sort({ documentDate: -1 });
+  const employerName = decodeBase64Url(req.params.employerId) || FALLBACK_EMPLOYER_NAME;
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const match = { userId: userObjectId, catalogueKey: 'payslip' };
+  const trimmedName = coerceTrimmedString(employerName);
+  if (trimmedName && trimmedName !== FALLBACK_EMPLOYER_NAME) {
+    match['metadata.employerName'] = trimmedName;
+  } else {
+    match.$or = [
+      { 'metadata.employerName': { $exists: false } },
+      { 'metadata.employerName': null },
+      { 'metadata.employerName': '' },
+    ];
+  }
+
+  const documents = await DocumentInsight.find(match).sort({ documentDate: -1 });
   res.json({
-    employer: employerName,
+    employer: trimmedName || FALLBACK_EMPLOYER_NAME,
     files: documents.map((doc) => ({
       ...mapDocumentForResponse(doc),
       status: doc.narrative?.length ? 'processed' : 'pending',
@@ -329,14 +431,56 @@ router.get('/payslips/employers/:employerId/files', async (req, res) => {
 });
 
 router.get('/statements/institutions', async (req, res) => {
-  const accounts = await Account.find({ userId: new mongoose.Types.ObjectId(req.user.id) }).sort({ institutionName: 1 });
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const accounts = await Account.find({ userId: userObjectId }).sort({ institutionName: 1, displayName: 1 });
+  const insights = await DocumentInsight.find({
+    userId: userObjectId,
+    catalogueKey: { $in: STATEMENT_CATALOGUE_KEYS },
+  }).select('metadata');
+
   const grouped = new Map();
-  for (const account of accounts) {
-    const entry = grouped.get(account.institutionName) || { institutionId: Buffer.from(account.institutionName).toString('base64url'), name: account.institutionName, accounts: 0 };
-    entry.accounts += 1;
-    grouped.set(account.institutionName, entry);
+
+  for (const doc of insights) {
+    const metadataRaw = doc?.metadata || {};
+    const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
+    const institutionName = normaliseInstitutionLabel(metadata);
+    const key = institutionName;
+    const entry = grouped.get(key) || {
+      institutionId: encodeBase64Url(key),
+      name: key,
+      accountKeys: new Set(),
+      docCount: 0,
+    };
+    const accountKey = normaliseAccountKey(metadata);
+    if (accountKey) {
+      entry.accountKeys.add(accountKey);
+    }
+    entry.docCount += 1;
+    grouped.set(key, entry);
   }
-  res.json({ institutions: Array.from(grouped.values()) });
+
+  for (const account of accounts) {
+    const institutionName = normaliseInstitutionLabel({ institutionName: account.institutionName });
+    const key = institutionName;
+    const entry = grouped.get(key) || {
+      institutionId: encodeBase64Url(key),
+      name: key,
+      accountKeys: new Set(),
+      docCount: 0,
+    };
+    entry.accountKeys.add(account._id.toString());
+    grouped.set(key, entry);
+  }
+
+  const institutions = Array.from(grouped.values())
+    .map((entry) => ({
+      institutionId: entry.institutionId,
+      name: entry.name,
+      accounts: entry.accountKeys.size || (entry.docCount > 0 ? 1 : 0),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  res.json({ institutions });
 });
 
 router.get('/statements/institutions/:institutionId/accounts', async (req, res) => {
@@ -355,76 +499,131 @@ router.get('/statements/institutions/:institutionId/accounts', async (req, res) 
 });
 
 router.get('/statements/institutions/:institutionId/files', async (req, res) => {
-  const institutionName = Buffer.from(req.params.institutionId, 'base64url').toString('utf8');
+  const institutionName = decodeBase64Url(req.params.institutionId) || FALLBACK_INSTITUTION_NAME;
   const userObjectId = new mongoose.Types.ObjectId(req.user.id);
-  const accounts = await Account.find({ userId: userObjectId, institutionName }).sort({ displayName: 1 });
-  const accountIds = accounts.map((account) => account._id);
-  const maskedByAccount = new Map(accounts.map((account) => [account.accountNumberMasked, account._id.toString()]));
-  const maskedNumbers = accounts.map((account) => account.accountNumberMasked).filter(Boolean);
+
+  const allAccounts = await Account.find({ userId: userObjectId }).sort({ displayName: 1 });
+  const matchingAccounts = allAccounts.filter(
+    (account) => normaliseInstitutionLabel({ institutionName: account.institutionName }) === institutionName
+  );
 
   const documents = await DocumentInsight.find({
     userId: userObjectId,
-    catalogueKey: { $in: ['current_account_statement', 'savings_account_statement', 'isa_statement'] },
-    $or: [
-      { 'metadata.accountId': { $in: accountIds } },
-      maskedNumbers.length ? { 'metadata.accountNumberMasked': { $in: maskedNumbers } } : null,
-    ].filter(Boolean),
-  }).sort({ documentMonth: -1 });
+    catalogueKey: { $in: STATEMENT_CATALOGUE_KEYS },
+  }).sort({ documentMonth: -1, documentDate: -1, updatedAt: -1 });
+  const matchingDocuments = documents.filter((doc) => {
+    const metadataRaw = doc?.metadata || {};
+    const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
+    return normaliseInstitutionLabel(metadata) === institutionName;
+  });
 
-  const jobs = await VaultDocumentJob.find({ userId: userObjectId, fileId: { $in: documents.map((doc) => doc.fileId) } }).select(
-    'fileId state errors classification'
-  );
+  const jobs = await VaultDocumentJob.find({
+    userId: userObjectId,
+    fileId: { $in: matchingDocuments.map((doc) => doc.fileId) },
+  }).select('fileId state errors classification');
   const jobMap = new Map(jobs.map((job) => [job.fileId, job]));
 
-  const docsByAccount = new Map();
-  for (const doc of documents) {
-    const meta = doc.metadata || {};
-    let accountId = meta.accountId ? meta.accountId.toString() : null;
-    if (!accountId && meta.accountNumberMasked && maskedByAccount.has(meta.accountNumberMasked)) {
-      accountId = maskedByAccount.get(meta.accountNumberMasked) || null;
-    }
-    if (!accountId) continue;
-    const list = docsByAccount.get(accountId) || [];
-    list.push({
-      doc,
-      job: jobMap.get(doc.fileId) || null,
+  const accountsById = new Map();
+  const maskedLookup = new Map();
+  for (const account of matchingAccounts) {
+    const accountId = account._id.toString();
+    accountsById.set(accountId, {
+      accountId,
+      displayName: account.displayName,
+      accountType: account.accountType,
+      accountNumberMasked: account.accountNumberMasked,
+      files: [],
     });
-    docsByAccount.set(accountId, list);
+    const masked = coerceTrimmedString(account.accountNumberMasked);
+    if (masked) {
+      maskedLookup.set(masked, accountId);
+    }
   }
+
+  const fallbackAccounts = new Map();
+
+  function getFallbackAccount(metadata) {
+    const accountKey = normaliseAccountKey(metadata) || metadata?.accountType || 'uncategorized';
+    const fallbackId = encodeBase64Url(`${institutionName}::${accountKey}`);
+    if (!fallbackAccounts.has(fallbackId)) {
+      fallbackAccounts.set(fallbackId, {
+        accountId: fallbackId,
+        displayName: normaliseAccountDisplay(metadata, 'Other account'),
+        accountType: metadata?.accountType || null,
+        accountNumberMasked: metadata?.accountNumberMasked || null,
+        files: [],
+      });
+    }
+    return fallbackAccounts.get(fallbackId);
+  }
+
+  for (const doc of matchingDocuments) {
+    const metadataRaw = doc?.metadata || {};
+    const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
+    let accountEntry = null;
+
+    const metaAccountId = coerceTrimmedString(metadata.accountId);
+    if (metaAccountId && accountsById.has(metaAccountId)) {
+      accountEntry = accountsById.get(metaAccountId);
+    }
+
+    if (!accountEntry) {
+      const masked = coerceTrimmedString(metadata.accountNumberMasked);
+      if (masked && maskedLookup.has(masked)) {
+        const matchedId = maskedLookup.get(masked);
+        accountEntry = accountsById.get(matchedId) || null;
+      }
+    }
+
+    if (!accountEntry && metaAccountId) {
+      const fallbackId = encodeBase64Url(`${institutionName}::${metaAccountId}`);
+      if (!fallbackAccounts.has(fallbackId)) {
+        fallbackAccounts.set(fallbackId, {
+          accountId: fallbackId,
+          displayName: normaliseAccountDisplay(metadata, 'Other account'),
+          accountType: metadata?.accountType || null,
+          accountNumberMasked: metadata?.accountNumberMasked || null,
+          files: [],
+        });
+      }
+      accountEntry = fallbackAccounts.get(fallbackId);
+    }
+
+    if (!accountEntry) {
+      accountEntry = getFallbackAccount(metadata);
+    }
+
+    const payload = mapDocumentForResponse(doc, jobMap.get(doc.fileId));
+    if (!payload) continue;
+
+    if (accountEntry.accountId && !payload.accountId) {
+      payload.accountId = accountEntry.accountId;
+    }
+    if (accountEntry.accountNumberMasked && !payload.accountNumberMasked) {
+      payload.accountNumberMasked = accountEntry.accountNumberMasked;
+    }
+    if (!payload.metadata) payload.metadata = {};
+    if (payload.metadata && typeof payload.metadata === 'object') {
+      if (!payload.metadata.accountId) {
+        payload.metadata.accountId = payload.accountId || accountEntry.accountId || null;
+      }
+      if (accountEntry.accountNumberMasked && !payload.metadata.accountNumberMasked) {
+        payload.metadata.accountNumberMasked = accountEntry.accountNumberMasked;
+      }
+      if (accountEntry.accountType && !payload.metadata.accountType) {
+        payload.metadata.accountType = accountEntry.accountType;
+      }
+    }
+    accountEntry.files.push(payload);
+  }
+
+  const accounts = [...accountsById.values(), ...fallbackAccounts.values()]
+    .filter((account) => Array.isArray(account.files) && account.files.length > 0)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   res.json({
     institution: { name: institutionName, accountCount: accounts.length },
-    accounts: accounts.map((account) => {
-      const accountId = account._id.toString();
-      const files = (docsByAccount.get(accountId) || []).map((entry) => {
-        const payload = mapDocumentForResponse(entry.doc, entry.job);
-        if (!payload) return null;
-        payload.accountId = accountId;
-        if (!payload.accountNumberMasked) {
-          payload.accountNumberMasked = entry.doc?.metadata?.accountNumberMasked || account.accountNumberMasked || null;
-        }
-        if (!payload.metadata) payload.metadata = {};
-        if (payload.metadata && typeof payload.metadata === 'object') {
-          payload.metadata.accountId = accountId;
-          if (!payload.metadata.accountNumberMasked) {
-            payload.metadata.accountNumberMasked = payload.accountNumberMasked;
-          }
-          if (!payload.metadata.accountType && account.accountType) {
-            payload.metadata.accountType = account.accountType;
-          }
-        }
-        payload.accountType = account.accountType || payload.metadata?.accountType || null;
-        return payload;
-      }).filter(Boolean);
-
-      return {
-        accountId,
-        displayName: account.displayName,
-        accountType: account.accountType,
-        accountNumberMasked: account.accountNumberMasked,
-        files,
-      };
-    }),
+    accounts,
   });
 });
 
