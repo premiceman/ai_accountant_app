@@ -198,6 +198,15 @@
     return date.toLocaleDateString();
   }
 
+  function toDateLike(value) {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value;
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
   function toNumberLike(value) {
     if (value == null) return null;
     if (typeof value === 'number' && Number.isFinite(value)) return value;
