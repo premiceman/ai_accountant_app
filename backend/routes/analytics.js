@@ -64,12 +64,33 @@ function toMajor(minor) {
 }
 
 function mergePayslipMetrics(legacyMetrics = {}, preferredMetrics = null) {
-  if (!preferredMetrics) return { ...(legacyMetrics || {}) };
   const merged = { ...(legacyMetrics || {}) };
+  if (!preferredMetrics) {
+    if (merged.totalDeductions == null && Array.isArray(merged.deductions)) {
+      merged.totalDeductions = merged.deductions.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+    }
+    if (merged.takeHomePercent == null && merged.gross) {
+      const netValue = Number(merged.net ?? 0);
+      merged.takeHomePercent = merged.gross ? netValue / Number(merged.gross || 1) : null;
+    }
+    if (merged.effectiveMarginalRate == null && merged.gross) {
+      const deductionsValue = Number(merged.totalDeductions ?? 0);
+      merged.effectiveMarginalRate = merged.gross ? deductionsValue / Number(merged.gross || 1) : null;
+    }
+    return merged;
+  }
   if (preferredMetrics.payDate) merged.payDate = preferredMetrics.payDate;
   if (preferredMetrics.period?.start) merged.periodStart = preferredMetrics.period.start;
   if (preferredMetrics.period?.end) merged.periodEnd = preferredMetrics.period.end;
   if (preferredMetrics.period?.month) merged.periodMonth = preferredMetrics.period.month;
+  if (preferredMetrics.period) {
+    merged.period = {
+      ...(merged.period || {}),
+      start: preferredMetrics.period.start || merged.period?.start || null,
+      end: preferredMetrics.period.end || merged.period?.end || null,
+      month: preferredMetrics.period.month || merged.period?.month || null,
+    };
+  }
   if (preferredMetrics.employer && !merged.employer) merged.employer = preferredMetrics.employer;
   if (preferredMetrics.taxCode) merged.taxCode = preferredMetrics.taxCode;
   const gross = toMajor(preferredMetrics.grossMinor);
@@ -87,15 +108,47 @@ function mergePayslipMetrics(legacyMetrics = {}, preferredMetrics = null) {
   if (pension != null) merged.pension = pension;
   const studentLoan = toMajor(preferredMetrics.studentLoanMinor);
   if (studentLoan != null) merged.studentLoan = studentLoan;
+  if (merged.totalDeductions == null && Array.isArray(merged.deductions)) {
+    merged.totalDeductions = merged.deductions.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+  }
+  if (merged.takeHomePercent == null && merged.gross) {
+    const netValue = Number(merged.net ?? 0);
+    merged.takeHomePercent = merged.gross ? netValue / Number(merged.gross || 1) : null;
+  }
+  if (merged.effectiveMarginalRate == null && merged.gross) {
+    const deductionsValue = Number(merged.totalDeductions ?? 0);
+    merged.effectiveMarginalRate = merged.gross ? deductionsValue / Number(merged.gross || 1) : null;
+  }
   return merged;
 }
 
 function mergeStatementMetrics(legacyMetrics = {}, preferredMetrics = null) {
-  if (!preferredMetrics) return legacyMetrics ? { ...legacyMetrics } : {};
   const merged = { ...(legacyMetrics || {}) };
+  if (!preferredMetrics) {
+    if (merged.totals?.income == null && merged.income != null) {
+      merged.totals = merged.totals || {};
+      merged.totals.income = merged.income;
+    }
+    if (merged.totals?.spend == null && merged.spend != null) {
+      merged.totals = merged.totals || {};
+      merged.totals.spend = merged.spend;
+    }
+    if (merged.totals?.net == null && merged.totals?.income != null && merged.totals?.spend != null) {
+      merged.totals.net = Number(merged.totals.income || 0) - Number(merged.totals.spend || 0);
+    }
+    return merged;
+  }
   if (preferredMetrics.period?.start) merged.periodStart = preferredMetrics.period.start;
   if (preferredMetrics.period?.end) merged.periodEnd = preferredMetrics.period.end;
   if (preferredMetrics.period?.month) merged.periodMonth = preferredMetrics.period.month;
+  if (preferredMetrics.period) {
+    merged.period = {
+      ...(merged.period || {}),
+      start: preferredMetrics.period.start || merged.period?.start || null,
+      end: preferredMetrics.period.end || merged.period?.end || null,
+      month: preferredMetrics.period.month || merged.period?.month || null,
+    };
+  }
   const inflows = toMajor(preferredMetrics.inflowsMinor);
   const outflows = toMajor(preferredMetrics.outflowsMinor);
   const net = toMajor(preferredMetrics.netMinor);
@@ -109,6 +162,9 @@ function mergeStatementMetrics(legacyMetrics = {}, preferredMetrics = null) {
     merged.totals.spend = outflows;
   }
   if (net != null) merged.net = net;
+  if (merged.totals?.net == null && merged.totals?.income != null && merged.totals?.spend != null) {
+    merged.totals.net = Number(merged.totals.income || 0) - Number(merged.totals.spend || 0);
+  }
   return merged;
 }
 
@@ -148,15 +204,18 @@ function enrichInsight(entry, key) {
     clone.metadata.documentMonth = preferred.documentMonth;
   }
   if (preferred?.currency) clone.currency = preferred.currency;
+  const legacyMetrics = preferred?.legacyMetrics || entry.metrics || {};
   if (entry.catalogueKey === 'payslip') {
-    clone.metrics = mergePayslipMetrics(entry.metrics, preferred?.metricsV1);
+    clone.metrics = mergePayslipMetrics(legacyMetrics, preferred?.metricsV1);
   } else if (preferred?.metricsV1 && preferred.transactionsV1?.length) {
-    clone.metrics = mergeStatementMetrics(entry.metrics, preferred.metricsV1);
-  } else if (entry.metrics) {
-    clone.metrics = { ...entry.metrics };
+    clone.metrics = mergeStatementMetrics(legacyMetrics, preferred.metricsV1);
+  } else if (legacyMetrics) {
+    clone.metrics = { ...legacyMetrics };
   }
   if (preferred?.transactionsV1?.length) {
     clone.transactions = convertPreferredTransactions(preferred.transactionsV1, key || entry.key || entry.baseKey || 'entry');
+  } else if (Array.isArray(preferred?.legacyTransactions)) {
+    clone.transactions = preferred.legacyTransactions.map((tx) => ({ ...tx }));
   } else if (Array.isArray(entry.transactions)) {
     clone.transactions = entry.transactions.map((tx) => ({ ...tx }));
   }
