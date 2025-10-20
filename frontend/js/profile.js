@@ -638,6 +638,9 @@
 
       try {
         await performDangerAction(activeDangerAction, typed);
+        if (activeDangerAction && (activeDangerAction.id === 'purge' || activeDangerAction.id === 'delete')) {
+          try { localStorage.removeItem('vault.uploadSessions.v1'); } catch {}
+        }
         closeDialog(true);
         showDangerStatus(activeDangerAction.successMessage, activeDangerAction.successVariant || 'success');
         if (activeDangerAction.requiresReload) {
