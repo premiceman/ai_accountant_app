@@ -87,9 +87,19 @@ function normaliseInstitutionLabel(source, fallback = FALLBACK_INSTITUTION_NAME)
   if (typeof source === 'string') {
     candidates.push(source);
   } else if (typeof source === 'object') {
+    const institution = source.institution && typeof source.institution === 'object' ? source.institution : null;
+    if (institution) {
+      candidates.push(
+        institution.name,
+        institution.displayName,
+        institution.legalName,
+        institution.organisation,
+        institution.orgName,
+        institution.providerName
+      );
+    }
     candidates.push(
       source.institutionName,
-      source.institution,
       source.bankName,
       source.providerName,
       source.provider,
@@ -98,6 +108,34 @@ function normaliseInstitutionLabel(source, fallback = FALLBACK_INSTITUTION_NAME)
       source.name
     );
   }
+  for (const candidate of candidates) {
+    const trimmed = coerceTrimmedString(candidate);
+    if (trimmed) return trimmed;
+  }
+  return fallback;
+}
+
+function normaliseEmployerLabel(source, fallback = FALLBACK_EMPLOYER_NAME) {
+  if (!source) return fallback;
+  if (typeof source === 'string') {
+    const trimmed = coerceTrimmedString(source);
+    return trimmed || fallback;
+  }
+  if (typeof source !== 'object') return fallback;
+  const employer = source.employer && typeof source.employer === 'object' ? source.employer : null;
+  const candidates = [];
+  if (employer) {
+    candidates.push(employer.name, employer.displayName, employer.legalName, employer.organisation, employer.orgName);
+  }
+  candidates.push(
+    source.employerName,
+    source.companyName,
+    source.company,
+    source.organisation,
+    source.orgName,
+    source.name,
+    source.label
+  );
   for (const candidate of candidates) {
     const trimmed = coerceTrimmedString(candidate);
     if (trimmed) return trimmed;
@@ -460,27 +498,33 @@ router.get('/tiles', async (req, res) => {
 });
 
 router.get('/payslips/employers', async (req, res) => {
-  const rows = await DocumentInsight.aggregate([
-    { $match: { userId: new mongoose.Types.ObjectId(req.user.id), catalogueKey: 'payslip' } },
-    {
-      $group: {
-        _id: '$metadata.employerName',
-        count: { $sum: 1 },
-        lastPayDate: { $max: '$documentDate' },
-      },
-    },
-  ]);
+  const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+  const insights = await DocumentInsight.find({ userId: userObjectId, catalogueKey: 'payslip' })
+    .select('metadata documentDate')
+    .sort({ documentDate: 1 });
 
-  const employers = rows.map((row) => {
-    const rawName = coerceTrimmedString(row?._id);
-    const displayName = rawName || FALLBACK_EMPLOYER_NAME;
-    return {
-      employerId: encodeBase64Url(displayName),
-      name: displayName,
-      count: row.count,
-      lastPayDate: row.lastPayDate,
+  const grouped = new Map();
+
+  for (const doc of insights) {
+    const metadataRaw = doc?.metadata || {};
+    const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
+    const employerName = normaliseEmployerLabel(metadata);
+    const key = employerName || FALLBACK_EMPLOYER_NAME;
+    const entry = grouped.get(key) || {
+      employerId: encodeBase64Url(key),
+      name: key,
+      count: 0,
+      lastPayDate: null,
     };
-  });
+    entry.count += 1;
+    const docDate = doc.documentDate instanceof Date ? doc.documentDate : doc.documentDate ? new Date(doc.documentDate) : null;
+    if (docDate && (!entry.lastPayDate || docDate > entry.lastPayDate)) {
+      entry.lastPayDate = docDate;
+    }
+    grouped.set(key, entry);
+  }
+
+  const employers = Array.from(grouped.values()).sort((a, b) => a.name.localeCompare(b.name));
 
   res.json({ employers });
 });
@@ -488,22 +532,19 @@ router.get('/payslips/employers', async (req, res) => {
 router.get('/payslips/employers/:employerId/files', async (req, res) => {
   const employerName = decodeBase64Url(req.params.employerId) || FALLBACK_EMPLOYER_NAME;
   const userObjectId = new mongoose.Types.ObjectId(req.user.id);
-  const match = { userId: userObjectId, catalogueKey: 'payslip' };
-  const trimmedName = coerceTrimmedString(employerName);
-  if (trimmedName && trimmedName !== FALLBACK_EMPLOYER_NAME) {
-    match['metadata.employerName'] = trimmedName;
-  } else {
-    match.$or = [
-      { 'metadata.employerName': { $exists: false } },
-      { 'metadata.employerName': null },
-      { 'metadata.employerName': '' },
-    ];
-  }
+  const targetName = coerceTrimmedString(employerName) || FALLBACK_EMPLOYER_NAME;
 
-  const documents = await DocumentInsight.find(match).sort({ documentDate: -1 });
+  const documents = await DocumentInsight.find({ userId: userObjectId, catalogueKey: 'payslip' }).sort({ documentDate: -1 });
+  const filtered = documents.filter((doc) => {
+    const metadataRaw = doc?.metadata || {};
+    const metadata = typeof metadataRaw?.toObject === 'function' ? metadataRaw.toObject() : metadataRaw;
+    const label = normaliseEmployerLabel(metadata);
+    return (label || FALLBACK_EMPLOYER_NAME) === targetName;
+  });
+
   res.json({
-    employer: trimmedName || FALLBACK_EMPLOYER_NAME,
-    files: documents.map((doc) => ({
+    employer: targetName,
+    files: filtered.map((doc) => ({
       ...mapDocumentForResponse(doc),
       status: doc.narrative?.length ? 'processed' : 'pending',
     })),
@@ -516,7 +557,7 @@ router.get('/statements/institutions', async (req, res) => {
   const insights = await DocumentInsight.find({
     userId: userObjectId,
     catalogueKey: { $in: STATEMENT_CATALOGUE_KEYS },
-  }).select('metadata');
+  }).select('metadata documentDate');
 
   const grouped = new Map();
 
@@ -530,12 +571,17 @@ router.get('/statements/institutions', async (req, res) => {
       name: key,
       accountKeys: new Set(),
       docCount: 0,
+      lastDocumentDate: null,
     };
     const accountKey = normaliseAccountKey(metadata);
     if (accountKey) {
       entry.accountKeys.add(accountKey);
     }
     entry.docCount += 1;
+    const docDate = doc.documentDate instanceof Date ? doc.documentDate : doc.documentDate ? new Date(doc.documentDate) : null;
+    if (docDate && (!entry.lastDocumentDate || docDate > entry.lastDocumentDate)) {
+      entry.lastDocumentDate = docDate;
+    }
     grouped.set(key, entry);
   }
 
@@ -547,6 +593,7 @@ router.get('/statements/institutions', async (req, res) => {
       name: key,
       accountKeys: new Set(),
       docCount: 0,
+      lastDocumentDate: null,
     };
     entry.accountKeys.add(account._id.toString());
     grouped.set(key, entry);
@@ -557,6 +604,8 @@ router.get('/statements/institutions', async (req, res) => {
       institutionId: entry.institutionId,
       name: entry.name,
       accounts: entry.accountKeys.size || (entry.docCount > 0 ? 1 : 0),
+      documents: entry.docCount,
+      lastStatementDate: entry.lastDocumentDate,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
