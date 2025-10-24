@@ -691,7 +691,22 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
   text-decoration: none;
   transition: background .16s ease, transform .16s ease, box-shadow .16s ease, color .16s ease;
 }
-.app-nav-item i{ font-size: 1.25rem; width: 24px; text-align: center; color: var(--fg-2); }
+.app-nav .nav-icon{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 12px;
+  transition: background .16s ease, transform .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.app-nav .nav-icon i{
+  font-size: 1.2rem;
+  line-height: 1;
+  color: var(--fg-2);
+  transition: inherit;
+}
 .app-nav-item .label{
   white-space: nowrap; opacity: 0; transform: translateX(-8px);
   transition: opacity .16s ease, transform .16s ease;
@@ -700,7 +715,7 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
 @media (max-width: 991.98px){
   .app-nav{ padding: 16px; gap: 8px; }
   .app-nav-item{ padding: 14px 16px; border-radius: 16px; }
-  .app-nav-item i{ font-size: 1.2rem; }
+  .app-nav .nav-icon i{ font-size: 1.1rem; }
 }
 
 /* Active + hover states */
@@ -713,12 +728,12 @@ body.onboarding-body .onboarding-sidebar .insight-card strong{color:rgba(255,255
   color: var(--fg);
   box-shadow: 0 4px 14px color-mix(in oklab, var(--brand) 20%, transparent);
 }
-.app-nav-item.active i{ color: var(--brand); }
+.app-nav-item.active .nav-icon i{ color: var(--brand); }
 
 /* Spacer + signout at bottom */
 .app-nav-spacer{ flex: 1 1 auto; }
 .app-nav-item.signout{ color: var(--danger); }
-.app-nav-item.signout i{ color: var(--danger); }
+.app-nav-item.signout .nav-icon i{ color: var(--danger); }
 
 /* Main page content spacing */
 body{ padding-top:0; padding-left:0; }
@@ -772,8 +787,14 @@ body.has-sidebar{ padding-left: var(--sidebar-collapsed); }
 }
 
 /* Title icon (optional) */
-.app-nav-title i{
-  font-size:1rem; width:24px; text-align:center; color: var(--fg-2);
+.app-nav-title .nav-icon{
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+}
+.app-nav-title .nav-icon i{
+  font-size: 1rem;
+  color: var(--fg-2);
 }
 
 /* Title label reveals on expand (same motion as items) */
@@ -797,30 +818,20 @@ body.has-sidebar{ padding-left: var(--sidebar-collapsed); }
    SIDEBAR POLISH — icons, titles, and sign-out button
    =========================================================== */
 
-/* --- Consistent icon slot for every row (items + titles) --- */
-.app-nav-item i,
-.app-nav-title i{
-  width: 28px;            /* fixed icon lane */
-  min-width: 28px;
-  height: 28px;
-  line-height: 28px;
-  text-align: center;
-  font-size: 1.15rem;
-  color: var(--fg-2);
-  transition: color .16s ease, transform .16s ease, background-color .16s ease;
+/* --- Icon behavior (items + titles) --- */
+.app-nav .nav-icon{
+  background: transparent;
 }
-
-/* Hover/active color for icons (keeps visibility when collapsed) */
-.app-nav-item:hover i{ color: var(--brand); transform: translateY(-1px); }
-.app-nav-item.active i{ color: var(--brand); }
-
-/* Title row: subtle, non-interactive */
-.app-nav-title{
-  display:flex; align-items:center; gap:12px;
-  padding:8px 12px; margin-top:6px; margin-bottom:2px;
-  color: var(--fg-2); font-size:.78rem; font-weight:700;
-  text-transform:uppercase; letter-spacing:.06em;
-  user-select:none; pointer-events:none;
+.app-nav-item:hover .nav-icon,
+.app-nav-toggle:hover .nav-icon{
+  transform: translateY(-1px);
+}
+.app-nav-item:hover .nav-icon i,
+.app-nav-toggle:hover .nav-icon i{
+  color: var(--brand);
+}
+.app-nav-item.active .nav-icon i{
+  color: var(--brand);
 }
 
 /* Label reveal behavior (collapsed: just icons; hover to show labels) */
@@ -922,7 +933,7 @@ body.has-sidebar{ padding-left: var(--sidebar-collapsed); }
   box-shadow: 0 6px 16px color-mix(in oklab, var(--danger) 12%, transparent);
   border-radius: 12px;       /* same radius as other items */
 }
-.app-nav-item.signout i{ color: var(--danger); }
+.app-nav-item.signout .nav-icon i{ color: var(--danger); }
 .app-nav-item.signout:hover{
   background: color-mix(in oklab, var(--danger) 12%, var(--bg-surface));
   transform: translateY(-1px);
@@ -949,47 +960,32 @@ body.has-sidebar{ padding-left: var(--sidebar-collapsed); }
 .app-nav-item:active{ transform: translateY(0); }
 
 /* ===========================================================
-   SIDEBAR — Collapsed icon rail that still looks full
+   SIDEBAR — Collapsed icon rail refresh
    Keeps icons visible & centered when collapsed; labels reveal on hover.
-   Works with your existing .app-sidebar hover-to-expand behavior.
+   Works with the existing hover-to-expand behavior.
    =========================================================== */
 
-/* Fixed icon lane + subtle “chip” background */
-.app-nav-item i,
-.app-nav-title i{
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  line-height: 28px;
-  text-align: center;
-  font-size: 1.15rem;
-  color: var(--fg-2);
-  border-radius: 8px;
-  background: var(--bg-surface-2);
-  transition: color .16s ease, background-color .16s ease, transform .16s ease;
+.app-sidebar:not(:hover){
+  --collapsed-icon-shell: 44px;
 }
 
-/* Hover/active emphasis for icons */
-.app-nav-item:hover i{
-  color: var(--brand);
-  background: color-mix(in oklab, var(--brand) 14%, var(--bg-surface-2));
-  transform: translateY(-1px);
-}
-.app-nav-item.active i{
-  color: var(--brand);
-  background: color-mix(in oklab, var(--brand) 18%, #fff);
-}
-
-/* Collapsed state: center icons, hide labels cleanly */
-.app-sidebar:not(:hover) .app-nav-item,
-.app-sidebar:not(:hover) .app-nav-title{
+.app-sidebar:not(:hover) .app-nav-title,
+.app-sidebar:not(:hover) .app-nav-toggle,
+.app-sidebar:not(:hover) .app-nav-item{
   justify-content: center;
   gap: 0;
 }
+
 .app-sidebar:not(:hover) .app-nav-item{ padding: 10px 0; }
 .app-sidebar:not(:hover) .app-nav-title{ padding: 6px 0; }
+.app-sidebar:not(:hover) .app-nav-heading{ margin-bottom: 6px; }
 
-/* Hide the text labels while collapsed (but keep accessible titles) */
+.app-sidebar:not(:hover) .app-nav-toggle .app-nav-title-content{
+  justify-content: center;
+}
+
+.app-sidebar:not(:hover) .app-nav-toggle-icon{ display: none; }
+
 .app-sidebar:not(:hover) .label{
   width: 0;
   opacity: 0;
@@ -999,42 +995,88 @@ body.has-sidebar{ padding-left: var(--sidebar-collapsed); }
   pointer-events: none;
 }
 
-/* Dividers in collapsed mode: tighter margins so they’re still visible */
+.app-sidebar:not(:hover) .nav-icon{
+  width: var(--collapsed-icon-shell);
+  min-width: var(--collapsed-icon-shell);
+  height: var(--collapsed-icon-shell);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--bg-surface-2) 94%, transparent);
+  box-shadow: 0 14px 30px rgba(12,21,32,0.14);
+}
+
+.app-sidebar:not(:hover) .app-nav-title .nav-icon{
+  background: color-mix(in oklab, var(--fg-2) 12%, transparent);
+  box-shadow: none;
+}
+
+.app-sidebar:not(:hover) .nav-icon i{
+  color: var(--fg);
+  font-size: 1.25rem;
+}
+
+.app-sidebar:not(:hover) .app-nav-title .nav-icon i{
+  color: var(--fg-2);
+  font-size: 1.15rem;
+}
+
+.app-sidebar:not(:hover) .app-nav-item,
+.app-sidebar:not(:hover) .app-nav-item:hover,
+.app-sidebar:not(:hover) .app-nav-item:active{
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-sidebar:not(:hover) .app-nav-item:hover .nav-icon,
+.app-sidebar:not(:hover) .app-nav-toggle:hover .nav-icon{
+  transform: translateY(-2px);
+  box-shadow: 0 18px 34px rgba(12,21,32,0.18);
+}
+
+.app-sidebar:not(:hover) .app-nav-item:hover .nav-icon i,
+.app-sidebar:not(:hover) .app-nav-toggle:hover .nav-icon i{
+  color: var(--brand);
+}
+
+.app-sidebar:not(:hover) .app-nav-item.active .nav-icon{
+  background: color-mix(in oklab, var(--brand) 24%, white);
+  box-shadow: 0 20px 34px color-mix(in oklab, var(--brand) 28%, transparent);
+}
+
+.app-sidebar:not(:hover) .app-nav-item.active .nav-icon i{
+  color: color-mix(in oklab, var(--brand) 92%, #0b3d34);
+}
+
+.app-sidebar:not(:hover) .app-nav-item.active::before{
+  left: 50%;
+  top: auto;
+  bottom: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+}
+
 .app-sidebar:not(:hover) .app-nav-sep{
-  margin: 8px 18px;
+  margin: 10px 22px;
 }
 
-/* Active row highlight (subtle brand tint + indicator bar) */
-.app-nav-item{ position: relative; }
-.app-nav-item.active{
-  background: color-mix(in oklab, var(--brand) 10%, var(--bg-surface));
-  box-shadow: 0 4px 14px color-mix(in oklab, var(--brand) 18%, transparent);
-}
-.app-nav-item.active::before{
-  content:""; position:absolute; left:6px; top:8px; bottom:8px; width:3px;
-  background: var(--brand); border-radius: 2px;
+.app-sidebar:not(:hover) .app-nav-item.signout{
+  padding: 10px 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  margin-inline: 8px;
 }
 
-/* Sign out button — keeps icon visible & polished in collapsed state too */
-.app-nav-item.signout{
-  margin: 8px;
-  padding: 10px 12px;
-  background: color-mix(in oklab, var(--danger) 6%, var(--bg-surface));
-  border: 1px solid color-mix(in oklab, var(--danger) 18%, var(--bd-hairline));
+.app-sidebar:not(:hover) .app-nav-item.signout::before{ display: none; }
+
+.app-sidebar:not(:hover) .app-nav-item.signout .nav-icon{
+  background: color-mix(in oklab, var(--danger) 20%, white);
+  box-shadow: 0 18px 34px color-mix(in oklab, var(--danger) 28%, transparent);
+}
+
+.app-sidebar:not(:hover) .app-nav-item.signout .nav-icon i{
   color: var(--danger);
-  box-shadow: 0 6px 16px color-mix(in oklab, var(--danger) 12%, transparent);
-  border-radius: 12px;
-}
-.app-nav-item.signout i{ color: var(--danger); }
-.app-sidebar:not(:hover) .app-nav-item.signout{ padding: 10px 0; } /* center icon when collapsed */
-.app-nav-item.signout:hover{
-  background: color-mix(in oklab, var(--danger) 12%, var(--bg-surface));
-  transform: translateY(-1px);
-}
-.app-nav-item.signout:active{ transform: translateY(0); }
-.app-nav-item.signout::before{
-  content:""; position:absolute; left:-8px; right:-8px; top:-12px; height:1px;
-  background: var(--bd-hairline); border-radius:1px; opacity:.9;
 }
 
 /* Labels reveal on expand (already handled elsewhere); keep the transition smooth */
