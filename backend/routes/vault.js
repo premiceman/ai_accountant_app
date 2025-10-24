@@ -17,6 +17,8 @@ const VaultCollection = require('../models/VaultCollection');
 const User = require('../models/User');
 const { getObject, deleteObject, putObject, fileIdToKey } = require('../src/lib/r2');
 const { dispatch: dispatchDocupipe, readR2Buffer } = require('../src/services/vault/docupipeDispatcher');
+const { applyDocumentInsights, setInsightsProcessing } = require('../src/services/documents/insightsStore');
+const { rebuildMonthlyAnalytics } = require('../src/services/vault/analytics');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -345,6 +347,7 @@ router.get('/json', async (req, res) => {
         classification: job.classification || null,
         errors: Array.isArray(job.errors) ? job.errors : [],
         trim: job.trim || null,
+        requiresManualFields: job.requiresManualFields || null,
       };
       processing = {
         documentId: job.docupipe?.documentId || null,
@@ -352,6 +355,7 @@ router.get('/json', async (req, res) => {
         standardizationId: job.docupipe?.standardizationId || null,
         schemaId: job.docupipe?.schemaId || job.classification?.schemaId || null,
         completedAt: job.completedAt || null,
+        requiresManualFields: job.requiresManualFields || null,
       };
       result = {
         json_key: job.storage?.jsonKey || null,
@@ -401,6 +405,133 @@ router.get('/json', async (req, res) => {
     console.error('processed json error', error);
     res.status(500).json({ ok: false, error: 'JSON_FETCH_FAILED' });
   }
+});
+
+router.put('/json/:docId', express.json({ limit: '1mb' }), async (req, res) => {
+  const docId = String(req.params?.docId || '').trim();
+  if (!docId) {
+    return res.status(400).json({ ok: false, error: 'DOC_ID_REQUIRED' });
+  }
+
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'UNAUTHORISED' });
+  }
+
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const rawPayload = req.body?.json ?? req.body?.payload ?? req.body;
+  if (!rawPayload || typeof rawPayload !== 'object') {
+    return res.status(400).json({ ok: false, error: 'INVALID_PAYLOAD' });
+  }
+
+  const { payload, errors } = normaliseManualJsonPayload(rawPayload);
+  if (errors.length) {
+    return res.status(422).json({ ok: false, error: 'VALIDATION_FAILED', details: errors });
+  }
+
+  const decodedKey = decodeFileKey(docId);
+  if (!decodedKey || !validateFileOwnership(userId, decodedKey)) {
+    return res.status(403).json({ ok: false, error: 'FORBIDDEN' });
+  }
+
+  let job = null;
+  try {
+    job = await VaultDocumentJob.findOne({ userId: userObjectId, fileId: docId });
+  } catch (error) {
+    console.warn('manual json job lookup failed', error);
+  }
+
+  const now = new Date();
+  const manualMeta = {
+    ...payload.metadata,
+    manualOverride: true,
+    lastManualUpdateAt: now.toISOString(),
+  };
+  if (!manualMeta.documentMonth) {
+    const periodMonth = resolvePeriodMonth(payload.metrics?.period) || resolvePeriodMonth(payload.metadata?.period);
+    if (periodMonth) {
+      manualMeta.documentMonth = periodMonth;
+    }
+  }
+  if (!manualMeta.documentMonth) {
+    manualMeta.documentMonth = inferDocumentMonth(manualMeta.documentDate);
+  }
+  payload.metadata = manualMeta;
+
+  const jsonKey = `${decodedKey}.std.json`;
+  const buffer = Buffer.from(JSON.stringify(payload, null, 2), 'utf8');
+
+  try {
+    await putObject({ key: jsonKey, body: buffer, contentType: 'application/json' });
+  } catch (error) {
+    console.error('manual json upload failed', error);
+    return res.status(500).json({ ok: false, error: 'JSON_PERSIST_FAILED' });
+  }
+
+  const classificationKey = pickClassificationKey(job, manualMeta);
+  const fileInfo = {
+    id: docId,
+    name: job?.originalName || manualMeta.documentName || manualMeta.documentLabel || docId,
+    uploadedAt: manualMeta.uploadedAt || job?.completedAt || job?.createdAt || null,
+    collectionId: job?.collectionId ? job.collectionId.toString() : null,
+  };
+
+  try {
+    await applyDocumentInsights(userId, classificationKey, {
+      storeKey: classificationKey,
+      baseKey: classificationKey,
+      insightType: classificationKey,
+      metadata: manualMeta,
+      metrics: payload.metrics,
+      transactions: payload.transactions,
+      narrative: payload.narrative,
+    }, fileInfo);
+  } catch (error) {
+    console.error('manual json insight apply failed', error);
+  }
+
+  if (job) {
+    try {
+      job.storage = job.storage || {};
+      job.storage.jsonKey = jsonKey;
+      job.state = 'completed';
+      job.requiresManualFields = null;
+      job.completedAt = now;
+      const audit = Array.isArray(job.audit) ? job.audit.slice() : [];
+      audit.push({ state: 'manual_json_saved', at: now, note: 'Manual values supplied via UI' });
+      job.audit = audit;
+      job.markModified('storage');
+      job.markModified('audit');
+      job.markModified('requiresManualFields');
+      await job.save();
+    } catch (error) {
+      console.warn('manual json job update failed', error);
+    }
+  }
+
+  try {
+    await setInsightsProcessing(userId, classificationKey, {
+      active: false,
+      message: 'Manual data saved',
+      fileId: docId,
+      updatedAt: now,
+    });
+  } catch (error) {
+    console.warn('manual json processing state failed', error);
+  }
+
+  try {
+    const month = manualMeta.documentMonth || inferDocumentMonth(manualMeta.documentDate);
+    if (month) {
+      await rebuildMonthlyAnalytics({ userId: userObjectId, month }).catch((err) => {
+        console.warn('manual json analytics rebuild failed', err);
+      });
+    }
+  } catch (error) {
+    console.warn('manual json analytics scheduling failed', error);
+  }
+
+  res.json({ ok: true, json: payload, jsonKey, catalogueKey: classificationKey });
 });
 
 router.delete('/files/:fileId', async (req, res) => {
@@ -1290,4 +1421,199 @@ function mapDocumentForResponse(doc, job = null) {
     classification: job?.classification || null,
     message: latestErrorMessage(job),
   };
+}
+
+const AMOUNT_FIELD_PATTERN = /(amount|balance|total|value|gross|net|salary|income|pay|payment|contribution|tax|deduction|ni|loan|fee|limit)$/i;
+const DATE_FIELD_PATTERN = /(date|month|period|issued|start|end)$/i;
+
+function normaliseManualJsonPayload(input) {
+  const errors = [];
+  const base = input && typeof input === 'object' ? input : {};
+  const metadata = normaliseValueTree(['metadata'], ensurePlainManualObject(base.metadata), errors);
+  const metrics = normaliseValueTree(['metrics'], ensurePlainManualObject(base.metrics), errors);
+  const transactions = normaliseTransactions(Array.isArray(base.transactions) ? base.transactions : [], errors);
+  const narrative = Array.isArray(base.narrative)
+    ? base.narrative.map((item, index) => {
+        if (item == null) return null;
+        const text = String(item).trim();
+        if (!text) return null;
+        if (text.length > 2000) {
+          errors.push({ path: formatPath(['narrative', index]), message: 'Narrative entries must be under 2000 characters.' });
+          return null;
+        }
+        return text;
+      }).filter(Boolean)
+    : [];
+
+  return {
+    payload: {
+      metadata,
+      metrics,
+      transactions,
+      narrative,
+    },
+    errors,
+  };
+}
+
+function ensurePlainManualObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value;
+}
+
+function normaliseTransactions(entries, errors) {
+  const list = [];
+  entries.forEach((entry, index) => {
+    const tx = normaliseValueTree(['transactions', index], ensurePlainManualObject(entry), errors);
+    if (Object.keys(tx).length) {
+      list.push(tx);
+    }
+  });
+  return list;
+}
+
+function normaliseValueTree(path, source, errors) {
+  const result = {};
+  Object.entries(source || {}).forEach(([rawKey, rawValue]) => {
+    const key = String(rawKey || '').trim();
+    if (!key) return;
+    const nextPath = [...path, key];
+    const processed = normaliseValue(nextPath, rawValue, errors);
+    if (processed.keep) {
+      result[key] = processed.value;
+    }
+  });
+  return result;
+}
+
+function normaliseValue(path, value, errors) {
+  if (value == null || value === '') {
+    return { keep: false };
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      errors.push({ path: formatPath(path), message: 'Enter a valid number.' });
+      return { keep: false };
+    }
+    return { keep: true, value };
+  }
+  if (typeof value === 'boolean') {
+    return { keep: true, value };
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) {
+      return { keep: false };
+    }
+    if (text.length > 500) {
+      errors.push({ path: formatPath(path), message: 'Value is too long (max 500 characters).' });
+      return { keep: false };
+    }
+    if (shouldTreatAsAmount(path)) {
+      const number = parseAmount(text);
+      if (!Number.isFinite(number)) {
+        errors.push({ path: formatPath(path), message: 'Enter a valid monetary amount.' });
+        return { keep: false };
+      }
+      return { keep: true, value: number };
+    }
+    if (shouldTreatAsDate(path)) {
+      const iso = normaliseDate(text);
+      if (!iso) {
+        errors.push({ path: formatPath(path), message: 'Enter a valid date.' });
+        return { keep: false };
+      }
+      return { keep: true, value: iso };
+    }
+    return { keep: true, value: text };
+  }
+  if (Array.isArray(value)) {
+    const items = [];
+    value.forEach((item, index) => {
+      const processed = normaliseValue([...path, index], item, errors);
+      if (processed.keep) {
+        items.push(processed.value);
+      }
+    });
+    return { keep: items.length > 0, value: items };
+  }
+  if (typeof value === 'object') {
+    const nested = normaliseValueTree(path, ensurePlainManualObject(value), errors);
+    return { keep: Object.keys(nested).length > 0, value: nested };
+  }
+  return { keep: false };
+}
+
+function shouldTreatAsAmount(path) {
+  const key = String(path[path.length - 1] || '');
+  return AMOUNT_FIELD_PATTERN.test(key);
+}
+
+function shouldTreatAsDate(path) {
+  const key = String(path[path.length - 1] || '');
+  return DATE_FIELD_PATTERN.test(key);
+}
+
+function parseAmount(text) {
+  const cleaned = text.replace(/[^0-9+\-.]/g, '');
+  if (!cleaned) return Number.NaN;
+  const number = Number(cleaned);
+  return Number.isFinite(number) ? number : Number.NaN;
+}
+
+function normaliseDate(text) {
+  if (/^\d{4}-\d{2}$/.test(text)) {
+    return text;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+  const timestamp = Date.parse(text);
+  if (Number.isNaN(timestamp)) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function formatPath(parts) {
+  return parts.reduce((acc, part) => {
+    const token = typeof part === 'number' ? `[${part}]` : String(part);
+    if (!acc) return token;
+    if (token.startsWith('[')) return `${acc}${token}`;
+    return `${acc}.${token}`;
+  }, '');
+}
+
+function pickClassificationKey(job, meta) {
+  if (job?.classification?.key) return job.classification.key;
+  if (typeof meta?.catalogueKey === 'string' && meta.catalogueKey.trim()) {
+    return meta.catalogueKey.trim();
+  }
+  if (typeof meta?.docType === 'string' && meta.docType.trim()) {
+    return meta.docType.trim();
+  }
+  return 'manual_document';
+}
+
+function inferDocumentMonth(documentDate) {
+  if (!documentDate) return null;
+  if (typeof documentDate === 'string' && /^\d{4}-\d{2}$/.test(documentDate)) {
+    return documentDate;
+  }
+  const date = new Date(documentDate);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+function resolvePeriodMonth(period) {
+  if (!period || typeof period !== 'object') return null;
+  const monthCandidate = period.month || period.monthKey;
+  if (typeof monthCandidate === 'string' && /^\d{4}-\d{2}$/.test(monthCandidate.trim())) {
+    return monthCandidate.trim();
+  }
+  const start = period.start || period.from;
+  if (start) {
+    return inferDocumentMonth(start);
+  }
+  return null;
 }

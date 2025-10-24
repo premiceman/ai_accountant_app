@@ -139,6 +139,21 @@
   let jsonModalClose = null;
   let jsonModalReturnFocus = null;
   let jsonModalStylesInjected = false;
+  let manualEditorModal = null;
+  let manualEditorDialog = null;
+  let manualEditorTitle = null;
+  let manualEditorMessage = null;
+  let manualEditorError = null;
+  let manualEditorLoading = null;
+  let manualEditorForm = null;
+  let manualEditorSections = null;
+  let manualEditorSave = null;
+  let manualEditorCancel = null;
+  let manualEditorReturnFocus = null;
+  let manualEditorDocId = null;
+  let manualEditorFile = null;
+  let manualEditorRequired = null;
+  let manualEditorStylesInjected = false;
 
   let trimModal = null;
   let trimModalDialog = null;
@@ -1253,6 +1268,1084 @@
     }
   }
 
+  function injectManualEditorStyles() {
+    if (manualEditorStylesInjected) return;
+    manualEditorStylesInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.55); z-index: 1320; }
+      .vault-json-editor.is-visible { display: flex; }
+      .vault-json-editor__dialog { position: relative; width: min(920px, 100%); max-height: min(90vh, 760px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: var(--vault-shadow, 0 18px 52px rgba(15, 23, 42, 0.16)); display: flex; flex-direction: column; }
+      .vault-json-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 24px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      .vault-json-editor__title { margin: 0; font-size: 1.05rem; font-weight: 600; }
+      .vault-json-editor__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; padding: 4px; cursor: pointer; }
+      .vault-json-editor__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
+      .vault-json-editor__body { padding: 20px 24px 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px; }
+      .vault-json-editor__message { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 0; }
+      .vault-json-editor__message strong { color: var(--vault-accent, #6759ff); }
+      .vault-json-editor__error { font-size: 0.9rem; color: var(--light-red, #ef4444); margin: 0; }
+      .vault-json-editor__loading { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 12px 0; }
+      .vault-json-editor__form { display: flex; flex-direction: column; gap: 18px; }
+      .json-editor-section { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 14px; background: rgba(15, 23, 42, 0.02); }
+      .json-editor-section__header { display: flex; flex-direction: column; gap: 4px; }
+      .json-editor-section__title { margin: 0; font-size: 0.95rem; font-weight: 600; }
+      .json-editor-section__description { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.65)); }
+      .json-editor-list { display: flex; flex-direction: column; gap: 12px; }
+      .json-editor-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.6fr) minmax(200px, 1.2fr) auto; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.75); border: 1px solid transparent; transition: border-color 160ms ease; }
+      .json-editor-row.has-error { border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.05); }
+      .json-editor-row.is-required { border-color: rgba(103, 89, 255, 0.35); }
+      .json-editor-col { display: flex; flex-direction: column; gap: 4px; }
+      .json-editor-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .json-editor-input, .json-editor-select, .json-editor-textarea { width: 100%; border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 10px; padding: 8px 10px; font-size: 0.9rem; line-height: 1.45; background: #fff; color: inherit; }
+      .json-editor-textarea { resize: vertical; min-height: 48px; }
+      .json-editor-select { height: 38px; }
+      .json-editor-remove { border: none; background: rgba(239, 68, 68, 0.1); color: rgba(239, 68, 68, 1); border-radius: 10px; padding: 8px 12px; font-size: 0.85rem; cursor: pointer; transition: background 140ms ease; }
+      .json-editor-remove:hover { background: rgba(239, 68, 68, 0.16); }
+      .json-editor-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+      .json-editor-row__error { grid-column: 1 / -1; font-size: 0.8rem; color: rgba(239, 68, 68, 1); }
+      .json-editor-add { align-self: flex-start; border: none; background: rgba(103, 89, 255, 0.12); color: var(--vault-accent, #6759ff); border-radius: 999px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer; transition: background 140ms ease; }
+      .json-editor-add:hover { background: rgba(103, 89, 255, 0.18); }
+      .json-editor-transaction { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.85); }
+      .json-editor-transaction__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .json-editor-transaction__title { margin: 0; font-size: 0.9rem; font-weight: 600; }
+      .json-editor-transaction-list { display: flex; flex-direction: column; gap: 12px; }
+      .json-editor-narrative { display: flex; flex-direction: column; gap: 12px; }
+      .json-editor-narrative-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.85); }
+      .json-editor-narrative-item.has-error { border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.05); }
+      .json-editor-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 24px; border-top: 1px solid rgba(15, 23, 42, 0.08); background: rgba(249, 250, 251, 0.85); }
+      .json-editor-footer button { min-width: 120px; border-radius: 999px; padding: 10px 18px; font-size: 0.9rem; border: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease; }
+      .json-editor-footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: inherit; }
+      .json-editor-footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); }
+      .json-editor-footer .btn-primary { background: var(--vault-accent, #6759ff); color: #fff; box-shadow: 0 10px 20px rgba(103, 89, 255, 0.24); }
+      .json-editor-footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(103, 89, 255, 0.28); }
+      .viewer__file-alert { margin: 12px 0 0; padding: 12px 14px; border-radius: 12px; background: rgba(253, 186, 116, 0.22); border: 1px solid rgba(234, 88, 12, 0.32); font-size: 0.9rem; color: rgba(120, 53, 15, 0.95); display: flex; flex-direction: column; gap: 6px; }
+      .viewer__file-alert strong { font-weight: 600; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureManualEditorModal() {
+    if (manualEditorModal) return manualEditorModal;
+    injectManualEditorStyles();
+
+    const modal = document.createElement('div');
+    modal.className = 'vault-json-editor';
+    modal.setAttribute('aria-hidden', 'true');
+
+    const dialog = document.createElement('div');
+    dialog.className = 'vault-json-editor__dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'vault-json-editor-title');
+    dialog.tabIndex = -1;
+
+    const header = document.createElement('header');
+    header.className = 'vault-json-editor__header';
+
+    const title = document.createElement('h4');
+    title.className = 'vault-json-editor__title';
+    title.id = 'vault-json-editor-title';
+    title.textContent = 'Edit data';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'vault-json-editor__close';
+    closeBtn.setAttribute('aria-label', 'Close editor');
+    closeBtn.textContent = '×';
+
+    const body = document.createElement('div');
+    body.className = 'vault-json-editor__body';
+
+    const message = document.createElement('p');
+    message.className = 'vault-json-editor__message';
+    message.hidden = true;
+
+    const error = document.createElement('p');
+    error.className = 'vault-json-editor__error';
+    error.hidden = true;
+
+    const loading = document.createElement('p');
+    loading.className = 'vault-json-editor__loading';
+    loading.textContent = 'Loading…';
+    loading.hidden = true;
+
+    const form = document.createElement('form');
+    form.className = 'vault-json-editor__form';
+    form.hidden = true;
+
+    const sections = document.createElement('div');
+    sections.className = 'vault-json-editor__sections';
+    form.appendChild(sections);
+
+    const footer = document.createElement('div');
+    footer.className = 'json-editor-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = 'Cancel';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.className = 'btn-primary';
+    saveBtn.textContent = 'Save changes';
+
+    footer.append(cancelBtn, saveBtn);
+    form.appendChild(footer);
+
+    body.append(message, error, loading, form);
+
+    header.append(title, closeBtn);
+    dialog.append(header, body);
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) {
+        hideManualEditorModal();
+      }
+    });
+
+    closeBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      hideManualEditorModal();
+    });
+
+    cancelBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      hideManualEditorModal();
+    });
+
+    form.addEventListener('submit', handleManualEditorSubmit);
+    form.addEventListener('click', handleManualEditorClick);
+    form.addEventListener('change', handleManualEditorChange);
+
+    modal.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        hideManualEditorModal();
+      }
+    });
+
+    manualEditorModal = modal;
+    manualEditorDialog = dialog;
+    manualEditorTitle = title;
+    manualEditorMessage = message;
+    manualEditorError = error;
+    manualEditorLoading = loading;
+    manualEditorForm = form;
+    manualEditorSections = sections;
+    manualEditorSave = saveBtn;
+    manualEditorCancel = cancelBtn;
+    return modal;
+  }
+
+  function hideManualEditorModal() {
+    if (!manualEditorModal) return;
+    manualEditorModal.classList.remove('is-visible');
+    manualEditorModal.setAttribute('aria-hidden', 'true');
+    manualEditorDocId = null;
+    manualEditorFile = null;
+    manualEditorRequired = null;
+    if (manualEditorForm) {
+      manualEditorForm.hidden = true;
+    }
+    if (manualEditorLoading) {
+      manualEditorLoading.hidden = true;
+    }
+    if (manualEditorMessage) {
+      manualEditorMessage.hidden = true;
+      manualEditorMessage.textContent = '';
+    }
+    if (manualEditorError) {
+      manualEditorError.hidden = true;
+      manualEditorError.textContent = '';
+    }
+    if (manualEditorSections) {
+      manualEditorSections.innerHTML = '';
+    }
+    const target = manualEditorReturnFocus;
+    manualEditorReturnFocus = null;
+    if (target && typeof target.focus === 'function') {
+      requestAnimationFrame(() => {
+        try { target.focus(); } catch (error) { console.warn('Failed to restore focus after closing editor', error); }
+      });
+    }
+  }
+
+  async function openManualJsonEditor(file, trigger) {
+    const docId = resolveDocId(file);
+    if (!docId) {
+      window.alert('Unable to edit this document because it is missing an identifier.');
+      return;
+    }
+
+    const modal = ensureManualEditorModal();
+    if (!modal || !manualEditorForm || !manualEditorLoading) {
+      window.alert('Unable to open the editor right now.');
+      return;
+    }
+
+    manualEditorDocId = docId;
+    manualEditorFile = file;
+    manualEditorReturnFocus = trigger || null;
+    clearManualEditorErrors();
+
+    manualEditorForm.hidden = true;
+    manualEditorLoading.hidden = false;
+    manualEditorLoading.textContent = 'Loading document data…';
+    if (manualEditorMessage) {
+      manualEditorMessage.hidden = true;
+      manualEditorMessage.textContent = '';
+    }
+    if (manualEditorError) {
+      manualEditorError.hidden = true;
+      manualEditorError.textContent = '';
+    }
+
+    const restore = trigger ? withButtonSpinner(trigger, 'Opening…') : () => {};
+
+    try {
+      const { data, meta, processing } = await fetchManualJsonPayload(docId);
+      manualEditorRequired = ensureObject(meta?.requiresManualFields);
+      renderManualEditorForm(data, manualEditorRequired, processing);
+      if (manualEditorTitle) {
+        manualEditorTitle.textContent = file?.title ? `${file.title} — Edit data` : 'Edit document data';
+      }
+      if (manualEditorMessage) {
+        const requires = Array.isArray(processing?.requiresManualFields)
+          ? processing.requiresManualFields.filter((field) => typeof field === 'string' && field.trim())
+          : [];
+        if (requires.length) {
+          manualEditorMessage.innerHTML = `<strong>Action needed:</strong> Add the missing values for ${requires.join(', ')} so your analytics stay accurate.`;
+          manualEditorMessage.hidden = false;
+        } else {
+          manualEditorMessage.hidden = true;
+        }
+      }
+      manualEditorLoading.hidden = true;
+      manualEditorForm.hidden = false;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(() => {
+        try {
+          if (manualEditorDialog) {
+            manualEditorDialog.focus();
+          } else if (manualEditorSave) {
+            manualEditorSave.focus();
+          }
+        } catch {}
+      });
+    } catch (error) {
+      manualEditorLoading.textContent = error.message || 'Unable to load document data.';
+      manualEditorForm.hidden = true;
+      modal.classList.add('is-visible');
+      modal.setAttribute('aria-hidden', 'false');
+    } finally {
+      restore();
+    }
+  }
+
+  async function fetchManualJsonPayload(docId) {
+    const response = await apiFetch(`/json?docId=${encodeURIComponent(docId)}`, { cache: 'no-store' });
+    if (response.status === 401) {
+      handleUnauthorised('Your session has expired. Please sign in again.');
+      throw new Error('Please sign in again to edit this document.');
+    }
+    const payload = await response.json().catch(() => null);
+    if (response.ok && payload?.ok) {
+      return {
+        data: normaliseManualJsonShape(payload.json || {}),
+        meta: payload.meta || {},
+        processing: payload.processing || {},
+      };
+    }
+    if (payload?.error === 'JSON_NOT_READY') {
+      return {
+        data: normaliseManualJsonShape({}),
+        meta: payload.meta || {},
+        processing: payload.processing || {},
+      };
+    }
+    throw new Error(payload?.error || 'Unable to load this document\'s data right now.');
+  }
+
+  function normaliseManualJsonShape(data) {
+    return {
+      metadata: ensureObject(data?.metadata),
+      metrics: ensureObject(data?.metrics),
+      transactions: Array.isArray(data?.transactions) ? data.transactions.map((tx) => ensureObject(tx)) : [],
+      narrative: Array.isArray(data?.narrative) ? data.narrative.map((line) => (line == null ? '' : String(line))) : [],
+    };
+  }
+
+  function renderManualEditorForm(data, required = {}, processing = {}) {
+    if (!manualEditorSections || !manualEditorForm) return;
+    manualEditorSections.innerHTML = '';
+
+    const metadataSection = buildKeyValueSection({
+      section: 'metadata',
+      title: 'Metadata',
+      description: 'Document information such as dates, labels and account identifiers.',
+      entries: data.metadata || {},
+      required: normaliseRequiredKeys(required.metadata),
+    });
+    manualEditorSections.appendChild(metadataSection);
+
+    const metricsSection = buildKeyValueSection({
+      section: 'metrics',
+      title: 'Metrics',
+      description: 'Amounts, balances and key figures used across the app.',
+      entries: data.metrics || {},
+      required: normaliseRequiredKeys(required.metrics),
+    });
+    manualEditorSections.appendChild(metricsSection);
+
+    const transactionsSection = buildTransactionsSection({
+      transactions: Array.isArray(data.transactions) ? data.transactions : [],
+      required: Array.isArray(required.transactions) ? required.transactions : [],
+    });
+    manualEditorSections.appendChild(transactionsSection);
+
+    const narrativeSection = buildNarrativeSection({
+      narrative: Array.isArray(data.narrative) ? data.narrative : [],
+    });
+    manualEditorSections.appendChild(narrativeSection);
+
+    updateTransactionIndexes();
+
+    const requiresManual = Array.isArray(processing?.requiresManualFields)
+      ? processing.requiresManualFields.filter((field) => typeof field === 'string' && field.trim())
+      : [];
+    if (manualEditorMessage) {
+      if (requiresManual.length) {
+        manualEditorMessage.innerHTML = `<strong>Manual entry required:</strong> Add values for ${requiresManual.join(', ')}.`;
+        manualEditorMessage.hidden = false;
+      } else {
+        manualEditorMessage.hidden = true;
+        manualEditorMessage.textContent = '';
+      }
+    }
+  }
+
+  function normaliseRequiredKeys(value) {
+    if (Array.isArray(value)) {
+      return value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
+    }
+    if (typeof value === 'object' && value) {
+      return Object.keys(value).filter((key) => typeof key === 'string' && key.trim()).map((key) => key.trim());
+    }
+    return [];
+  }
+
+  function buildKeyValueSection({ section, title, description, entries, required }) {
+    const wrapper = document.createElement('section');
+    wrapper.className = 'json-editor-section';
+    wrapper.dataset.section = section;
+
+    const header = document.createElement('div');
+    header.className = 'json-editor-section__header';
+    const heading = document.createElement('h5');
+    heading.className = 'json-editor-section__title';
+    heading.textContent = title;
+    header.appendChild(heading);
+    if (description) {
+      const help = document.createElement('p');
+      help.className = 'json-editor-section__description';
+      help.textContent = description;
+      header.appendChild(help);
+    }
+    wrapper.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'json-editor-list';
+    list.dataset.editorList = section;
+    list.dataset.section = section;
+
+    const keys = Object.keys(entries || {});
+    const requiredSet = new Set(Array.isArray(required) ? required : []);
+    if (!keys.length && requiredSet.size) {
+      requiredSet.forEach((field) => {
+        list.appendChild(createEditorRow({ section, key: field, value: '', required: true }));
+      });
+    } else if (keys.length) {
+      keys.forEach((key) => {
+        list.appendChild(createEditorRow({ section, key, value: entries[key], required: requiredSet.has(key) }));
+      });
+    } else {
+      list.appendChild(createEditorRow({ section, key: '', value: '' }));
+    }
+
+    wrapper.appendChild(list);
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'json-editor-add';
+    addBtn.dataset.editorAction = 'add-field';
+    addBtn.dataset.section = section;
+    addBtn.textContent = 'Add field';
+    wrapper.appendChild(addBtn);
+
+    return wrapper;
+  }
+
+  function buildTransactionsSection({ transactions, required }) {
+    const wrapper = document.createElement('section');
+    wrapper.className = 'json-editor-section';
+    wrapper.dataset.section = 'transactions';
+
+    const header = document.createElement('div');
+    header.className = 'json-editor-section__header';
+    const heading = document.createElement('h5');
+    heading.className = 'json-editor-section__title';
+    heading.textContent = 'Transactions';
+    header.appendChild(heading);
+    const help = document.createElement('p');
+    help.className = 'json-editor-section__description';
+    help.textContent = 'Each transaction should include a date, description and amount.';
+    header.appendChild(help);
+    wrapper.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'json-editor-transactions';
+    list.dataset.editorTransactions = 'true';
+
+    const entries = Array.isArray(transactions) && transactions.length ? transactions : (Array.isArray(required) && required.length ? required.map(() => ({})) : []);
+    entries.forEach((tx, index) => {
+      list.appendChild(createTransactionCard(tx, index));
+    });
+
+    if (!entries.length) {
+      list.appendChild(createTransactionCard({}, 0));
+    }
+
+    wrapper.appendChild(list);
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'json-editor-add';
+    addBtn.dataset.editorAction = 'add-transaction';
+    addBtn.textContent = 'Add transaction';
+    wrapper.appendChild(addBtn);
+
+    return wrapper;
+  }
+
+  function buildNarrativeSection({ narrative }) {
+    const wrapper = document.createElement('section');
+    wrapper.className = 'json-editor-section';
+    wrapper.dataset.section = 'narrative';
+
+    const header = document.createElement('div');
+    header.className = 'json-editor-section__header';
+    const heading = document.createElement('h5');
+    heading.className = 'json-editor-section__title';
+    heading.textContent = 'Narrative';
+    header.appendChild(heading);
+    const help = document.createElement('p');
+    help.className = 'json-editor-section__description';
+    help.textContent = 'Optional notes or bullet points displayed alongside the document.';
+    header.appendChild(help);
+    wrapper.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'json-editor-narrative';
+    list.dataset.editorNarrative = 'true';
+
+    const entries = Array.isArray(narrative) && narrative.length ? narrative : [''];
+    entries.forEach((line) => {
+      list.appendChild(createNarrativeRow(line));
+    });
+
+    wrapper.appendChild(list);
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'json-editor-add';
+    addBtn.dataset.editorAction = 'add-narrative';
+    addBtn.textContent = 'Add note';
+    wrapper.appendChild(addBtn);
+
+    return wrapper;
+  }
+
+  function createTransactionCard(transaction, index) {
+    const id = `tx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const card = document.createElement('article');
+    card.className = 'json-editor-transaction';
+    card.dataset.editorTransaction = id;
+    card.dataset.editorTransactionIndex = String(index);
+
+    const header = document.createElement('div');
+    header.className = 'json-editor-transaction__header';
+    const title = document.createElement('h6');
+    title.className = 'json-editor-transaction__title';
+    title.textContent = `Transaction ${index + 1}`;
+    header.appendChild(title);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'json-editor-remove';
+    remove.dataset.editorAction = 'remove-transaction';
+    remove.dataset.transaction = id;
+    remove.textContent = 'Remove';
+    header.appendChild(remove);
+    card.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'json-editor-transaction-list';
+    list.dataset.editorList = 'transactions';
+    list.dataset.transaction = id;
+
+    const keys = Object.keys(transaction || {});
+    if (keys.length) {
+      keys.forEach((key) => {
+        list.appendChild(createEditorRow({ section: 'transactions', key, value: transaction[key], transactionId: id }));
+      });
+    } else {
+      list.appendChild(createEditorRow({ section: 'transactions', key: '', value: '', transactionId: id }));
+    }
+    card.appendChild(list);
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'json-editor-add';
+    addBtn.dataset.editorAction = 'add-field';
+    addBtn.dataset.section = 'transactions';
+    addBtn.dataset.transaction = id;
+    addBtn.textContent = 'Add field';
+    card.appendChild(addBtn);
+
+    return card;
+  }
+
+  function createNarrativeRow(value) {
+    const row = document.createElement('div');
+    row.className = 'json-editor-narrative-item';
+    row.dataset.editorNarrativeItem = 'true';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'json-editor-textarea';
+    textarea.dataset.editorField = 'narrative';
+    textarea.rows = 2;
+    textarea.value = value || '';
+    row.appendChild(textarea);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'json-editor-remove';
+    remove.dataset.editorAction = 'remove-narrative';
+    remove.textContent = 'Remove';
+    row.appendChild(remove);
+
+    const error = document.createElement('div');
+    error.className = 'json-editor-row__error';
+    error.dataset.editorError = 'message';
+    row.appendChild(error);
+
+    return row;
+  }
+
+  function createEditorRow({ section, key, value, required = false, transactionId = null }) {
+    const row = document.createElement('div');
+    row.className = 'json-editor-row';
+    row.dataset.editorRow = section;
+    if (transactionId) {
+      row.dataset.transaction = transactionId;
+    }
+    if (required) {
+      row.classList.add('is-required');
+      row.dataset.required = 'true';
+    }
+
+    const keyCol = document.createElement('div');
+    keyCol.className = 'json-editor-col';
+    const keyLabel = document.createElement('label');
+    keyLabel.className = 'json-editor-label';
+    keyLabel.textContent = 'Field';
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.className = 'json-editor-input';
+    keyInput.placeholder = 'Field name';
+    keyInput.dataset.editorField = 'key';
+    keyInput.value = key || '';
+    keyCol.append(keyLabel, keyInput);
+
+    const typeCol = document.createElement('div');
+    typeCol.className = 'json-editor-col';
+    const typeLabel = document.createElement('label');
+    typeLabel.className = 'json-editor-label';
+    typeLabel.textContent = 'Type';
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'json-editor-select';
+    typeSelect.dataset.editorField = 'type';
+    const fieldType = detectEditorType(key, value);
+    ['text', 'number', 'date', 'boolean', 'json'].forEach((option) => {
+      const opt = document.createElement('option');
+      opt.value = option;
+      opt.textContent = option === 'json' ? 'Structured data' : option.charAt(0).toUpperCase() + option.slice(1);
+      typeSelect.appendChild(opt);
+    });
+    typeSelect.value = fieldType;
+    typeCol.append(typeLabel, typeSelect);
+
+    const valueCol = document.createElement('div');
+    valueCol.className = 'json-editor-col';
+    valueCol.dataset.editorValueContainer = 'true';
+    const valueLabel = document.createElement('label');
+    valueLabel.className = 'json-editor-label';
+    valueLabel.textContent = 'Value';
+    valueCol.appendChild(valueLabel);
+    const valueControl = createValueControl(fieldType, value);
+    valueCol.appendChild(valueControl);
+    row.dataset.editorValueType = fieldType;
+
+    const removeCol = document.createElement('div');
+    removeCol.className = 'json-editor-col';
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'json-editor-remove';
+    removeBtn.dataset.editorAction = 'remove-row';
+    removeBtn.dataset.section = section;
+    if (transactionId) {
+      removeBtn.dataset.transaction = transactionId;
+    }
+    removeBtn.textContent = 'Remove';
+    if (required) {
+      removeBtn.disabled = true;
+    }
+    removeCol.appendChild(removeBtn);
+
+    const error = document.createElement('div');
+    error.className = 'json-editor-row__error';
+    error.dataset.editorError = 'message';
+
+    row.append(keyCol, typeCol, valueCol, removeCol, error);
+    return row;
+  }
+
+  function detectEditorType(key, value) {
+    const normalisedKey = (key || '').toLowerCase();
+    if (typeof value === 'number') return 'number';
+    if (typeof value === 'boolean') return 'boolean';
+    if (value && typeof value === 'object') return 'json';
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (/^\d{4}-\d{2}$/.test(trimmed) || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return 'date';
+      const parsed = Date.parse(trimmed);
+      if (!Number.isNaN(parsed) && trimmed.length > 3) return 'date';
+      if ((/amount|balance|total|value|gross|net|salary|income|pay|payment|contribution|tax|deduction|ni|loan|fee|limit$/i).test(normalisedKey)) {
+        const number = Number(trimmed.replace(/[, ]+/g, ''));
+        if (!Number.isNaN(number)) return 'number';
+      }
+    }
+    return 'text';
+  }
+
+  function createValueControl(type, value) {
+    let control;
+    if (type === 'number') {
+      control = document.createElement('input');
+      control.type = 'number';
+      control.step = '0.01';
+      control.inputMode = 'decimal';
+      control.value = value != null && value !== '' ? String(value) : '';
+    } else if (type === 'date') {
+      control = document.createElement('input');
+      control.type = 'date';
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+        control.value = value.trim();
+      } else if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value.trim())) {
+        control.value = `${value.trim()}-01`;
+      } else {
+        control.value = '';
+      }
+    } else if (type === 'boolean') {
+      control = document.createElement('select');
+      control.className = 'json-editor-select';
+      ['true', 'false'].forEach((option) => {
+        const opt = document.createElement('option');
+        opt.value = option;
+        opt.textContent = option === 'true' ? 'Yes' : 'No';
+        control.appendChild(opt);
+      });
+      control.value = String(value === true || value === 'true');
+    } else if (type === 'json') {
+      control = document.createElement('textarea');
+      control.className = 'json-editor-textarea';
+      control.rows = 2;
+      try {
+        control.value = typeof value === 'string' && value.trim().startsWith('{') ? value : JSON.stringify(value ?? {}, null, 2);
+      } catch {
+        control.value = typeof value === 'string' ? value : '';
+      }
+    } else {
+      control = document.createElement('input');
+      control.type = 'text';
+      control.value = value != null && value !== '' ? String(value) : '';
+    }
+    if (!control.className) {
+      control.className = 'json-editor-input';
+    } else if (!control.className.includes('json-editor')) {
+      control.classList.add('json-editor-input');
+    }
+    control.dataset.editorField = 'value';
+    control.dataset.editorType = type;
+    return control;
+  }
+
+  function handleManualEditorClick(event) {
+    const actionButton = event.target.closest('[data-editor-action]');
+    if (!actionButton) return;
+    const action = actionButton.dataset.editorAction;
+    if (!action) return;
+    event.preventDefault();
+
+    if (action === 'add-field') {
+      const section = actionButton.dataset.section || 'metadata';
+      const transaction = actionButton.dataset.transaction || null;
+      if (transaction) {
+        const list = manualEditorSections?.querySelector(`[data-editor-list="transactions"][data-transaction="${transaction}"]`);
+        if (list) {
+          list.appendChild(createEditorRow({ section: 'transactions', key: '', value: '', transactionId: transaction }));
+        }
+      } else {
+        const list = manualEditorSections?.querySelector(`.json-editor-list[data-section="${section}"]`);
+        if (list) {
+          list.appendChild(createEditorRow({ section, key: '', value: '' }));
+        }
+      }
+    } else if (action === 'remove-row') {
+      const row = actionButton.closest('[data-editor-row]');
+      if (!row) return;
+      if (row.dataset.required === 'true') return;
+      row.remove();
+    } else if (action === 'add-transaction') {
+      const list = manualEditorSections?.querySelector('[data-editor-transactions]');
+      if (list) {
+        const nextIndex = list.querySelectorAll('[data-editor-transaction]').length;
+        list.appendChild(createTransactionCard({}, nextIndex));
+        updateTransactionIndexes();
+      }
+    } else if (action === 'remove-transaction') {
+      const id = actionButton.dataset.transaction;
+      if (!id) return;
+      const card = manualEditorSections?.querySelector(`[data-editor-transaction="${id}"]`);
+      if (card) {
+        card.remove();
+        updateTransactionIndexes();
+      }
+    } else if (action === 'add-narrative') {
+      const list = manualEditorSections?.querySelector('[data-editor-narrative]');
+      if (list) {
+        list.appendChild(createNarrativeRow(''));
+      }
+    } else if (action === 'remove-narrative') {
+      const item = actionButton.closest('[data-editor-narrative-item]');
+      if (item) item.remove();
+    }
+  }
+
+  function handleManualEditorChange(event) {
+    const select = event.target.closest('[data-editor-field="type"]');
+    if (!select) return;
+    const row = select.closest('[data-editor-row]');
+    if (!row) return;
+    const container = row.querySelector('[data-editor-value-container]');
+    if (!container) return;
+    const previousControl = container.querySelector('[data-editor-field="value"]');
+    const previousValue = previousControl ? previousControl.value : '';
+    const type = select.value || 'text';
+    container.innerHTML = '';
+    const control = createValueControl(type, previousValue);
+    container.appendChild(control);
+    row.dataset.editorValueType = type;
+  }
+
+  function handleManualEditorSubmit(event) {
+    event.preventDefault();
+    clearManualEditorErrors();
+    if (!manualEditorDocId) {
+      manualEditorError.hidden = false;
+      manualEditorError.textContent = 'Document identifier missing. Close and try again.';
+      return;
+    }
+    const { payload, errors } = collectManualEditorData();
+    if (errors.length) {
+      manualEditorError.hidden = false;
+      manualEditorError.textContent = 'Please fix the highlighted fields.';
+      return;
+    }
+    submitManualEditorPayload(payload).catch((error) => {
+      manualEditorError.hidden = false;
+      manualEditorError.textContent = error.message || 'Unable to save changes right now.';
+    });
+  }
+
+  async function submitManualEditorPayload(payload) {
+    if (!manualEditorDocId || !manualEditorSave) return;
+    const restore = withButtonSpinner(manualEditorSave, 'Saving…');
+    try {
+      const response = await apiFetch(`/json/${encodeURIComponent(manualEditorDocId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ json: payload }),
+      });
+      const result = await response.json().catch(() => null);
+      if (response.status === 401) {
+        handleUnauthorised('Your session has expired. Please sign in again.');
+        throw new Error('Please sign in again to continue.');
+      }
+      if (!response.ok || !result?.ok) {
+        const details = Array.isArray(result?.details) ? result.details : [];
+        if (details.length) {
+          highlightServerValidation(details);
+          manualEditorError.hidden = false;
+          manualEditorError.textContent = result?.error || 'Please fix the highlighted fields.';
+        } else {
+          throw new Error(result?.error || 'Unable to save changes right now.');
+        }
+        return;
+      }
+      if (manualEditorMessage) {
+        manualEditorMessage.hidden = false;
+        manualEditorMessage.textContent = 'Changes saved. Your analytics will refresh shortly.';
+      }
+      manualEditorError.hidden = true;
+      if (manualEditorFile) {
+        applyProcessingUpdate(manualEditorFile, {
+          status: 'completed',
+          processing: { requiresManualFields: null },
+        });
+      }
+      renderViewerFiles();
+      queueRefresh();
+    } catch (error) {
+      throw error;
+    } finally {
+      restore();
+    }
+  }
+
+  function collectManualEditorData() {
+    const errors = [];
+    const metadata = gatherKeyValueSection('metadata', errors);
+    const metrics = gatherKeyValueSection('metrics', errors);
+    const transactions = gatherTransactions(errors);
+    const narrative = gatherNarrative(errors);
+    return { payload: { metadata, metrics, transactions, narrative }, errors };
+  }
+
+  function gatherKeyValueSection(section, errors) {
+    const list = manualEditorSections?.querySelector(`.json-editor-list[data-section="${section}"]`);
+    if (!list) return {};
+    const rows = Array.from(list.querySelectorAll('[data-editor-row]'));
+    const result = {};
+    rows.forEach((row) => {
+      const keyInput = row.querySelector('[data-editor-field="key"]');
+      const typeSelect = row.querySelector('[data-editor-field="type"]');
+      const valueControl = row.querySelector('[data-editor-field="value"]');
+      if (!keyInput || !typeSelect || !valueControl) return;
+      const key = keyInput.value.trim();
+      if (!key) return;
+      const parsed = parseEditorValue(typeSelect.value, valueControl, { allowEmpty: true });
+      if (!parsed.ok) {
+        errors.push({ path: `${section}.${key}`, message: parsed.message });
+        showRowError(row, parsed.message);
+        return;
+      }
+      if (typeof parsed.value === 'undefined') return;
+      result[key] = parsed.value;
+    });
+    return result;
+  }
+
+  function gatherTransactions(errors) {
+    const list = manualEditorSections?.querySelector('[data-editor-transactions]');
+    if (!list) return [];
+    const cards = Array.from(list.querySelectorAll('[data-editor-transaction]'));
+    const results = [];
+    cards.forEach((card, index) => {
+      card.dataset.editorTransactionIndex = String(index);
+      const rows = Array.from(card.querySelectorAll('[data-editor-row]'));
+      const record = {};
+      rows.forEach((row) => {
+        const keyInput = row.querySelector('[data-editor-field="key"]');
+        const typeSelect = row.querySelector('[data-editor-field="type"]');
+        const valueControl = row.querySelector('[data-editor-field="value"]');
+        if (!keyInput || !typeSelect || !valueControl) return;
+        const key = keyInput.value.trim();
+        if (!key) return;
+        const parsed = parseEditorValue(typeSelect.value, valueControl, { allowEmpty: true });
+        if (!parsed.ok) {
+          errors.push({ path: `transactions[${index}].${key}`, message: parsed.message });
+          showRowError(row, parsed.message);
+          return;
+        }
+        if (typeof parsed.value === 'undefined') return;
+        record[key] = parsed.value;
+      });
+      if (Object.keys(record).length) {
+        results.push(record);
+      }
+    });
+    return results;
+  }
+
+  function gatherNarrative(errors) {
+    const list = manualEditorSections?.querySelector('[data-editor-narrative]');
+    if (!list) return [];
+    const items = Array.from(list.querySelectorAll('[data-editor-narrative-item]'));
+    const entries = [];
+    items.forEach((item, index) => {
+      const textarea = item.querySelector('textarea');
+      if (!textarea) return;
+      const text = textarea.value.trim();
+      if (!text) return;
+      if (text.length > 2000) {
+        const message = 'Narrative entries must be under 2000 characters.';
+        errors.push({ path: `narrative[${index}]`, message });
+        item.classList.add('has-error');
+        const error = item.querySelector('[data-editor-error]');
+        if (error) error.textContent = message;
+        return;
+      }
+      entries.push(text);
+    });
+    return entries;
+  }
+
+  function parseEditorValue(type, control, { allowEmpty = false } = {}) {
+    if (!control) return { ok: false, message: 'Field missing.' };
+    if (type === 'number') {
+      const raw = control.value.trim();
+      if (!raw) return { ok: true, value: allowEmpty ? undefined : null };
+      const parsed = Number(raw.replace(/[, ]+/g, ''));
+      if (!Number.isFinite(parsed)) {
+        return { ok: false, message: 'Enter a valid number.' };
+      }
+      return { ok: true, value: parsed };
+    }
+    if (type === 'date') {
+      const raw = control.value.trim();
+      if (!raw) return { ok: true, value: allowEmpty ? undefined : null };
+      if (/^\d{4}-\d{2}$/.test(raw)) {
+        return { ok: true, value: raw };
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        return { ok: true, value: raw };
+      }
+      const parsed = Date.parse(raw);
+      if (Number.isNaN(parsed)) {
+        return { ok: false, message: 'Enter a valid date.' };
+      }
+      return { ok: true, value: new Date(parsed).toISOString() };
+    }
+    if (type === 'boolean') {
+      return { ok: true, value: control.value === 'true' };
+    }
+    if (type === 'json') {
+      const raw = control.value.trim();
+      if (!raw) return { ok: true, value: allowEmpty ? undefined : {} };
+      try {
+        return { ok: true, value: JSON.parse(raw) };
+      } catch (error) {
+        return { ok: false, message: 'Enter valid JSON.' };
+      }
+    }
+    const raw = control.value.trim();
+    if (!raw) return { ok: true, value: allowEmpty ? undefined : '' };
+    if (raw.length > 500) {
+      return { ok: false, message: 'Value is too long (max 500 characters).' };
+    }
+    return { ok: true, value: raw };
+  }
+
+  function showRowError(row, message) {
+    if (!row) return;
+    row.classList.add('has-error');
+    const error = row.querySelector('[data-editor-error]');
+    if (error) error.textContent = message;
+  }
+
+  function clearManualEditorErrors() {
+    if (manualEditorSections) {
+      manualEditorSections.querySelectorAll('.has-error').forEach((element) => {
+        element.classList.remove('has-error');
+      });
+      manualEditorSections.querySelectorAll('[data-editor-error]').forEach((element) => {
+        element.textContent = '';
+      });
+    }
+    if (manualEditorError) {
+      manualEditorError.hidden = true;
+      manualEditorError.textContent = '';
+    }
+  }
+
+  function highlightServerValidation(details) {
+    details.forEach((detail) => {
+      const path = typeof detail.path === 'string' ? detail.path : '';
+      const message = detail.message || 'Invalid value.';
+      highlightPathError(path, message);
+    });
+  }
+
+  function highlightPathError(path, message) {
+    if (!path || !manualEditorSections) return;
+    const normalised = path.replace(/\[(\d+)\]/g, '.$1');
+    const parts = normalised.split('.').filter(Boolean);
+    if (!parts.length) return;
+    const root = parts.shift();
+    if (root === 'metadata' || root === 'metrics') {
+      const key = parts.join('.');
+      const section = manualEditorSections.querySelector(`.json-editor-list[data-section="${root}"]`);
+      if (!section) return;
+      const rows = Array.from(section.querySelectorAll('[data-editor-row]'));
+      rows.forEach((row) => {
+        const input = row.querySelector('[data-editor-field="key"]');
+        if (input && input.value.trim() === key) {
+          showRowError(row, message);
+        }
+      });
+      return;
+    }
+    if (root === 'transactions') {
+      const index = Number(parts.shift());
+      const key = parts.join('.');
+      const card = manualEditorSections.querySelector(`[data-editor-transaction-index="${index}"]`);
+      if (!card) return;
+      const rows = Array.from(card.querySelectorAll('[data-editor-row]'));
+      rows.forEach((row) => {
+        const input = row.querySelector('[data-editor-field="key"]');
+        if (input && input.value.trim() === key) {
+          showRowError(row, message);
+        }
+      });
+      return;
+    }
+    if (root === 'narrative') {
+      const index = Number(parts.shift());
+      const items = manualEditorSections.querySelectorAll('[data-editor-narrative-item]');
+      const item = items[index];
+      if (item) {
+        item.classList.add('has-error');
+        const error = item.querySelector('[data-editor-error]');
+        if (error) error.textContent = message;
+      }
+    }
+  }
+
+  function updateTransactionIndexes() {
+    const list = manualEditorSections?.querySelector('[data-editor-transactions]');
+    if (!list) return;
+    Array.from(list.querySelectorAll('[data-editor-transaction]')).forEach((card, index) => {
+      card.dataset.editorTransactionIndex = String(index);
+      const title = card.querySelector('.json-editor-transaction__title');
+      if (title) title.textContent = `Transaction ${index + 1}`;
+    });
+  }
+
   function injectTrimModalStyles() {
     if (trimModalStylesInjected) return;
     trimModalStylesInjected = true;
@@ -2035,6 +3128,20 @@
       actions.appendChild(processButton);
     }
 
+    const editDataButton = document.createElement('button');
+    editDataButton.type = 'button';
+    editDataButton.textContent = 'Edit data';
+    if (!docId) {
+      editDataButton.disabled = true;
+      editDataButton.title = 'Document identifier unavailable for editing.';
+    }
+    editDataButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openManualJsonEditor(file, editDataButton);
+    });
+    actions.appendChild(editDataButton);
+
     const processedJsonButton = document.createElement('button');
     processedJsonButton.type = 'button';
     processedJsonButton.textContent = 'Processed JSON';
@@ -2114,6 +3221,17 @@
         messageBox.appendChild(line);
       });
       card.appendChild(messageBox);
+    }
+
+    if (processing.status === 'awaiting_manual_json' || raw.processing?.requiresManualFields) {
+      const alertBox = document.createElement('div');
+      alertBox.className = 'viewer__file-alert';
+      const titleLine = document.createElement('strong');
+      titleLine.textContent = 'More details needed';
+      const bodyLine = document.createElement('span');
+      bodyLine.textContent = 'We could not extract everything from this document. Use “Edit data” to fill in the missing values.';
+      alertBox.append(titleLine, bodyLine);
+      card.appendChild(alertBox);
     }
 
     const details = document.createElement('div');
