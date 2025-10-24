@@ -43,33 +43,33 @@
   const STORAGE_KEY = 'vault.uploadSessions.v1';
 
   const BRAND_THEMES = [
-    { className: 'grid-card--brand-monzo', tokens: ['monzo'] },
-    { className: 'grid-card--brand-halifax', tokens: ['halifax'] },
-    { className: 'grid-card--brand-lloyds', tokens: ['lloyds', 'lloyd'] },
-    { className: 'grid-card--brand-hsbc', tokens: ['hsbc'] },
-    { className: 'grid-card--brand-natwest', tokens: ['natwest', 'nat west', 'royal bank of scotland'] },
-    { className: 'grid-card--brand-santander', tokens: ['santander'] },
-    { className: 'grid-card--brand-barclays', tokens: ['barclays', 'barclaycard'] },
-    { className: 'grid-card--brand-starling', tokens: ['starling'] },
-    { className: 'grid-card--brand-revolut', tokens: ['revolut'] },
-    { className: 'grid-card--brand-nationwide', tokens: ['nationwide'] },
-    { className: 'grid-card--brand-firstdirect', tokens: ['first direct'] },
-    { className: 'grid-card--brand-tsb', tokens: ['tsb'] },
-    { className: 'grid-card--brand-vanguard', tokens: ['vanguard'] },
-    { className: 'grid-card--brand-fidelity', tokens: ['fidelity'] },
-    { className: 'grid-card--brand-hl', tokens: ['hargreaves', 'lansdown'] },
-    { className: 'grid-card--brand-aviva', tokens: ['aviva'] },
-    { className: 'grid-card--brand-scottishwidows', tokens: ['scottish widows'] },
-    { className: 'grid-card--brand-hmrc', tokens: ['hmrc', 'hm revenue', "her majesty's revenue"] },
-    { className: 'grid-card--brand-amazon', tokens: ['amazon'] },
-    { className: 'grid-card--brand-google', tokens: ['google', 'alphabet'] },
-    { className: 'grid-card--brand-microsoft', tokens: ['microsoft'] },
-    { className: 'grid-card--brand-apple', tokens: ['apple'] },
-    { className: 'grid-card--brand-meta', tokens: ['meta', 'facebook'] },
-    { className: 'grid-card--brand-tesco', tokens: ['tesco'] },
-    { className: 'grid-card--brand-sainsbury', tokens: ["sainsbury", "sainsbury's"] },
-    { className: 'grid-card--brand-shell', tokens: ['shell'] },
-    { className: 'grid-card--brand-bp', tokens: ['^bp$', 'bp plc', 'british petroleum'] },
+    { className: 'vault-card--brand-monzo', tokens: ['monzo'] },
+    { className: 'vault-card--brand-halifax', tokens: ['halifax'] },
+    { className: 'vault-card--brand-lloyds', tokens: ['lloyds', 'lloyd'] },
+    { className: 'vault-card--brand-hsbc', tokens: ['hsbc'] },
+    { className: 'vault-card--brand-natwest', tokens: ['natwest', 'nat west', 'royal bank of scotland'] },
+    { className: 'vault-card--brand-santander', tokens: ['santander'] },
+    { className: 'vault-card--brand-barclays', tokens: ['barclays', 'barclaycard'] },
+    { className: 'vault-card--brand-starling', tokens: ['starling'] },
+    { className: 'vault-card--brand-revolut', tokens: ['revolut'] },
+    { className: 'vault-card--brand-nationwide', tokens: ['nationwide'] },
+    { className: 'vault-card--brand-firstdirect', tokens: ['first direct'] },
+    { className: 'vault-card--brand-tsb', tokens: ['tsb'] },
+    { className: 'vault-card--brand-vanguard', tokens: ['vanguard'] },
+    { className: 'vault-card--brand-fidelity', tokens: ['fidelity'] },
+    { className: 'vault-card--brand-hl', tokens: ['hargreaves', 'lansdown'] },
+    { className: 'vault-card--brand-aviva', tokens: ['aviva'] },
+    { className: 'vault-card--brand-scottishwidows', tokens: ['scottish widows'] },
+    { className: 'vault-card--brand-hmrc', tokens: ['hmrc', 'hm revenue', "her majesty's revenue"] },
+    { className: 'vault-card--brand-amazon', tokens: ['amazon'] },
+    { className: 'vault-card--brand-google', tokens: ['google', 'alphabet'] },
+    { className: 'vault-card--brand-microsoft', tokens: ['microsoft'] },
+    { className: 'vault-card--brand-apple', tokens: ['apple'] },
+    { className: 'vault-card--brand-meta', tokens: ['meta', 'facebook'] },
+    { className: 'vault-card--brand-tesco', tokens: ['tesco'] },
+    { className: 'vault-card--brand-sainsbury', tokens: ["sainsbury", "sainsbury's"] },
+    { className: 'vault-card--brand-shell', tokens: ['shell'] },
+    { className: 'vault-card--brand-bp', tokens: ['^bp$', 'bp plc', 'british petroleum'] },
   ];
 
   function normaliseBrandName(name) {
@@ -103,15 +103,15 @@
 
   function applyEntityBranding(card, name) {
     if (!card) return;
-    card.className = 'grid-card';
+    card.className = 'vault-card';
     card.style.removeProperty('--card-brand-hue');
     const theme = findBrandTheme(name);
     if (theme) {
-      card.classList.add('grid-card--brand', theme.className);
+      card.classList.add('vault-card--brand', theme.className);
       return;
     }
     if (name) {
-      card.classList.add('grid-card--brand', 'grid-card--brand-generic');
+      card.classList.add('vault-card--brand', 'vault-card--brand-generic');
       card.style.setProperty('--card-brand-hue', `${hashNameToHue(name)}`);
     }
   }
@@ -643,6 +643,83 @@
     const trimmed = String(name || '').trim();
     if (!trimmed) return 'Institution';
     return trimmed.replace(/^statement\s+/i, '').trim() || trimmed;
+  }
+
+  function pickFirstLabel(candidates, fallback = '') {
+    for (const candidate of candidates) {
+      if (candidate == null) continue;
+      if (typeof candidate === 'string') {
+        const trimmed = candidate.trim();
+        if (trimmed) return trimmed;
+        continue;
+      }
+      if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+        return String(candidate);
+      }
+    }
+    return fallback;
+  }
+
+  function normaliseEmployerName(source) {
+    if (!source) return 'Employer';
+    if (typeof source === 'string') {
+      const trimmed = source.trim();
+      return trimmed || 'Employer';
+    }
+    const name = pickFirstLabel([
+      source.name,
+      source.employerName,
+      source.employer?.name,
+      source.employer?.legalName,
+      source.employer?.displayName,
+      source.companyName,
+      source.company,
+      source.organisation,
+      source.orgName,
+      source.label,
+    ]);
+    return name || 'Employer';
+  }
+
+  function normaliseInstitutionDisplayName(source) {
+    if (!source) return 'Institution';
+    if (typeof source === 'string') {
+      return normaliseStatementName(source);
+    }
+    const name = pickFirstLabel([
+      source.institution?.name,
+      source.institution?.displayName,
+      source.institution?.legalName,
+      source.institutionName,
+      source.name,
+      source.label,
+    ]);
+    return normaliseStatementName(name || '');
+  }
+
+  function normaliseCount(value) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0) {
+      return number;
+    }
+    return null;
+  }
+
+  function formatCountLabel(count, singular, plural = `${singular}s`) {
+    const normalised = normaliseCount(count);
+    if (normalised == null) return null;
+    const label = normalised === 1 ? singular : plural;
+    return `${formatNumber(normalised)} ${label}`;
+  }
+
+  function createMetaRow(label, value) {
+    const row = document.createElement('div');
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    const valueEl = document.createElement('span');
+    valueEl.textContent = value == null || value === '' ? '—' : String(value);
+    row.append(labelEl, valueEl);
+    return row;
   }
 
   function normalisePayslipViewerFiles(files, { employerName = '', includeEmployerInSummary = false } = {}) {
@@ -3069,22 +3146,68 @@
 
   function renderEmployerGrid(employers) {
     payslipGrid.innerHTML = '';
-    payslipMeta.textContent = employers.length ? `${employers.length} employer${employers.length === 1 ? '' : 's'}` : 'No payslips yet.';
-    employers.forEach((employer) => {
+    const list = Array.isArray(employers) ? employers : [];
+    payslipMeta.textContent = list.length
+      ? `${list.length} employer${list.length === 1 ? '' : 's'}`
+      : 'No payslips yet.';
+
+    list.forEach((employer) => {
+      const employerName = normaliseEmployerName(employer);
+      const employerRef = { ...employer, name: employerName };
+      const fileCount =
+        normaliseCount(
+          employer.count ?? employer.fileCount ?? employer.files ?? employer.documents ?? employer.documentCount
+        ) ?? null;
+      const lastPaySource =
+        employer.lastPayDate ?? employer.latestPayDate ?? employer.latest?.date ?? employer.mostRecentDate ?? null;
+      const lastPayDate = toDateLike(lastPaySource);
+      const lastPayLabel = lastPayDate ? lastPayDate.toLocaleDateString() : '—';
+      const subtitleParts = [];
+      const fileSummary = formatCountLabel(fileCount, 'document');
+      if (fileSummary) subtitleParts.push(fileSummary);
+      if (lastPayDate) subtitleParts.push(`Last pay ${lastPayLabel}`);
+      const subtitleText = subtitleParts.join(' • ') || 'View payslips';
+
       const card = document.createElement('article');
-      applyEntityBranding(card, employer.name);
+      applyEntityBranding(card, employerName);
+      card.classList.add('vault-card--interactive', 'vault-card--payslip');
+
+      const header = document.createElement('div');
+      header.className = 'vault-card__header';
+
+      const icon = document.createElement('div');
+      icon.className = 'vault-card__icon vault-card__icon--payslip';
+      icon.innerHTML = '<i class="bi bi-receipt"></i>';
+
+      const text = document.createElement('div');
+      text.className = 'vault-card__text';
+
       const title = document.createElement('h3');
-      title.textContent = employer.name || 'Unknown employer';
-      const dl = document.createElement('dl');
-      dl.innerHTML = `
-        <div><span>Files</span><span>${employer.count}</span></div>
-        <div><span>Last pay date</span><span>${employer.lastPayDate ? new Date(employer.lastPayDate).toLocaleDateString() : '—'}</span></div>
-      `;
-      card.append(title, dl);
+      title.className = 'vault-card__title';
+      title.textContent = employerName || 'Employer';
+
+      const subtitle = document.createElement('p');
+      subtitle.className = 'vault-card__subtitle';
+      subtitle.textContent = subtitleText;
+
+      const chevron = document.createElement('div');
+      chevron.className = 'vault-card__chevron';
+      chevron.innerHTML = '<i class="bi bi-arrow-up-right"></i>';
+
+      text.append(title, subtitle);
+      header.append(icon, text, chevron);
+
+      const meta = document.createElement('dl');
+      meta.className = 'vault-card__meta';
+      meta.append(createMetaRow('Files', fileCount != null ? formatNumber(fileCount) : '—'));
+      meta.append(createMetaRow('Last pay date', lastPayLabel));
+
+      card.append(header, meta);
       card.tabIndex = 0;
       card.setAttribute('role', 'button');
-      card.setAttribute('aria-label', `View payslips for ${employer.name || 'employer'}`);
-      const open = () => openPayslipViewer(employer);
+      card.setAttribute('aria-label', `View payslips for ${employerName || 'employer'}`);
+
+      const open = () => openPayslipViewer(employerRef);
       card.addEventListener('click', open);
       card.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -3121,7 +3244,9 @@
       }
       const data = await response.json();
       const accounts = Array.isArray(data?.accounts) ? data.accounts : [];
-      const institutionName = normaliseStatementName(institution.name || data?.institution?.name);
+      const institutionName = normaliseStatementName(
+        institution.name || institution.institution?.name || data?.institution?.name
+      );
       const files = normaliseStatementViewerFiles(accounts, {
         institutionName,
         includeInstitutionInSummary: false,
@@ -3140,22 +3265,79 @@
 
   function renderInstitutionGrid(institutions) {
     statementGrid.innerHTML = '';
-    statementMeta.textContent = institutions.length ? `${institutions.length} institution${institutions.length === 1 ? '' : 's'}` : 'No statements yet.';
-    institutions.forEach((inst) => {
+    const list = Array.isArray(institutions) ? institutions : [];
+    statementMeta.textContent = list.length
+      ? `${list.length} institution${list.length === 1 ? '' : 's'}`
+      : 'No statements yet.';
+
+    list.forEach((inst) => {
+      const cleanName = normaliseInstitutionDisplayName(inst);
+      const institutionRef = { ...inst, name: cleanName };
+      const accountCountSource = Array.isArray(inst.accounts) ? inst.accounts.length : inst.accounts ?? inst.accountCount;
+      const accountCount = normaliseCount(accountCountSource);
+      const documentCountSource =
+        inst.documents ??
+        inst.documentCount ??
+        inst.files ??
+        inst.count ??
+        (Array.isArray(inst.documents) ? inst.documents.length : null);
+      const documentCount = normaliseCount(documentCountSource);
+      const lastStatementSource =
+        inst.lastStatementDate ?? inst.latestStatementDate ?? inst.lastDocumentDate ?? inst.updated ?? inst.latest?.date ?? null;
+      const lastStatementDate = toDateLike(lastStatementSource);
+      const lastStatementLabel = lastStatementDate ? lastStatementDate.toLocaleDateString() : '—';
+
+      const subtitleParts = [];
+      const documentSummary = formatCountLabel(documentCount, 'document');
+      if (documentSummary) subtitleParts.push(documentSummary);
+      const accountSummary = formatCountLabel(accountCount, 'account');
+      if (!documentSummary && accountSummary) subtitleParts.push(accountSummary);
+      if (lastStatementDate) subtitleParts.push(`Updated ${lastStatementLabel}`);
+      const subtitleText = subtitleParts.join(' • ') || 'View statements';
+
       const card = document.createElement('article');
-      const cleanName = normaliseStatementName(inst.name);
       applyEntityBranding(card, cleanName);
+      card.classList.add('vault-card--interactive', 'vault-card--statement');
+
+      const header = document.createElement('div');
+      header.className = 'vault-card__header';
+
+      const icon = document.createElement('div');
+      icon.className = 'vault-card__icon vault-card__icon--statement';
+      icon.innerHTML = '<i class="bi bi-bank"></i>';
+
+      const text = document.createElement('div');
+      text.className = 'vault-card__text';
+
       const title = document.createElement('h3');
+      title.className = 'vault-card__title';
       title.textContent = cleanName || 'Institution';
-      const dl = document.createElement('dl');
-      dl.innerHTML = `
-        <div><span>Accounts</span><span>${inst.accounts || 0}</span></div>
-      `;
-      card.append(title, dl);
+
+      const subtitle = document.createElement('p');
+      subtitle.className = 'vault-card__subtitle';
+      subtitle.textContent = subtitleText;
+
+      const chevron = document.createElement('div');
+      chevron.className = 'vault-card__chevron';
+      chevron.innerHTML = '<i class="bi bi-arrow-up-right"></i>';
+
+      text.append(title, subtitle);
+      header.append(icon, text, chevron);
+
+      const meta = document.createElement('dl');
+      meta.className = 'vault-card__meta';
+      meta.append(createMetaRow('Accounts', accountCount != null ? formatNumber(accountCount) : '—'));
+      if (documentCount != null) {
+        meta.append(createMetaRow('Documents', formatNumber(documentCount)));
+      }
+      meta.append(createMetaRow('Last statement', lastStatementLabel));
+
+      card.append(header, meta);
       card.tabIndex = 0;
       card.setAttribute('role', 'button');
       card.setAttribute('aria-label', `View statements for ${cleanName || 'institution'}`);
-      const open = () => openStatementViewer(inst);
+
+      const open = () => openStatementViewer(institutionRef);
       card.addEventListener('click', open);
       card.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {

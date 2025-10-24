@@ -740,124 +740,207 @@
 
     .grid {
       display: grid;
-      gap: 16px;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: clamp(1rem, 2.5vw, 1.8rem);
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     }
 
-    .grid-card {
-      background: var(--vault-card-bg);
-      border: 1px solid var(--vault-border);
-      border-radius: var(--vault-radius);
-      padding: 16px;
-      box-shadow: var(--vault-shadow-soft);
-    }
-
-    .grid-card--brand {
-      color: #ffffff;
-      border: none;
-      box-shadow: 0 24px 48px rgba(15, 23, 42, 0.2);
+    .vault-card {
       position: relative;
+      border-radius: 20px;
+      padding: 22px;
+      background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(244, 250, 248, 0.9));
+      border: 1px solid rgba(12, 21, 32, 0.08);
+      box-shadow: 0 24px 48px rgba(12, 21, 32, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      min-height: 190px;
+      transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+      cursor: pointer;
       overflow: hidden;
     }
 
-    .grid-card--brand h3 {
-      color: inherit;
+    .vault-card--interactive:hover,
+    .vault-card--interactive:focus-visible {
+      transform: translateY(-4px);
+      box-shadow: 0 32px 60px rgba(12, 21, 32, 0.12);
+      border-color: color-mix(in oklab, var(--vault-accent) 40%, transparent);
     }
 
-    .grid-card--brand dl {
-      color: rgba(255, 255, 255, 0.85);
+    .vault-card:focus-visible {
+      outline: 3px solid color-mix(in oklab, var(--vault-accent) 60%, white);
+      outline-offset: 3px;
     }
 
-    .grid-card--brand::before {
+    .vault-card__header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .vault-card__icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: rgba(0, 194, 168, 0.16);
+      color: rgba(11, 62, 54, 0.9);
+      flex-shrink: 0;
+      font-size: 1.35rem;
+      box-shadow: 0 12px 28px rgba(12, 21, 32, 0.08);
+    }
+
+    .vault-card__icon--statement {
+      background: rgba(103, 89, 255, 0.16);
+      color: rgba(54, 38, 150, 0.92);
+    }
+
+    .vault-card__text {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .vault-card__title {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .vault-card__subtitle {
+      margin: 0;
+      color: color-mix(in oklab, var(--vault-muted) 85%, transparent);
+      font-size: 0.88rem;
+    }
+
+    .vault-card__chevron {
+      color: rgba(12, 21, 32, 0.35);
+      font-size: 1.35rem;
+      display: flex;
+      align-items: center;
+    }
+
+    .vault-card__meta {
+      margin: 0;
+      padding-top: 14px;
+      border-top: 1px solid rgba(12, 21, 32, 0.08);
+      display: grid;
+      gap: 8px;
+      font-size: 0.87rem;
+      color: var(--vault-muted);
+    }
+
+    .vault-card__meta div {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .vault-card__meta span:last-child {
+      font-weight: 600;
+      color: var(--bs-body-color);
+    }
+
+    .vault-card--brand {
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 32px 68px rgba(12, 21, 32, 0.18);
+    }
+
+    .vault-card--brand .vault-card__subtitle {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .vault-card--brand .vault-card__meta {
+      border-top-color: rgba(255, 255, 255, 0.25);
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .vault-card--brand .vault-card__meta span:last-child {
+      color: #ffffff;
+    }
+
+    .vault-card--brand .vault-card__icon {
+      background: rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+      box-shadow: 0 14px 30px rgba(255, 255, 255, 0.2);
+    }
+
+    .vault-card--brand .vault-card__chevron {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .vault-card--brand::before,
+    .vault-card--brand::after {
       content: "";
       position: absolute;
-      inset: -20% -30% auto;
+      inset: auto;
+      border-radius: 999px;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    .vault-card--brand::before {
+      inset: -20% -35% auto -35%;
       height: 60%;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.18);
-      filter: blur(0);
-      pointer-events: none;
-      z-index: 0;
+      background: rgba(255, 255, 255, 0.22);
     }
 
-    .grid-card--brand::after {
-      content: "";
-      position: absolute;
-      inset: auto -40% -55% -40%;
+    .vault-card--brand::after {
+      inset: auto -45% -55% -45%;
       height: 70%;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.12);
-      pointer-events: none;
-      z-index: 0;
+      background: rgba(255, 255, 255, 0.16);
     }
 
-    .grid-card--brand > * {
-      position: relative;
-      z-index: 1;
-    }
-
-    .grid-card--brand-generic {
+    .vault-card--brand-generic {
       --card-brand-hue: 210;
-      background: linear-gradient(150deg, hsl(var(--card-brand-hue), 74%, 55%) 0%, hsl(var(--card-brand-hue), 68%, 42%) 100%);
+      background: linear-gradient(155deg, hsl(var(--card-brand-hue), 72%, 56%) 0%, hsl(var(--card-brand-hue), 68%, 46%) 100%);
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .grid-card--brand {
+      .vault-card,
+      .vault-card::before,
+      .vault-card::after {
         transition: none;
       }
     }
 
-    .grid-card--brand-monzo { background: linear-gradient(145deg, #ff2d77 0%, #ff8a4d 55%, #ffc233 100%); }
-    .grid-card--brand-halifax { background: linear-gradient(145deg, #003087 0%, #005bff 100%); }
-    .grid-card--brand-lloyds { background: linear-gradient(145deg, #0b3d1c 0%, #1f8a47 100%); }
-    .grid-card--brand-hsbc { background: linear-gradient(145deg, #b00020 0%, #ff5a5f 100%); }
-    .grid-card--brand-natwest { background: linear-gradient(145deg, #2d014d 0%, #6600a8 100%); }
-    .grid-card--brand-santander { background: linear-gradient(145deg, #c5001a 0%, #ff5656 100%); }
-    .grid-card--brand-barclays { background: linear-gradient(145deg, #0065b3 0%, #00bfe7 100%); }
-    .grid-card--brand-starling { background: linear-gradient(145deg, #522680 0%, #8b5cf6 100%); }
-    .grid-card--brand-revolut { background: linear-gradient(145deg, #0065ff 0%, #00d1ff 100%); }
-    .grid-card--brand-nationwide { background: linear-gradient(145deg, #002663 0%, #0052a5 100%); }
-    .grid-card--brand-firstdirect { background: linear-gradient(145deg, #111827 0%, #374151 100%); }
-    .grid-card--brand-tsb { background: linear-gradient(145deg, #0099e5 0%, #004e92 100%); }
-    .grid-card--brand-vanguard { background: linear-gradient(145deg, #8b1a2b 0%, #cf4856 100%); }
-    .grid-card--brand-fidelity { background: linear-gradient(145deg, #0b4430 0%, #169c6b 100%); }
-    .grid-card--brand-hl { background: linear-gradient(145deg, #002663 0%, #0d4dff 100%); }
-    .grid-card--brand-aviva { background: linear-gradient(145deg, #0057b8 0%, #00a8ff 100%); }
-    .grid-card--brand-scottishwidows { background: linear-gradient(145deg, #2c0f36 0%, #60215d 100%); }
-    .grid-card--brand-hmrc { background: linear-gradient(145deg, #0b5037 0%, #2d8c60 100%); }
-    .grid-card--brand-amazon { background: linear-gradient(145deg, #ff9900 0%, #ffbf3d 100%); color: #1f2933; }
-    .grid-card--brand-google { background: linear-gradient(145deg, #1a73e8 0%, #34a853 100%); }
-    .grid-card--brand-microsoft { background: linear-gradient(145deg, #0067b8 0%, #107c10 100%); }
-    .grid-card--brand-apple { background: linear-gradient(145deg, #0f172a 0%, #334155 100%); }
-    .grid-card--brand-meta { background: linear-gradient(145deg, #0064e0 0%, #9333ea 100%); }
-    .grid-card--brand-tesco { background: linear-gradient(145deg, #00539f 0%, #ef3f2b 100%); }
-    .grid-card--brand-sainsbury { background: linear-gradient(145deg, #ec6608 0%, #ff9248 100%); color: #1f2933; }
-    .grid-card--brand-shell { background: linear-gradient(145deg, #ff1f00 0%, #ffb400 100%); color: #1f2933; }
-    .grid-card--brand-bp { background: linear-gradient(145deg, #005f20 0%, #97d700 100%); }
+    .vault-card--brand-monzo { background: linear-gradient(145deg, #ff2d77 0%, #ff8a4d 55%, #ffc233 100%); }
+    .vault-card--brand-halifax { background: linear-gradient(145deg, #003087 0%, #005bff 100%); }
+    .vault-card--brand-lloyds { background: linear-gradient(145deg, #0b3d1c 0%, #1f8a47 100%); }
+    .vault-card--brand-hsbc { background: linear-gradient(145deg, #b00020 0%, #ff5a5f 100%); }
+    .vault-card--brand-natwest { background: linear-gradient(145deg, #2d014d 0%, #6600a8 100%); }
+    .vault-card--brand-santander { background: linear-gradient(145deg, #c5001a 0%, #ff5656 100%); }
+    .vault-card--brand-barclays { background: linear-gradient(145deg, #0065b3 0%, #00bfe7 100%); }
+    .vault-card--brand-starling { background: linear-gradient(145deg, #522680 0%, #8b5cf6 100%); }
+    .vault-card--brand-revolut { background: linear-gradient(145deg, #0065ff 0%, #00d1ff 100%); }
+    .vault-card--brand-nationwide { background: linear-gradient(145deg, #002663 0%, #0052a5 100%); }
+    .vault-card--brand-firstdirect { background: linear-gradient(145deg, #111827 0%, #374151 100%); }
+    .vault-card--brand-tsb { background: linear-gradient(145deg, #0099e5 0%, #004e92 100%); }
+    .vault-card--brand-vanguard { background: linear-gradient(145deg, #8b1a2b 0%, #cf4856 100%); }
+    .vault-card--brand-fidelity { background: linear-gradient(145deg, #0b4430 0%, #169c6b 100%); }
+    .vault-card--brand-hl { background: linear-gradient(145deg, #002663 0%, #0d4dff 100%); }
+    .vault-card--brand-aviva { background: linear-gradient(145deg, #0057b8 0%, #00a8ff 100%); }
+    .vault-card--brand-scottishwidows { background: linear-gradient(145deg, #2c0f36 0%, #60215d 100%); }
+    .vault-card--brand-hmrc { background: linear-gradient(145deg, #0b5037 0%, #2d8c60 100%); }
+    .vault-card--brand-amazon { background: linear-gradient(145deg, #ff9900 0%, #ffbf3d 100%); color: #1f2933; }
+    .vault-card--brand-google { background: linear-gradient(145deg, #1a73e8 0%, #34a853 100%); }
+    .vault-card--brand-microsoft { background: linear-gradient(145deg, #0067b8 0%, #107c10 100%); }
+    .vault-card--brand-apple { background: linear-gradient(145deg, #0f172a 0%, #334155 100%); }
+    .vault-card--brand-meta { background: linear-gradient(145deg, #0064e0 0%, #9333ea 100%); }
+    .vault-card--brand-tesco { background: linear-gradient(145deg, #00539f 0%, #ef3f2b 100%); }
+    .vault-card--brand-sainsbury { background: linear-gradient(145deg, #ec6608 0%, #ff9248 100%); color: #1f2933; }
+    .vault-card--brand-shell { background: linear-gradient(145deg, #ff1f00 0%, #ffb400 100%); color: #1f2933; }
+    .vault-card--brand-bp { background: linear-gradient(145deg, #005f20 0%, #97d700 100%); }
 
-    .grid-card--brand-amazon dl,
-    .grid-card--brand-sainsbury dl,
-    .grid-card--brand-shell dl {
+    .vault-card--brand-amazon .vault-card__meta,
+    .vault-card--brand-sainsbury .vault-card__meta,
+    .vault-card--brand-shell .vault-card__meta {
       color: rgba(31, 41, 51, 0.75);
-    }
-
-    .grid-card h3 {
-      margin: 0 0 8px;
-      font-size: 1rem;
-      font-weight: 600;
-    }
-
-    .grid-card dl {
-      margin: 0;
-      font-size: 0.9rem;
-      color: var(--vault-muted);
-    }
-
-    .grid-card dl div {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 4px 0;
     }
 
     .collection-card {
