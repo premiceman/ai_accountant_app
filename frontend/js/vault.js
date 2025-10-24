@@ -154,6 +154,311 @@
   let manualEditorFile = null;
   let manualEditorRequired = null;
   let manualEditorStylesInjected = false;
+  let manualEditorSchemaKey = null;
+  let manualEditorFormData = null;
+
+  const MANUAL_EDITOR_SCHEMAS = {
+    bank_statement: {
+      title: 'Bank statement data',
+      sections: [
+        {
+          id: 'institution',
+          type: 'group',
+          title: 'Institution',
+          description: 'Information about the banking institution.',
+          fields: [
+            { path: 'institution.name', label: 'Institution name', type: 'text', required: true },
+            { path: 'institution.address', label: 'Branch address', type: 'text' },
+            { path: 'institution.swiftBic', label: 'SWIFT/BIC', type: 'text' },
+            { path: 'institution.contactInfo.telephone', label: 'Telephone', type: 'text' },
+            { path: 'institution.contactInfo.website', label: 'Website', type: 'text' },
+          ],
+        },
+        {
+          id: 'account',
+          type: 'group',
+          title: 'Account',
+          description: 'Details of the account featured on the statement.',
+          fields: [
+            { path: 'account.holderName', label: 'Account holder', type: 'text', required: true },
+            { path: 'account.holderAddress.street', label: 'Holder street', type: 'text' },
+            { path: 'account.holderAddress.city', label: 'Holder city', type: 'text' },
+            { path: 'account.holderAddress.postalCode', label: 'Holder postal code', type: 'text' },
+            { path: 'account.accountNumber', label: 'Account number', type: 'text', required: true },
+            { path: 'account.sortCode', label: 'Sort code', type: 'text' },
+            { path: 'account.iban', label: 'IBAN', type: 'text' },
+            {
+              path: 'account.type',
+              label: 'Account type',
+              type: 'select',
+              options: [
+                { value: '', label: 'Select type' },
+                { value: 'current', label: 'Current' },
+                { value: 'checking', label: 'Checking' },
+                { value: 'savings', label: 'Savings' },
+                { value: 'credit_card', label: 'Credit card' },
+                { value: 'investment', label: 'Investment' },
+                { value: 'brokerage', label: 'Brokerage' },
+                { value: 'e_money', label: 'E-money' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+            { path: 'account.currency', label: 'Currency', type: 'text', required: true },
+          ],
+        },
+        {
+          id: 'statement',
+          type: 'group',
+          title: 'Statement period',
+          description: 'Dates and identifiers for the statement.',
+          fields: [
+            { path: 'statement.statementNumber', label: 'Statement number', type: 'text' },
+            { path: 'statement.period.startDate', label: 'Period start', type: 'date', required: true },
+            { path: 'statement.period.endDate', label: 'Period end', type: 'date', required: true },
+            { path: 'statement.period.Date', label: 'Statement month', type: 'month', placeholder: 'MM/YYYY' },
+          ],
+        },
+        {
+          id: 'balances',
+          type: 'group',
+          title: 'Balances',
+          description: 'Key balances and totals for the statement period.',
+          fields: [
+            { path: 'balances.openingBalance', label: 'Opening balance', type: 'number', required: true },
+            { path: 'balances.closingBalance', label: 'Closing balance', type: 'number', required: true },
+            { path: 'balances.totalMoneyIn', label: 'Total money in', type: 'number' },
+            { path: 'balances.totalMoneyOut', label: 'Total money out', type: 'number' },
+            { path: 'balances.overdraftLimit', label: 'Overdraft limit', type: 'number' },
+            { path: 'balances.averageBalances.averageCreditBalance', label: 'Average credit balance', type: 'number' },
+            { path: 'balances.averageBalances.averageDebitBalance', label: 'Average debit balance', type: 'number' },
+          ],
+        },
+        {
+          id: 'interest',
+          type: 'group',
+          title: 'Interest information',
+          description: 'Rates and interest payments.',
+          fields: [
+            { path: 'interestInformation.creditInterestRate', label: 'Credit interest rate', type: 'text' },
+            { path: 'interestInformation.overdraftInterestRate', label: 'Overdraft interest rate', type: 'text' },
+            { path: 'interestInformation.interestPaid.date', label: 'Interest paid date', type: 'date' },
+            { path: 'interestInformation.interestPaid.description', label: 'Interest paid description', type: 'text' },
+            { path: 'interestInformation.interestPaid.amount', label: 'Interest paid amount', type: 'number' },
+          ],
+        },
+        {
+          id: 'transactions',
+          type: 'array',
+          path: 'transactions',
+          title: 'Transactions',
+          description: 'List of transactions during the statement period.',
+          addLabel: 'Add transaction',
+          itemLabel: 'Transaction',
+          fields: [
+            { path: 'date', label: 'Date', type: 'date', required: true },
+            { path: 'description', label: 'Description', type: 'text', required: true },
+            { path: 'moneyIn', label: 'Money in', type: 'number' },
+            { path: 'moneyOut', label: 'Money out', type: 'number' },
+            { path: 'balance', label: 'Running balance', type: 'number' },
+            {
+              path: 'transactionType',
+              label: 'Transaction type',
+              type: 'select',
+              options: [
+                { value: '', label: 'Select type' },
+                { value: 'card_payment', label: 'Card payment' },
+                { value: 'direct_debit', label: 'Direct debit' },
+                { value: 'faster_payment', label: 'Faster payment' },
+                { value: 'transfer', label: 'Transfer' },
+                { value: 'credit', label: 'Credit' },
+                { value: 'debit', label: 'Debit' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+            { path: 'paymentMethod', label: 'Payment method', type: 'text' },
+            { path: 'counterparty', label: 'Counterparty', type: 'text' },
+            { path: 'reference', label: 'Reference', type: 'text' },
+          ],
+        },
+        {
+          id: 'additional',
+          type: 'group',
+          title: 'Additional information',
+          description: 'Optional supplementary details provided in the statement.',
+          fields: [
+            { path: 'additionalInformation.fscsInformation', label: 'FSCS information', type: 'textarea' },
+            { path: 'additionalInformation.serviceQualitySurvey.region', label: 'Survey region', type: 'text' },
+            { path: 'additionalInformation.serviceQualitySurvey.ranking', label: 'Survey ranking', type: 'text' },
+            { path: 'additionalInformation.serviceQualitySurvey.score', label: 'Survey score', type: 'text' },
+          ],
+        },
+        {
+          id: 'news',
+          type: 'array',
+          path: 'additionalInformation.news',
+          title: 'News items',
+          description: 'Notices and news shared with the statement.',
+          addLabel: 'Add news item',
+          itemLabel: 'News item',
+          fields: [
+            { path: 'title', label: 'Title', type: 'text', required: true },
+            { path: 'content', label: 'Content', type: 'textarea', required: true },
+          ],
+        },
+      ],
+    },
+    payslip: {
+      title: 'Payslip data',
+      sections: [
+        {
+          id: 'employee',
+          type: 'group',
+          title: 'Employee details',
+          fields: [
+            { path: 'employee.fullName', label: 'Full name', type: 'text', required: true },
+            { path: 'employee.employeeId', label: 'Employee ID', type: 'text' },
+            { path: 'employee.niNumber', label: 'NI number', type: 'text' },
+            { path: 'employee.taxCode', label: 'Tax code', type: 'text' },
+            { path: 'employee.niCategory', label: 'NI category', type: 'text' },
+            { path: 'employee.address.street', label: 'Street address', type: 'text' },
+            { path: 'employee.address.city', label: 'City', type: 'text' },
+            { path: 'employee.address.county', label: 'County', type: 'text' },
+            { path: 'employee.address.postcode', label: 'Postcode', type: 'text' },
+          ],
+        },
+        {
+          id: 'employer',
+          type: 'group',
+          title: 'Employer details',
+          fields: [
+            { path: 'employer.name', label: 'Employer name', type: 'text', required: true },
+            { path: 'employer.taxDistrict', label: 'Tax district', type: 'text' },
+            { path: 'employer.taxReference', label: 'Tax reference', type: 'text' },
+            { path: 'employer.employersNicThisPeriod', label: 'Employer NI this period', type: 'number' },
+            { path: 'employer.employersNicYtd', label: 'Employer NI YTD', type: 'number' },
+            { path: 'employer.employersPensionThisPeriod', label: 'Employer pension this period', type: 'number' },
+            { path: 'employer.employersPensionYtd', label: 'Employer pension YTD', type: 'number' },
+          ],
+        },
+        {
+          id: 'period',
+          type: 'group',
+          title: 'Pay period',
+          fields: [
+            { path: 'period.Date', label: 'Pay month', type: 'month', required: true, placeholder: 'MM/YYYY' },
+            { path: 'period.start', label: 'Period start', type: 'date' },
+            { path: 'period.end', label: 'Period end', type: 'date' },
+            {
+              path: 'period.payFrequency',
+              label: 'Pay frequency',
+              type: 'select',
+              options: [
+                { value: '', label: 'Select frequency' },
+                { value: 'weekly', label: 'Weekly' },
+                { value: 'biweekly', label: 'Bi-weekly' },
+                { value: 'fourweekly', label: 'Four-weekly' },
+                { value: 'monthly', label: 'Monthly' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+          ],
+        },
+        {
+          id: 'currency',
+          type: 'group',
+          title: 'Currency',
+          fields: [{ path: 'currency', label: 'Currency', type: 'text', required: true }],
+        },
+        {
+          id: 'earnings',
+          type: 'array',
+          path: 'earnings',
+          title: 'Earnings',
+          description: 'Itemised earnings for the period.',
+          addLabel: 'Add earning',
+          itemLabel: 'Earning',
+          fields: [
+            { path: 'rawLabel', label: 'Label', type: 'text', required: true },
+            {
+              path: 'category',
+              label: 'Category',
+              type: 'select',
+              options: [
+                { value: '', label: 'Select category' },
+                { value: 'base_salary', label: 'Base salary' },
+                { value: 'overtime', label: 'Overtime' },
+                { value: 'holiday_pay', label: 'Holiday pay' },
+                { value: 'sick_pay', label: 'Sick pay' },
+                { value: 'bonus', label: 'Bonus' },
+                { value: 'commission', label: 'Commission' },
+                { value: 'mbo', label: 'MBO' },
+                { value: 'allowance', label: 'Allowance' },
+                { value: 'shift_allowance', label: 'Shift allowance' },
+                { value: 'backpay', label: 'Back pay' },
+                { value: 'expenses_reimbursed', label: 'Expenses reimbursed' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+            { path: 'amountPeriod', label: 'Amount this period', type: 'number', required: true },
+            { path: 'amountYtd', label: 'Amount YTD', type: 'number' },
+          ],
+        },
+        {
+          id: 'deductions',
+          type: 'array',
+          path: 'deductions',
+          title: 'Deductions',
+          description: 'Deductions applied to this payslip.',
+          addLabel: 'Add deduction',
+          itemLabel: 'Deduction',
+          fields: [
+            { path: 'rawLabel', label: 'Label', type: 'text', required: true },
+            {
+              path: 'category',
+              label: 'Category',
+              type: 'select',
+              options: [
+                { value: '', label: 'Select category' },
+                { value: 'income_tax', label: 'Income tax' },
+                { value: 'national_insurance', label: 'National insurance' },
+                { value: 'student_loan', label: 'Student loan' },
+                { value: 'pension_employee', label: 'Pension (employee)' },
+                { value: 'pension_employer', label: 'Pension (employer)' },
+                { value: 'attachment_of_earnings', label: 'Attachment of earnings' },
+                { value: 'benefits_in_kind', label: 'Benefits in kind' },
+                { value: 'union_dues', label: 'Union dues' },
+                { value: 'cycle_to_work', label: 'Cycle to work' },
+                { value: 'childcare_vouchers', label: 'Childcare vouchers' },
+                { value: 'other', label: 'Other' },
+              ],
+            },
+            { path: 'amountPeriod', label: 'Amount this period', type: 'number', required: true },
+            { path: 'amountYtd', label: 'Amount YTD', type: 'number' },
+          ],
+        },
+        {
+          id: 'totals',
+          type: 'group',
+          title: 'Totals',
+          fields: [
+            { path: 'totals.grossPeriod', label: 'Gross pay this period', type: 'number', required: true },
+            { path: 'totals.netPeriod', label: 'Net pay this period', type: 'number', required: true },
+            { path: 'totals.grossYtd', label: 'Gross pay YTD', type: 'number' },
+            { path: 'totals.netYtd', label: 'Net pay YTD', type: 'number' },
+          ],
+        },
+        {
+          id: 'meta',
+          type: 'group',
+          title: 'Metadata',
+          fields: [
+            { path: 'meta.documentId', label: 'Document ID', type: 'text' },
+            { path: 'meta.confidence', label: 'Confidence score', type: 'number' },
+          ],
+        },
+      ],
+    },
+  };
 
   let trimModal = null;
   let trimModalDialog = null;
@@ -1046,18 +1351,56 @@
     jsonModalStylesInjected = true;
     const style = document.createElement('style');
     style.textContent = `
-      .vault-json-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.55); padding: 24px; z-index: 1300; }
-      .vault-json-modal.is-visible { display: flex; }
-      .vault-json-modal__dialog { position: relative; width: min(760px, 100%); max-height: min(85vh, 700px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); box-shadow: var(--vault-shadow, 0 16px 48px rgba(15, 23, 42, 0.12)); border: 1px solid var(--vault-border, rgba(15, 23, 42, 0.08)); display: flex; flex-direction: column; overflow: hidden; }
-      .vault-json-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
-      .vault-json-modal__title { margin: 0; font-size: 1rem; font-weight: 600; }
-      .vault-json-modal__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; cursor: pointer; padding: 4px; }
-      .vault-json-modal__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
-      .vault-json-modal__meta { padding: 12px 20px 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); display: flex; flex-direction: column; gap: 12px; max-height: 160px; overflow: auto; }
-      .vault-json-modal__meta-item { display: flex; flex-direction: column; gap: 4px; }
-      .vault-json-modal__meta-item code { display: block; white-space: pre-wrap; font-size: 0.75rem; }
-      .vault-json-modal__content { flex: 1; margin: 0; padding: 16px 20px 20px; background: rgba(15, 23, 42, 0.03); font-family: 'SFMono-Regular', 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.85rem; line-height: 1.45; overflow: auto; white-space: pre-wrap; word-break: break-word; color: inherit; }
-    `;
+      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.55); z-index: 1320; }
+      .vault-json-editor.is-visible { display: flex; }
+      .vault-json-editor__dialog { position: relative; width: min(960px, 100%); max-height: min(90vh, 780px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: var(--vault-shadow, 0 18px 52px rgba(15, 23, 42, 0.16)); display: flex; flex-direction: column; }
+      .vault-json-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 26px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
+      .vault-json-editor__title { margin: 0; font-size: 1.05rem; font-weight: 600; }
+      .vault-json-editor__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; padding: 4px; cursor: pointer; }
+      .vault-json-editor__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
+      .vault-json-editor__body { padding: 20px 26px 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 18px; }
+      .vault-json-editor__message { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 0; }
+      .vault-json-editor__message strong { color: var(--vault-accent, #6759ff); }
+      .vault-json-editor__error { font-size: 0.9rem; color: var(--light-red, #ef4444); margin: 0; }
+      .vault-json-editor__loading { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 12px 0; }
+      .vault-json-editor__form { display: flex; flex-direction: column; gap: 20px; }
+      .vault-json-editor__sections { display: flex; flex-direction: column; gap: 20px; }
+      .manual-editor__empty { margin: 0; padding: 24px; text-align: center; font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); border: 1px dashed rgba(15, 23, 42, 0.12); border-radius: 16px; background: rgba(15, 23, 42, 0.03); }
+      .manual-editor__section { display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 16px; border: 1px solid rgba(15, 23, 42, 0.08); background: rgba(255, 255, 255, 0.9); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08); }
+      .manual-editor__section-header { display: flex; flex-direction: column; gap: 6px; }
+      .manual-editor__section-title { margin: 0; font-size: 0.95rem; font-weight: 600; }
+      .manual-editor__section-description { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.65)); }
+      .manual-editor__section-body { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .manual-editor__section--array .manual-editor__section-body { display: flex; flex-direction: column; }
+      .manual-editor__array { display: flex; flex-direction: column; gap: 14px; }
+      .manual-editor__array-item { border: 1px solid rgba(15, 23, 42, 0.1); border-radius: 14px; background: rgba(255, 255, 255, 0.95); padding: 16px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08); display: flex; flex-direction: column; gap: 12px; }
+      .manual-editor__array-item-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .manual-editor__array-item-title { margin: 0; font-size: 0.9rem; font-weight: 600; }
+      .manual-editor__field { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; border: 1px solid rgba(15, 23, 42, 0.1); background: rgba(255, 255, 255, 0.92); transition: border-color 160ms ease, box-shadow 160ms ease; }
+      .manual-editor__field.has-error { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.05); box-shadow: 0 6px 20px rgba(239, 68, 68, 0.12); }
+      .manual-editor__label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
+      .manual-editor__input { width: 100%; border: 1px solid rgba(15, 23, 42, 0.15); border-radius: 10px; padding: 9px 12px; font-size: 0.92rem; line-height: 1.45; background: #fff; color: inherit; box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05); transition: border-color 140ms ease, box-shadow 140ms ease; }
+      .manual-editor__input:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; box-shadow: 0 0 0 2px rgba(103, 89, 255, 0.18); }
+      .manual-editor__input--textarea { min-height: 72px; resize: vertical; }
+      .manual-editor__input--select { height: 38px; }
+      .manual-editor__error { font-size: 0.78rem; color: rgba(239, 68, 68, 1); min-height: 1em; }
+      .manual-editor__array-actions { display: flex; justify-content: flex-start; }
+      .manual-editor__add { border: none; background: rgba(103, 89, 255, 0.12); color: var(--vault-accent, #6759ff); border-radius: 999px; padding: 7px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
+      .manual-editor__add:hover { background: rgba(103, 89, 255, 0.18); transform: translateY(-1px); }
+      .manual-editor__remove { border: none; background: rgba(239, 68, 68, 0.12); color: rgba(220, 38, 38, 1); border-radius: 999px; padding: 6px 14px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
+      .manual-editor__remove:hover { background: rgba(239, 68, 68, 0.18); transform: translateY(-1px); }
+      .vault-json-editor__footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 26px 22px; border-top: 1px solid rgba(15, 23, 42, 0.08); background: rgba(249, 250, 251, 0.9); }
+      .vault-json-editor__footer button { min-width: 120px; border-radius: 999px; padding: 10px 18px; font-size: 0.9rem; border: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease; }
+      .vault-json-editor__footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: inherit; }
+      .vault-json-editor__footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); }
+      .vault-json-editor__footer .btn-primary { background: var(--vault-accent, #6759ff); color: #fff; box-shadow: 0 10px 20px rgba(103, 89, 255, 0.24); }
+      .vault-json-editor__footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(103, 89, 255, 0.28); }
+      @media (max-width: 680px) {
+        .vault-json-editor__dialog { width: 100%; height: 100%; max-height: none; border-radius: 0; }
+        .vault-json-editor__body { padding: 16px; }
+        .manual-editor__section-body { grid-template-columns: 1fr; }
+      }
+    `; `;
     document.head.appendChild(style);
   }
 
@@ -1378,7 +1721,7 @@
     form.appendChild(sections);
 
     const footer = document.createElement('div');
-    footer.className = 'json-editor-footer';
+    footer.className = 'vault-json-editor__footer';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
@@ -1447,6 +1790,8 @@
     manualEditorDocId = null;
     manualEditorFile = null;
     manualEditorRequired = null;
+    manualEditorSchemaKey = null;
+    manualEditorFormData = null;
     if (manualEditorForm) {
       manualEditorForm.hidden = true;
     }
@@ -1506,9 +1851,14 @@
     const restore = trigger ? withButtonSpinner(trigger, 'Opening…') : () => {};
 
     try {
-      const { data, meta, processing } = await fetchManualJsonPayload(docId);
+      const { data, meta, processing, schema } = await fetchManualJsonPayload(docId);
+      manualEditorSchemaKey = resolveManualEditorSchema(file, schema, meta);
+      if (!manualEditorSchemaKey || !MANUAL_EDITOR_SCHEMAS[manualEditorSchemaKey]) {
+        throw new Error('Manual editing is not available for this document type yet.');
+      }
+      manualEditorFormData = mapManualPayloadToForm(manualEditorSchemaKey, data);
       manualEditorRequired = ensureObject(meta?.requiresManualFields);
-      renderManualEditorForm(data, manualEditorRequired, processing);
+      renderManualEditorForm(manualEditorFormData, manualEditorRequired, processing);
       if (manualEditorTitle) {
         manualEditorTitle.textContent = file?.title ? `${file.title} — Edit data` : 'Edit document data';
       }
@@ -1558,6 +1908,7 @@
         data: normaliseManualJsonShape(payload.json || {}),
         meta: payload.meta || {},
         processing: payload.processing || {},
+        schema: payload.schema || null,
       };
     }
     if (payload?.error === 'JSON_NOT_READY') {
@@ -1565,6 +1916,7 @@
         data: normaliseManualJsonShape({}),
         meta: payload.meta || {},
         processing: payload.processing || {},
+        schema: payload.schema || null,
       };
     }
     throw new Error(payload?.error || 'Unable to load this document\'s data right now.');
@@ -1579,40 +1931,32 @@
     };
   }
 
-  function renderManualEditorForm(data, required = {}, processing = {}) {
+  function renderManualEditorForm(data = {}, required = {}, processing = {}) {
     if (!manualEditorSections || !manualEditorForm) return;
     manualEditorSections.innerHTML = '';
 
-    const metadataSection = buildKeyValueSection({
-      section: 'metadata',
-      title: 'Metadata',
-      description: 'Document information such as dates, labels and account identifiers.',
-      entries: data.metadata || {},
-      required: normaliseRequiredKeys(required.metadata),
-    });
-    manualEditorSections.appendChild(metadataSection);
+    const schema = manualEditorSchemaKey ? MANUAL_EDITOR_SCHEMAS[manualEditorSchemaKey] : null;
+    if (!schema) {
+      const unavailable = document.createElement('p');
+      unavailable.className = 'manual-editor__empty';
+      unavailable.textContent = 'Manual editing is not available for this document yet.';
+      manualEditorSections.appendChild(unavailable);
+      manualEditorForm.hidden = true;
+      if (manualEditorMessage) {
+        manualEditorMessage.hidden = false;
+        manualEditorMessage.textContent = unavailable.textContent;
+      }
+      return;
+    }
 
-    const metricsSection = buildKeyValueSection({
-      section: 'metrics',
-      title: 'Metrics',
-      description: 'Amounts, balances and key figures used across the app.',
-      entries: data.metrics || {},
-      required: normaliseRequiredKeys(required.metrics),
+    schema.sections.forEach((section) => {
+      const element = section.type === 'array'
+        ? renderManualEditorArraySection(section, data)
+        : renderManualEditorSection(section, data);
+      manualEditorSections.appendChild(element);
     });
-    manualEditorSections.appendChild(metricsSection);
 
-    const transactionsSection = buildTransactionsSection({
-      transactions: Array.isArray(data.transactions) ? data.transactions : [],
-      required: Array.isArray(required.transactions) ? required.transactions : [],
-    });
-    manualEditorSections.appendChild(transactionsSection);
-
-    const narrativeSection = buildNarrativeSection({
-      narrative: Array.isArray(data.narrative) ? data.narrative : [],
-    });
-    manualEditorSections.appendChild(narrativeSection);
-
-    updateTransactionIndexes();
+    manualEditorForm.hidden = false;
 
     const requiresManual = Array.isArray(processing?.requiresManualFields)
       ? processing.requiresManualFields.filter((field) => typeof field === 'string' && field.trim())
@@ -1628,438 +1972,558 @@
     }
   }
 
-  function normaliseRequiredKeys(value) {
-    if (Array.isArray(value)) {
-      return value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
-    }
-    if (typeof value === 'object' && value) {
-      return Object.keys(value).filter((key) => typeof key === 'string' && key.trim()).map((key) => key.trim());
-    }
-    return [];
-  }
-
-  function buildKeyValueSection({ section, title, description, entries, required }) {
+  function renderManualEditorSection(section, data) {
     const wrapper = document.createElement('section');
-    wrapper.className = 'json-editor-section';
-    wrapper.dataset.section = section;
+    wrapper.className = 'manual-editor__section';
+    wrapper.dataset.sectionId = section.id || section.title || '';
 
     const header = document.createElement('div');
-    header.className = 'json-editor-section__header';
-    const heading = document.createElement('h5');
-    heading.className = 'json-editor-section__title';
-    heading.textContent = title;
-    header.appendChild(heading);
-    if (description) {
-      const help = document.createElement('p');
-      help.className = 'json-editor-section__description';
-      help.textContent = description;
-      header.appendChild(help);
+    header.className = 'manual-editor__section-header';
+    if (section.title) {
+      const heading = document.createElement('h5');
+      heading.className = 'manual-editor__section-title';
+      heading.textContent = section.title;
+      header.appendChild(heading);
+    }
+    if (section.description) {
+      const description = document.createElement('p');
+      description.className = 'manual-editor__section-description';
+      description.textContent = section.description;
+      header.appendChild(description);
     }
     wrapper.appendChild(header);
 
-    const list = document.createElement('div');
-    list.className = 'json-editor-list';
-    list.dataset.editorList = section;
-    list.dataset.section = section;
-
-    const keys = Object.keys(entries || {});
-    const requiredSet = new Set(Array.isArray(required) ? required : []);
-    if (!keys.length && requiredSet.size) {
-      requiredSet.forEach((field) => {
-        list.appendChild(createEditorRow({ section, key: field, value: '', required: true }));
-      });
-    } else if (keys.length) {
-      keys.forEach((key) => {
-        list.appendChild(createEditorRow({ section, key, value: entries[key], required: requiredSet.has(key) }));
-      });
-    } else {
-      list.appendChild(createEditorRow({ section, key: '', value: '' }));
-    }
-
-    wrapper.appendChild(list);
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'json-editor-add';
-    addBtn.dataset.editorAction = 'add-field';
-    addBtn.dataset.section = section;
-    addBtn.textContent = 'Add field';
-    wrapper.appendChild(addBtn);
+    const body = document.createElement('div');
+    body.className = 'manual-editor__section-body';
+    section.fields.forEach((field) => {
+      const value = getValueAtPath(data, field.path);
+      const fieldElement = renderManualEditorField(field, value, field.path);
+      body.appendChild(fieldElement);
+    });
+    wrapper.appendChild(body);
 
     return wrapper;
   }
 
-  function buildTransactionsSection({ transactions, required }) {
+  function renderManualEditorArraySection(section, data) {
     const wrapper = document.createElement('section');
-    wrapper.className = 'json-editor-section';
-    wrapper.dataset.section = 'transactions';
+    wrapper.className = 'manual-editor__section manual-editor__section--array';
+    wrapper.dataset.sectionId = section.id || section.title || '';
 
     const header = document.createElement('div');
-    header.className = 'json-editor-section__header';
-    const heading = document.createElement('h5');
-    heading.className = 'json-editor-section__title';
-    heading.textContent = 'Transactions';
-    header.appendChild(heading);
-    const help = document.createElement('p');
-    help.className = 'json-editor-section__description';
-    help.textContent = 'Each transaction should include a date, description and amount.';
-    header.appendChild(help);
+    header.className = 'manual-editor__section-header';
+    if (section.title) {
+      const heading = document.createElement('h5');
+      heading.className = 'manual-editor__section-title';
+      heading.textContent = section.title;
+      header.appendChild(heading);
+    }
+    if (section.description) {
+      const description = document.createElement('p');
+      description.className = 'manual-editor__section-description';
+      description.textContent = section.description;
+      header.appendChild(description);
+    }
     wrapper.appendChild(header);
 
-    const list = document.createElement('div');
-    list.className = 'json-editor-transactions';
-    list.dataset.editorTransactions = 'true';
+    const container = document.createElement('div');
+    container.className = 'manual-editor__array';
+    container.dataset.arrayPath = section.path;
 
-    const entries = Array.isArray(transactions) && transactions.length ? transactions : (Array.isArray(required) && required.length ? required.map(() => ({})) : []);
-    entries.forEach((tx, index) => {
-      list.appendChild(createTransactionCard(tx, index));
+    const values = getValueAtPath(data, section.path);
+    const entries = Array.isArray(values) && values.length ? values : [{}];
+    entries.forEach((entry, index) => {
+      container.appendChild(renderManualEditorArrayItem(section, entry, index));
     });
 
-    if (!entries.length) {
-      list.appendChild(createTransactionCard({}, 0));
-    }
+    wrapper.appendChild(container);
 
-    wrapper.appendChild(list);
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'json-editor-add';
-    addBtn.dataset.editorAction = 'add-transaction';
-    addBtn.textContent = 'Add transaction';
-    wrapper.appendChild(addBtn);
-
-    return wrapper;
-  }
-
-  function buildNarrativeSection({ narrative }) {
-    const wrapper = document.createElement('section');
-    wrapper.className = 'json-editor-section';
-    wrapper.dataset.section = 'narrative';
-
-    const header = document.createElement('div');
-    header.className = 'json-editor-section__header';
-    const heading = document.createElement('h5');
-    heading.className = 'json-editor-section__title';
-    heading.textContent = 'Narrative';
-    header.appendChild(heading);
-    const help = document.createElement('p');
-    help.className = 'json-editor-section__description';
-    help.textContent = 'Optional notes or bullet points displayed alongside the document.';
-    header.appendChild(help);
-    wrapper.appendChild(header);
-
-    const list = document.createElement('div');
-    list.className = 'json-editor-narrative';
-    list.dataset.editorNarrative = 'true';
-
-    const entries = Array.isArray(narrative) && narrative.length ? narrative : [''];
-    entries.forEach((line) => {
-      list.appendChild(createNarrativeRow(line));
-    });
-
-    wrapper.appendChild(list);
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'json-editor-add';
-    addBtn.dataset.editorAction = 'add-narrative';
-    addBtn.textContent = 'Add note';
-    wrapper.appendChild(addBtn);
+    const actions = document.createElement('div');
+    actions.className = 'manual-editor__array-actions';
+    const addButton = document.createElement('button');
+    addButton.type = 'button';
+    addButton.className = 'manual-editor__add';
+    addButton.dataset.action = 'add-array-item';
+    addButton.dataset.arrayPath = section.path;
+    addButton.textContent = section.addLabel || 'Add item';
+    actions.appendChild(addButton);
+    wrapper.appendChild(actions);
 
     return wrapper;
   }
 
-  function createTransactionCard(transaction, index) {
-    const id = `tx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const card = document.createElement('article');
-    card.className = 'json-editor-transaction';
-    card.dataset.editorTransaction = id;
-    card.dataset.editorTransactionIndex = String(index);
+  function renderManualEditorArrayItem(section, itemData, index) {
+    const item = document.createElement('div');
+    item.className = 'manual-editor__array-item';
+    item.dataset.arrayPath = section.path;
+    item.dataset.arrayIndex = String(index);
 
     const header = document.createElement('div');
-    header.className = 'json-editor-transaction__header';
+    header.className = 'manual-editor__array-item-header';
     const title = document.createElement('h6');
-    title.className = 'json-editor-transaction__title';
-    title.textContent = `Transaction ${index + 1}`;
+    title.className = 'manual-editor__array-item-title';
+    title.textContent = section.itemLabel ? `${section.itemLabel} ${index + 1}` : `Item ${index + 1}`;
     header.appendChild(title);
 
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'json-editor-remove';
-    remove.dataset.editorAction = 'remove-transaction';
-    remove.dataset.transaction = id;
+    remove.className = 'manual-editor__remove';
+    remove.dataset.action = 'remove-array-item';
+    remove.dataset.arrayPath = section.path;
+    remove.dataset.arrayIndex = String(index);
     remove.textContent = 'Remove';
     header.appendChild(remove);
-    card.appendChild(header);
+    item.appendChild(header);
 
-    const list = document.createElement('div');
-    list.className = 'json-editor-transaction-list';
-    list.dataset.editorList = 'transactions';
-    list.dataset.transaction = id;
-
-    const keys = Object.keys(transaction || {});
-    if (keys.length) {
-      keys.forEach((key) => {
-        list.appendChild(createEditorRow({ section: 'transactions', key, value: transaction[key], transactionId: id }));
-      });
-    } else {
-      list.appendChild(createEditorRow({ section: 'transactions', key: '', value: '', transactionId: id }));
-    }
-    card.appendChild(list);
-
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'json-editor-add';
-    addBtn.dataset.editorAction = 'add-field';
-    addBtn.dataset.section = 'transactions';
-    addBtn.dataset.transaction = id;
-    addBtn.textContent = 'Add field';
-    card.appendChild(addBtn);
-
-    return card;
-  }
-
-  function createNarrativeRow(value) {
-    const row = document.createElement('div');
-    row.className = 'json-editor-narrative-item';
-    row.dataset.editorNarrativeItem = 'true';
-
-    const textarea = document.createElement('textarea');
-    textarea.className = 'json-editor-textarea';
-    textarea.dataset.editorField = 'narrative';
-    textarea.rows = 2;
-    textarea.value = value || '';
-    row.appendChild(textarea);
-
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'json-editor-remove';
-    remove.dataset.editorAction = 'remove-narrative';
-    remove.textContent = 'Remove';
-    row.appendChild(remove);
-
-    const error = document.createElement('div');
-    error.className = 'json-editor-row__error';
-    error.dataset.editorError = 'message';
-    row.appendChild(error);
-
-    return row;
-  }
-
-  function createEditorRow({ section, key, value, required = false, transactionId = null }) {
-    const row = document.createElement('div');
-    row.className = 'json-editor-row';
-    row.dataset.editorRow = section;
-    if (transactionId) {
-      row.dataset.transaction = transactionId;
-    }
-    if (required) {
-      row.classList.add('is-required');
-      row.dataset.required = 'true';
-    }
-
-    const keyCol = document.createElement('div');
-    keyCol.className = 'json-editor-col';
-    const keyLabel = document.createElement('label');
-    keyLabel.className = 'json-editor-label';
-    keyLabel.textContent = 'Field';
-    const keyInput = document.createElement('input');
-    keyInput.type = 'text';
-    keyInput.className = 'json-editor-input';
-    keyInput.placeholder = 'Field name';
-    keyInput.dataset.editorField = 'key';
-    keyInput.value = key || '';
-    keyCol.append(keyLabel, keyInput);
-
-    const typeCol = document.createElement('div');
-    typeCol.className = 'json-editor-col';
-    const typeLabel = document.createElement('label');
-    typeLabel.className = 'json-editor-label';
-    typeLabel.textContent = 'Type';
-    const typeSelect = document.createElement('select');
-    typeSelect.className = 'json-editor-select';
-    typeSelect.dataset.editorField = 'type';
-    const fieldType = detectEditorType(key, value);
-    ['text', 'number', 'date', 'boolean', 'json'].forEach((option) => {
-      const opt = document.createElement('option');
-      opt.value = option;
-      opt.textContent = option === 'json' ? 'Structured data' : option.charAt(0).toUpperCase() + option.slice(1);
-      typeSelect.appendChild(opt);
+    const body = document.createElement('div');
+    body.className = 'manual-editor__section-body';
+    section.fields.forEach((field) => {
+      const fullPath = `${section.path}[${index}].${field.path}`;
+      const value = getValueAtPath(itemData, field.path);
+      const fieldElement = renderManualEditorField(field, value, fullPath, { relativePath: field.path });
+      body.appendChild(fieldElement);
     });
-    typeSelect.value = fieldType;
-    typeCol.append(typeLabel, typeSelect);
+    item.appendChild(body);
 
-    const valueCol = document.createElement('div');
-    valueCol.className = 'json-editor-col';
-    valueCol.dataset.editorValueContainer = 'true';
-    const valueLabel = document.createElement('label');
-    valueLabel.className = 'json-editor-label';
-    valueLabel.textContent = 'Value';
-    valueCol.appendChild(valueLabel);
-    const valueControl = createValueControl(fieldType, value);
-    valueCol.appendChild(valueControl);
-    row.dataset.editorValueType = fieldType;
+    return item;
+  }
 
-    const removeCol = document.createElement('div');
-    removeCol.className = 'json-editor-col';
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'json-editor-remove';
-    removeBtn.dataset.editorAction = 'remove-row';
-    removeBtn.dataset.section = section;
-    if (transactionId) {
-      removeBtn.dataset.transaction = transactionId;
+  function renderManualEditorField(field, value, fullPath, options = {}) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'manual-editor__field';
+    wrapper.dataset.fieldPath = fullPath;
+    if (options.relativePath) {
+      wrapper.dataset.relativePath = options.relativePath;
     }
-    removeBtn.textContent = 'Remove';
-    if (required) {
-      removeBtn.disabled = true;
-    }
-    removeCol.appendChild(removeBtn);
+
+    const label = document.createElement('label');
+    label.className = 'manual-editor__label';
+    const inputId = `manual-editor-${fullPath.replace(/[^a-z0-9]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')}`;
+    label.setAttribute('for', inputId);
+    label.textContent = field.required ? `${field.label} *` : field.label;
+    wrapper.appendChild(label);
+
+    const control = createManualEditorInput(field, value, fullPath, inputId, options);
+    wrapper.appendChild(control);
 
     const error = document.createElement('div');
-    error.className = 'json-editor-row__error';
-    error.dataset.editorError = 'message';
+    error.className = 'manual-editor__error';
+    error.dataset.fieldError = fullPath;
+    wrapper.appendChild(error);
 
-    row.append(keyCol, typeCol, valueCol, removeCol, error);
-    return row;
+    return wrapper;
   }
 
-  function detectEditorType(key, value) {
-    const normalisedKey = (key || '').toLowerCase();
-    if (typeof value === 'number') return 'number';
-    if (typeof value === 'boolean') return 'boolean';
-    if (value && typeof value === 'object') return 'json';
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (/^\d{4}-\d{2}$/.test(trimmed) || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return 'date';
-      const parsed = Date.parse(trimmed);
-      if (!Number.isNaN(parsed) && trimmed.length > 3) return 'date';
-      if ((/amount|balance|total|value|gross|net|salary|income|pay|payment|contribution|tax|deduction|ni|loan|fee|limit$/i).test(normalisedKey)) {
-        const number = Number(trimmed.replace(/[, ]+/g, ''));
-        if (!Number.isNaN(number)) return 'number';
-      }
-    }
-    return 'text';
-  }
-
-  function createValueControl(type, value) {
+  function createManualEditorInput(field, value, fullPath, id, options = {}) {
+    const type = field.type || 'text';
     let control;
-    if (type === 'number') {
+    if (type === 'textarea') {
+      control = document.createElement('textarea');
+      control.className = 'manual-editor__input manual-editor__input--textarea';
+      control.rows = field.rows || 3;
+      control.value = value != null ? String(value) : '';
+    } else if (type === 'number') {
       control = document.createElement('input');
       control.type = 'number';
       control.step = '0.01';
-      control.inputMode = 'decimal';
-      control.value = value != null && value !== '' ? String(value) : '';
+      control.className = 'manual-editor__input';
+      control.value = Number.isFinite(value) ? String(value) : value != null ? String(value) : '';
     } else if (type === 'date') {
       control = document.createElement('input');
       control.type = 'date';
-      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-        control.value = value.trim();
-      } else if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value.trim())) {
-        control.value = `${value.trim()}-01`;
-      } else {
-        control.value = '';
-      }
-    } else if (type === 'boolean') {
+      control.className = 'manual-editor__input';
+      control.value = formatDateInput(value);
+    } else if (type === 'month') {
+      control = document.createElement('input');
+      control.type = 'month';
+      control.className = 'manual-editor__input';
+      control.value = formatMonthInput(value);
+    } else if (type === 'select') {
       control = document.createElement('select');
-      control.className = 'json-editor-select';
-      ['true', 'false'].forEach((option) => {
-        const opt = document.createElement('option');
-        opt.value = option;
-        opt.textContent = option === 'true' ? 'Yes' : 'No';
-        control.appendChild(opt);
+      control.className = 'manual-editor__input manual-editor__input--select';
+      const optionsList = Array.isArray(field.options) ? field.options : [];
+      optionsList.forEach((opt) => {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        control.appendChild(option);
       });
-      control.value = String(value === true || value === 'true');
-    } else if (type === 'json') {
-      control = document.createElement('textarea');
-      control.className = 'json-editor-textarea';
-      control.rows = 2;
-      try {
-        control.value = typeof value === 'string' && value.trim().startsWith('{') ? value : JSON.stringify(value ?? {}, null, 2);
-      } catch {
-        control.value = typeof value === 'string' ? value : '';
-      }
+      control.value = value != null ? String(value) : '';
     } else {
       control = document.createElement('input');
       control.type = 'text';
-      control.value = value != null && value !== '' ? String(value) : '';
+      control.className = 'manual-editor__input';
+      control.value = value != null ? String(value) : '';
     }
-    if (!control.className) {
-      control.className = 'json-editor-input';
-    } else if (!control.className.includes('json-editor')) {
-      control.classList.add('json-editor-input');
+
+    control.id = id;
+    control.dataset.fieldPath = fullPath;
+    control.dataset.fieldType = type;
+    if (options.relativePath) {
+      control.dataset.relativePath = options.relativePath;
     }
-    control.dataset.editorField = 'value';
-    control.dataset.editorType = type;
+    if (field.placeholder) {
+      control.placeholder = field.placeholder;
+    }
+
     return control;
   }
 
-  function handleManualEditorClick(event) {
-    const actionButton = event.target.closest('[data-editor-action]');
-    if (!actionButton) return;
-    const action = actionButton.dataset.editorAction;
-    if (!action) return;
-    event.preventDefault();
+  function getValueAtPath(source, path) {
+    if (!source || !path) return undefined;
+    const tokens = String(path).replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+    let current = source;
+    for (const token of tokens) {
+      if (current == null) return undefined;
+      current = current[token];
+    }
+    return current;
+  }
 
-    if (action === 'add-field') {
-      const section = actionButton.dataset.section || 'metadata';
-      const transaction = actionButton.dataset.transaction || null;
-      if (transaction) {
-        const list = manualEditorSections?.querySelector(`[data-editor-list="transactions"][data-transaction="${transaction}"]`);
-        if (list) {
-          list.appendChild(createEditorRow({ section: 'transactions', key: '', value: '', transactionId: transaction }));
+  function setValueAtPath(target, path, value) {
+    if (!target || !path) return;
+    const tokens = String(path).replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+    let current = target;
+    tokens.forEach((token, index) => {
+      if (index === tokens.length - 1) {
+        current[token] = value;
+        return;
+      }
+      if (!current[token] || typeof current[token] !== 'object') {
+        const nextToken = tokens[index + 1];
+        current[token] = Number.isInteger(Number(nextToken)) ? [] : {};
+      }
+      current = current[token];
+    });
+  }
+
+  function formatDateInput(value) {
+    if (!value) return '';
+    const str = String(value).trim();
+    if (!str) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    if (/^\d{4}-\d{2}$/.test(str)) return `${str}-01`;
+    if (/^\d{2}\/\d{4}$/.test(str)) {
+      const [month, year] = str.split('/');
+      return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-01`;
+    }
+    const parsed = new Date(str);
+    if (Number.isNaN(parsed.valueOf())) return '';
+    return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}-${String(parsed.getUTCDate()).padStart(2, '0')}`;
+  }
+
+  function formatMonthInput(value) {
+    if (!value) return '';
+    const str = String(value).trim();
+    if (!str) return '';
+    if (/^\d{4}-\d{2}$/.test(str)) return str;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str.slice(0, 7);
+    if (/^\d{2}\/\d{4}$/.test(str)) {
+      const [month, year] = str.split('/');
+      return `${year.padStart(4, '0')}-${month.padStart(2, '0')}`;
+    }
+    const parsed = new Date(str);
+    if (Number.isNaN(parsed.valueOf())) return '';
+    return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function toIsoDateString(value) {
+    const formatted = formatDateInput(value);
+    return formatted || null;
+  }
+
+  function toMonthKey(value) {
+    const formatted = formatMonthInput(value);
+    return formatted || null;
+  }
+
+  function toDisplayMonth(monthKey) {
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return null;
+    const [year, month] = monthKey.split('-');
+    return `${month}/${year}`;
+  }
+
+  function normaliseMonthInputValue(value) {
+    const monthKey = toMonthKey(value);
+    if (!monthKey) {
+      return { monthKey: null, display: null, iso: null };
+    }
+    return {
+      monthKey,
+      display: toDisplayMonth(monthKey),
+      iso: `${monthKey}-01`,
+    };
+  }
+
+  function safeNumber(value) {
+    if (value == null || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function collectManualEditorData() {
+    const schema = manualEditorSchemaKey ? MANUAL_EDITOR_SCHEMAS[manualEditorSchemaKey] : null;
+    const errors = [];
+    const form = {};
+    if (!schema) {
+      errors.push({ path: '', message: 'Unsupported schema.' });
+      return { form, errors };
+    }
+
+    schema.sections.forEach((section) => {
+      if (section.type === 'array') {
+        const values = collectManualEditorArray(section, errors);
+        if (values.length) {
+          setValueAtPath(form, section.path, values);
         }
       } else {
-        const list = manualEditorSections?.querySelector(`.json-editor-list[data-section="${section}"]`);
-        if (list) {
-          list.appendChild(createEditorRow({ section, key: '', value: '' }));
+        section.fields.forEach((field) => {
+          const value = readManualEditorField(field, field.path, errors);
+          if (typeof value !== 'undefined') {
+            setValueAtPath(form, field.path, value);
+          }
+        });
+      }
+    });
+
+    return { form, errors };
+  }
+
+  function collectManualEditorArray(section, errors) {
+    const container = manualEditorSections?.querySelector(`.manual-editor__array[data-array-path="${section.path}"]`);
+    if (!container) return [];
+    const items = Array.from(container.querySelectorAll('[data-array-index]'));
+    const results = [];
+    items.forEach((item) => {
+      const index = Number(item.dataset.arrayIndex);
+      const record = {};
+      const hasInputValue = section.fields.some((field) => {
+        const fullPath = `${section.path}[${index}].${field.path}`;
+        const input = manualEditorSections?.querySelector(`[data-field-path="${fullPath}"]`);
+        return input && input.value.trim();
+      });
+      if (!hasInputValue) {
+        return;
+      }
+      section.fields.forEach((field) => {
+        const fullPath = `${section.path}[${index}].${field.path}`;
+        const value = readManualEditorField(field, fullPath, errors);
+        if (typeof value !== 'undefined') {
+          setValueAtPath(record, field.path, value);
         }
+      });
+      if (Object.keys(record).length) {
+        results.push(record);
       }
-    } else if (action === 'remove-row') {
-      const row = actionButton.closest('[data-editor-row]');
-      if (!row) return;
-      if (row.dataset.required === 'true') return;
-      row.remove();
-    } else if (action === 'add-transaction') {
-      const list = manualEditorSections?.querySelector('[data-editor-transactions]');
-      if (list) {
-        const nextIndex = list.querySelectorAll('[data-editor-transaction]').length;
-        list.appendChild(createTransactionCard({}, nextIndex));
-        updateTransactionIndexes();
+    });
+    return results;
+  }
+
+  function readManualEditorField(field, fullPath, errors, options = {}) {
+    const input = manualEditorSections?.querySelector(`[data-field-path="${fullPath}"]`);
+    if (!input) return undefined;
+    const type = input.dataset.fieldType || field.type || 'text';
+    const raw = input.value != null ? input.value.trim() : '';
+    if (!raw) {
+      if (field.required && !options.allowBlank) {
+        showManualEditorFieldError(fullPath, 'This field is required.');
+        errors.push({ path: fullPath, message: 'This field is required.' });
       }
-    } else if (action === 'remove-transaction') {
-      const id = actionButton.dataset.transaction;
-      if (!id) return;
-      const card = manualEditorSections?.querySelector(`[data-editor-transaction="${id}"]`);
-      if (card) {
-        card.remove();
-        updateTransactionIndexes();
+      return undefined;
+    }
+
+    if (type === 'number') {
+      const number = Number(raw);
+      if (!Number.isFinite(number)) {
+        showManualEditorFieldError(fullPath, 'Enter a valid monetary amount.');
+        errors.push({ path: fullPath, message: 'Enter a valid monetary amount.' });
+        return undefined;
       }
-    } else if (action === 'add-narrative') {
-      const list = manualEditorSections?.querySelector('[data-editor-narrative]');
-      if (list) {
-        list.appendChild(createNarrativeRow(''));
+      return number;
+    }
+
+    if (type === 'date') {
+      const iso = toIsoDateString(raw);
+      if (!iso) {
+        showManualEditorFieldError(fullPath, 'Enter a valid date.');
+        errors.push({ path: fullPath, message: 'Enter a valid date.' });
+        return undefined;
       }
-    } else if (action === 'remove-narrative') {
-      const item = actionButton.closest('[data-editor-narrative-item]');
-      if (item) item.remove();
+      return iso;
+    }
+
+    if (type === 'month') {
+      const monthKey = toMonthKey(raw);
+      if (!monthKey) {
+        showManualEditorFieldError(fullPath, 'Enter a valid month.');
+        errors.push({ path: fullPath, message: 'Enter a valid month.' });
+        return undefined;
+      }
+      return monthKey;
+    }
+
+    if (type === 'select') {
+      if (!raw) {
+        if (field.required && !options.allowBlank) {
+          showManualEditorFieldError(fullPath, 'Please choose an option.');
+          errors.push({ path: fullPath, message: 'Please choose an option.' });
+        }
+        return undefined;
+      }
+      return raw;
+    }
+
+    return raw;
+  }
+
+  function showManualEditorFieldError(path, message) {
+    const field = manualEditorSections?.querySelector(`.manual-editor__field[data-field-path="${path}"]`);
+    if (!field) return;
+    field.classList.add('has-error');
+    const error = field.querySelector('.manual-editor__error');
+    if (error) error.textContent = message;
+  }
+
+  function clearManualEditorFieldError(path) {
+    const field = manualEditorSections?.querySelector(`.manual-editor__field[data-field-path="${path}"]`);
+    if (!field) return;
+    field.classList.remove('has-error');
+    const error = field.querySelector('.manual-editor__error');
+    if (error) error.textContent = '';
+  }
+
+  function clearManualEditorErrors() {
+    if (!manualEditorSections) return;
+    manualEditorSections.querySelectorAll('.manual-editor__field').forEach((field) => {
+      field.classList.remove('has-error');
+    });
+    manualEditorSections.querySelectorAll('.manual-editor__error').forEach((error) => {
+      error.textContent = '';
+    });
+    if (manualEditorError) {
+      manualEditorError.hidden = true;
+      manualEditorError.textContent = '';
     }
   }
 
-  function handleManualEditorChange(event) {
-    const select = event.target.closest('[data-editor-field="type"]');
-    if (!select) return;
-    const row = select.closest('[data-editor-row]');
-    if (!row) return;
-    const container = row.querySelector('[data-editor-value-container]');
+  function highlightServerValidation(details) {
+    if (!Array.isArray(details)) return;
+    details.forEach((detail) => {
+      const serverPath = typeof detail.path === 'string' ? detail.path : '';
+      const message = detail.message || 'Invalid value.';
+      const mapped = mapServerPathToFormPath(manualEditorSchemaKey, serverPath);
+      highlightPathError(mapped, message);
+    });
+  }
+
+  function highlightPathError(path, message) {
+    if (!path) return;
+    showManualEditorFieldError(path, message);
+  }
+
+  function mapServerPathToFormPath(schemaKey, path) {
+    if (!path) return path;
+    if (schemaKey === 'bank_statement') {
+      let mapped = path.replace(/^metadata\./, '');
+      mapped = mapped.replace(/^metrics\.(openingBalance|closingBalance|totalMoneyIn|totalMoneyOut|overdraftLimit)/, 'balances.$1');
+      mapped = mapped.replace(/^metrics\.averageBalances\./, 'balances.averageBalances.');
+      mapped = mapped.replace(/^metrics\.period\.start/, 'statement.period.startDate');
+      mapped = mapped.replace(/^metrics\.period\.end/, 'statement.period.endDate');
+      mapped = mapped.replace(/^metrics\.period\.month/, 'statement.period.Date');
+      mapped = mapped.replace(/^metrics\.currency/, 'account.currency');
+      mapped = mapped.replace(/^period\.start$/, 'statement.period.startDate');
+      mapped = mapped.replace(/^period\.end$/, 'statement.period.endDate');
+      mapped = mapped.replace(/^period\.(Date|month)$/, 'statement.period.Date');
+      mapped = mapped.replace(/^metadata\.documentMonth/, 'statement.period.Date');
+      mapped = mapped.replace(/^metadata\.documentDate/, 'statement.period.endDate');
+      return mapped;
+    }
+    if (schemaKey === 'payslip') {
+      let mapped = path.replace(/^metadata\./, '');
+      mapped = mapped.replace(/^metrics\.(grossPeriod|netPeriod|grossYtd|netYtd)/, 'totals.$1');
+      mapped = mapped.replace(/^metrics\.payDate/, 'period.Date');
+      mapped = mapped.replace(/^metrics\.period\.start/, 'period.start');
+      mapped = mapped.replace(/^metrics\.period\.end/, 'period.end');
+      mapped = mapped.replace(/^metrics\.period\.payFrequency/, 'period.payFrequency');
+      mapped = mapped.replace(/^metrics\.currency/, 'currency');
+      mapped = mapped.replace(/^metadata\.documentMonth/, 'period.Date');
+      mapped = mapped.replace(/^metadata\.documentDate/, 'period.Date');
+      return mapped;
+    }
+    return path;
+  }
+
+  function handleManualEditorClick(event) {
+    const actionTarget = event.target.closest('[data-action]');
+    if (!actionTarget) return;
+    const { action } = actionTarget.dataset;
+    if (action === 'add-array-item') {
+      event.preventDefault();
+      addManualEditorArrayItem(actionTarget.dataset.arrayPath || '');
+    } else if (action === 'remove-array-item') {
+      event.preventDefault();
+      removeManualEditorArrayItem(actionTarget.dataset.arrayPath || '', Number(actionTarget.dataset.arrayIndex));
+    }
+  }
+
+  function addManualEditorArrayItem(path) {
+    if (!path) return;
+    const schema = MANUAL_EDITOR_SCHEMAS[manualEditorSchemaKey];
+    const section = schema?.sections.find((item) => item.type === 'array' && item.path === path);
+    if (!section) return;
+    const container = manualEditorSections?.querySelector(`.manual-editor__array[data-array-path="${path}"]`);
     if (!container) return;
-    const previousControl = container.querySelector('[data-editor-field="value"]');
-    const previousValue = previousControl ? previousControl.value : '';
-    const type = select.value || 'text';
-    container.innerHTML = '';
-    const control = createValueControl(type, previousValue);
-    container.appendChild(control);
-    row.dataset.editorValueType = type;
+    const nextIndex = container.querySelectorAll('[data-array-index]').length;
+    container.appendChild(renderManualEditorArrayItem(section, {}, nextIndex));
+  }
+
+  function removeManualEditorArrayItem(path, index) {
+    if (!path || Number.isNaN(index)) return;
+    const container = manualEditorSections?.querySelector(`.manual-editor__array[data-array-path="${path}"]`);
+    if (!container) return;
+    const item = container.querySelector(`[data-array-index="${index}"]`);
+    if (!item) return;
+    item.remove();
+    reindexManualEditorArrayItems(path);
+  }
+
+  function reindexManualEditorArrayItems(path) {
+    const container = manualEditorSections?.querySelector(`.manual-editor__array[data-array-path="${path}"]`);
+    if (!container) return;
+    const items = Array.from(container.querySelectorAll('[data-array-index]'));
+    items.forEach((item, index) => {
+      item.dataset.arrayIndex = String(index);
+      const header = item.querySelector('.manual-editor__array-item-title');
+      if (header) {
+        header.textContent = header.textContent.replace(/\d+$/, String(index + 1));
+      }
+      const remove = item.querySelector('[data-action="remove-array-item"]');
+      if (remove) {
+        remove.dataset.arrayIndex = String(index);
+      }
+      item.querySelectorAll('[data-field-path]').forEach((input) => {
+        const relative = input.dataset.relativePath;
+        if (!relative) return;
+        const newPath = `${path}[${index}].${relative}`;
+        input.dataset.fieldPath = newPath;
+        const wrapper = input.closest('.manual-editor__field');
+        if (wrapper) {
+          wrapper.dataset.fieldPath = newPath;
+          const error = wrapper.querySelector('.manual-editor__error');
+          if (error) error.dataset.fieldError = newPath;
+          const label = wrapper.querySelector('label');
+          const newId = `manual-editor-${newPath.replace(/[^a-z0-9]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')}`;
+          if (label) label.setAttribute('for', newId);
+          input.id = newId;
+        }
+      });
+    });
+  }
+
+  function handleManualEditorChange(event) {
+    const input = event.target.closest('[data-field-path]');
+    if (!input) return;
+    clearManualEditorFieldError(input.dataset.fieldPath);
   }
 
   function handleManualEditorSubmit(event) {
@@ -2070,18 +2534,444 @@
       manualEditorError.textContent = 'Document identifier missing. Close and try again.';
       return;
     }
-    const { payload, errors } = collectManualEditorData();
+    if (!manualEditorSchemaKey || !MANUAL_EDITOR_SCHEMAS[manualEditorSchemaKey]) {
+      manualEditorError.hidden = false;
+      manualEditorError.textContent = 'This document type cannot be edited manually yet.';
+      return;
+    }
+
+    const { form, errors } = collectManualEditorData();
     if (errors.length) {
       manualEditorError.hidden = false;
       manualEditorError.textContent = 'Please fix the highlighted fields.';
       return;
     }
+
+    manualEditorFormData = form;
+    const payload = buildManualPayload(manualEditorSchemaKey, form);
     submitManualEditorPayload(payload).catch((error) => {
       manualEditorError.hidden = false;
       manualEditorError.textContent = error.message || 'Unable to save changes right now.';
     });
   }
 
+  function buildManualPayload(schemaKey, form) {
+    if (schemaKey === 'bank_statement') return buildBankStatementPayload(form);
+    if (schemaKey === 'payslip') return buildPayslipPayload(form);
+    return { metadata: form.metadata || {}, metrics: form.metrics || {}, transactions: [], narrative: [] };
+  }
+
+  function buildBankStatementPayload(form) {
+    const institutionForm = ensureObject(form.institution);
+    const contactInfoForm = ensureObject(institutionForm.contactInfo);
+    const institution = {};
+    if (typeof institutionForm.name === 'string') institution.name = institutionForm.name;
+    if (typeof institutionForm.address === 'string') institution.address = institutionForm.address;
+    if (typeof institutionForm.swiftBic === 'string') institution.swiftBic = institutionForm.swiftBic;
+    const contactInfo = {};
+    if (typeof contactInfoForm.telephone === 'string') contactInfo.telephone = contactInfoForm.telephone;
+    if (typeof contactInfoForm.website === 'string') contactInfo.website = contactInfoForm.website;
+    if (Object.keys(contactInfo).length) institution.contactInfo = contactInfo;
+
+    const accountForm = ensureObject(form.account);
+    const holderAddressForm = ensureObject(accountForm.holderAddress);
+    const account = {};
+    if (typeof accountForm.holderName === 'string') account.holderName = accountForm.holderName;
+    const holderAddress = {};
+    if (typeof holderAddressForm.street === 'string') holderAddress.street = holderAddressForm.street;
+    if (typeof holderAddressForm.city === 'string') holderAddress.city = holderAddressForm.city;
+    if (typeof holderAddressForm.postalCode === 'string') holderAddress.postalCode = holderAddressForm.postalCode;
+    if (Object.keys(holderAddress).length) account.holderAddress = holderAddress;
+    if (typeof accountForm.accountNumber === 'string') account.accountNumber = accountForm.accountNumber;
+    if (typeof accountForm.sortCode === 'string') account.sortCode = accountForm.sortCode;
+    if (typeof accountForm.iban === 'string') account.iban = accountForm.iban;
+    if (typeof accountForm.type === 'string') account.type = accountForm.type;
+    if (typeof accountForm.currency === 'string') account.currency = accountForm.currency;
+
+    const statementForm = ensureObject(form.statement);
+    const periodForm = ensureObject(statementForm.period);
+    const startIso = toIsoDateString(periodForm.startDate);
+    const endIso = toIsoDateString(periodForm.endDate);
+    const monthInfo = normaliseMonthInputValue(periodForm.Date || endIso || startIso);
+    const statement = {};
+    if (typeof statementForm.statementNumber === 'string') statement.statementNumber = statementForm.statementNumber;
+    statement.period = {
+      startDate: startIso || null,
+      endDate: endIso || null,
+      Date: monthInfo.display,
+    };
+
+    const balancesForm = ensureObject(form.balances);
+    const averageBalancesForm = ensureObject(balancesForm.averageBalances);
+    const balances = {};
+    if (balancesForm.openingBalance != null) balances.openingBalance = safeNumber(balancesForm.openingBalance);
+    if (balancesForm.closingBalance != null) balances.closingBalance = safeNumber(balancesForm.closingBalance);
+    if (balancesForm.totalMoneyIn != null) balances.totalMoneyIn = safeNumber(balancesForm.totalMoneyIn);
+    if (balancesForm.totalMoneyOut != null) balances.totalMoneyOut = safeNumber(balancesForm.totalMoneyOut);
+    if (balancesForm.overdraftLimit != null) balances.overdraftLimit = safeNumber(balancesForm.overdraftLimit);
+    const averageBalances = {};
+    if (averageBalancesForm.averageCreditBalance != null) {
+      averageBalances.averageCreditBalance = safeNumber(averageBalancesForm.averageCreditBalance);
+    }
+    if (averageBalancesForm.averageDebitBalance != null) {
+      averageBalances.averageDebitBalance = safeNumber(averageBalancesForm.averageDebitBalance);
+    }
+    if (Object.keys(averageBalances).length) balances.averageBalances = averageBalances;
+
+    const interestForm = ensureObject(form.interestInformation);
+    const interestPaidForm = ensureObject(interestForm.interestPaid);
+    const interestInformation = {};
+    if (typeof interestForm.creditInterestRate === 'string') {
+      interestInformation.creditInterestRate = interestForm.creditInterestRate;
+    }
+    if (typeof interestForm.overdraftInterestRate === 'string') {
+      interestInformation.overdraftInterestRate = interestForm.overdraftInterestRate;
+    }
+    const interestPaid = {};
+    const interestPaidDate = toIsoDateString(interestPaidForm.date);
+    if (interestPaidDate) interestPaid.date = interestPaidDate;
+    if (typeof interestPaidForm.description === 'string') interestPaid.description = interestPaidForm.description;
+    if (interestPaidForm.amount != null) interestPaid.amount = safeNumber(interestPaidForm.amount);
+    if (Object.keys(interestPaid).length) interestInformation.interestPaid = interestPaid;
+
+    const additionalForm = ensureObject(form.additionalInformation);
+    const additionalInformation = {};
+    if (typeof additionalForm.fscsInformation === 'string') {
+      additionalInformation.fscsInformation = additionalForm.fscsInformation;
+    }
+    const surveyForm = ensureObject(additionalForm.serviceQualitySurvey);
+    const serviceQualitySurvey = {};
+    if (typeof surveyForm.region === 'string') serviceQualitySurvey.region = surveyForm.region;
+    if (typeof surveyForm.ranking === 'string') serviceQualitySurvey.ranking = surveyForm.ranking;
+    if (typeof surveyForm.score === 'string') serviceQualitySurvey.score = surveyForm.score;
+    if (Object.keys(serviceQualitySurvey).length) {
+      additionalInformation.serviceQualitySurvey = serviceQualitySurvey;
+    }
+    const newsItems = Array.isArray(additionalForm.news)
+      ? additionalForm.news
+          .map((item) => ({
+            title: typeof item.title === 'string' ? item.title : '',
+            content: typeof item.content === 'string' ? item.content : '',
+          }))
+          .filter((item) => item.title || item.content)
+      : [];
+    if (newsItems.length) {
+      additionalInformation.news = newsItems;
+    }
+
+    const metadata = {
+      manualSchema: 'bank_statement',
+      institution,
+      account,
+      statement,
+      balances,
+      interestInformation,
+      additionalInformation,
+    };
+
+    metadata.period = {
+      start: startIso || null,
+      end: endIso || null,
+      month: monthInfo.monthKey,
+      display: monthInfo.display,
+    };
+
+    metadata.currency = typeof account.currency === 'string' ? account.currency : null;
+    metadata.documentDate = endIso || startIso || monthInfo.iso;
+    metadata.documentMonth = monthInfo.monthKey;
+    metadata.displayMonth = monthInfo.display;
+
+    const metrics = {
+      currency: metadata.currency || null,
+      openingBalance: safeNumber(balances.openingBalance),
+      closingBalance: safeNumber(balances.closingBalance),
+      totalMoneyIn: safeNumber(balances.totalMoneyIn),
+      totalMoneyOut: safeNumber(balances.totalMoneyOut),
+      overdraftLimit: safeNumber(balances.overdraftLimit),
+      averageBalances,
+      period: {
+        start: startIso || null,
+        end: endIso || null,
+        month: monthInfo.monthKey,
+        display: monthInfo.display,
+      },
+    };
+
+    const transactions = Array.isArray(form.transactions)
+      ? form.transactions
+          .map((entry) => {
+            const date = toIsoDateString(entry.date);
+            const moneyIn = safeNumber(entry.moneyIn);
+            const moneyOut = safeNumber(entry.moneyOut);
+            const balance = safeNumber(entry.balance);
+            const record = {};
+            if (date) record.date = date;
+            if (entry.description) record.description = String(entry.description);
+            if (moneyIn != null) record.moneyIn = moneyIn;
+            if (moneyOut != null) record.moneyOut = moneyOut;
+            if (balance != null) record.balance = balance;
+            if (entry.transactionType) record.transactionType = entry.transactionType;
+            if (entry.paymentMethod) record.paymentMethod = String(entry.paymentMethod);
+            if (entry.counterparty) record.counterparty = String(entry.counterparty);
+            if (entry.reference) record.reference = String(entry.reference);
+            if (!Object.keys(record).length) return null;
+            if (moneyIn != null || moneyOut != null) {
+              const amount = (moneyIn || 0) - (moneyOut || 0);
+              if (amount !== 0) {
+                record.amount = amount;
+                record.direction = amount >= 0 ? 'inflow' : 'outflow';
+              }
+            }
+            if (account.accountNumber) record.accountNumber = account.accountNumber;
+            if (metadata.currency) record.currency = metadata.currency;
+            return record;
+          })
+          .filter(Boolean)
+      : [];
+
+    return { metadata, metrics, transactions, narrative: [] };
+  }
+
+  function buildPayslipPayload(form) {
+    const employeeForm = ensureObject(form.employee);
+    const employeeAddressForm = ensureObject(employeeForm.address);
+    const employee = {};
+    if (typeof employeeForm.fullName === 'string') employee.fullName = employeeForm.fullName;
+    if (typeof employeeForm.employeeId === 'string') employee.employeeId = employeeForm.employeeId;
+    if (typeof employeeForm.niNumber === 'string') employee.niNumber = employeeForm.niNumber;
+    if (typeof employeeForm.taxCode === 'string') employee.taxCode = employeeForm.taxCode;
+    if (typeof employeeForm.niCategory === 'string') employee.niCategory = employeeForm.niCategory;
+    const employeeAddress = {};
+    if (typeof employeeAddressForm.street === 'string') employeeAddress.street = employeeAddressForm.street;
+    if (typeof employeeAddressForm.city === 'string') employeeAddress.city = employeeAddressForm.city;
+    if (typeof employeeAddressForm.county === 'string') employeeAddress.county = employeeAddressForm.county;
+    if (typeof employeeAddressForm.postcode === 'string') employeeAddress.postcode = employeeAddressForm.postcode;
+    if (Object.keys(employeeAddress).length) employee.address = employeeAddress;
+
+    const employerForm = ensureObject(form.employer);
+    const employer = {};
+    if (typeof employerForm.name === 'string') employer.name = employerForm.name;
+    if (typeof employerForm.taxDistrict === 'string') employer.taxDistrict = employerForm.taxDistrict;
+    if (typeof employerForm.taxReference === 'string') employer.taxReference = employerForm.taxReference;
+    if (employerForm.employersNicThisPeriod != null) {
+      employer.employersNicThisPeriod = safeNumber(employerForm.employersNicThisPeriod);
+    }
+    if (employerForm.employersNicYtd != null) {
+      employer.employersNicYtd = safeNumber(employerForm.employersNicYtd);
+    }
+    if (employerForm.employersPensionThisPeriod != null) {
+      employer.employersPensionThisPeriod = safeNumber(employerForm.employersPensionThisPeriod);
+    }
+    if (employerForm.employersPensionYtd != null) {
+      employer.employersPensionYtd = safeNumber(employerForm.employersPensionYtd);
+    }
+
+    const periodForm = ensureObject(form.period);
+    const payFrequency = typeof periodForm.payFrequency === 'string' ? periodForm.payFrequency : null;
+    const monthInfo = normaliseMonthInputValue(periodForm.Date || periodForm.end || periodForm.start);
+    const payDateIso = monthInfo.iso;
+    const periodStartIso = toIsoDateString(periodForm.start);
+    const periodEndIso = toIsoDateString(periodForm.end);
+    const period = {
+      Date: monthInfo.display,
+      start: periodStartIso || null,
+      end: periodEndIso || null,
+      payFrequency,
+      month: monthInfo.monthKey,
+      display: monthInfo.display,
+    };
+
+    const earnings = Array.isArray(form.earnings)
+      ? form.earnings
+          .map((item) => ({
+            rawLabel: typeof item.rawLabel === 'string' ? item.rawLabel : '',
+            category: typeof item.category === 'string' ? item.category : '',
+            amountPeriod: safeNumber(item.amountPeriod),
+            amountYtd: safeNumber(item.amountYtd),
+          }))
+          .filter((item) => item.rawLabel || item.category)
+      : [];
+
+    const deductions = Array.isArray(form.deductions)
+      ? form.deductions
+          .map((item) => ({
+            rawLabel: typeof item.rawLabel === 'string' ? item.rawLabel : '',
+            category: typeof item.category === 'string' ? item.category : '',
+            amountPeriod: safeNumber(item.amountPeriod),
+            amountYtd: safeNumber(item.amountYtd),
+          }))
+          .filter((item) => item.rawLabel || item.category)
+      : [];
+
+    const totalsForm = ensureObject(form.totals);
+    const totals = {};
+    if (totalsForm.grossPeriod != null) totals.grossPeriod = safeNumber(totalsForm.grossPeriod);
+    if (totalsForm.netPeriod != null) totals.netPeriod = safeNumber(totalsForm.netPeriod);
+    if (totalsForm.grossYtd != null) totals.grossYtd = safeNumber(totalsForm.grossYtd);
+    if (totalsForm.netYtd != null) totals.netYtd = safeNumber(totalsForm.netYtd);
+
+    const metaForm = ensureObject(form.meta);
+    const meta = {};
+    if (typeof metaForm.documentId === 'string') meta.documentId = metaForm.documentId;
+    if (metaForm.confidence != null) meta.confidence = safeNumber(metaForm.confidence);
+
+    const metadata = {
+      manualSchema: 'payslip',
+      employee,
+      employer,
+      period,
+      currency: typeof form.currency === 'string' ? form.currency : null,
+      earnings,
+      deductions,
+      totals,
+      meta,
+    };
+
+    metadata.documentDate = payDateIso || periodEndIso || periodStartIso || monthInfo.iso;
+    metadata.documentMonth = monthInfo.monthKey;
+    metadata.displayMonth = monthInfo.display;
+
+    const metrics = {
+      currency: metadata.currency || null,
+      grossPeriod: safeNumber(totals.grossPeriod),
+      netPeriod: safeNumber(totals.netPeriod),
+      grossYtd: safeNumber(totals.grossYtd),
+      netYtd: safeNumber(totals.netYtd),
+      payDate: payDateIso,
+      period: {
+        start: periodStartIso || null,
+        end: periodEndIso || null,
+        month: monthInfo.monthKey,
+        display: monthInfo.display,
+        payFrequency,
+      },
+    };
+
+    return { metadata, metrics, transactions: [], narrative: [] };
+  }
+
+  function mapManualPayloadToForm(schemaKey, json) {
+    if (schemaKey === 'bank_statement') return mapBankStatementPayloadToForm(json);
+    if (schemaKey === 'payslip') return mapPayslipPayloadToForm(json);
+    return {};
+  }
+
+  function mapBankStatementPayloadToForm(json) {
+    const metadata = ensureObject(json.metadata);
+    const metrics = ensureObject(json.metrics);
+    const statement = ensureObject(metadata.statement);
+    const period = ensureObject(statement.period);
+    const balances = ensureObject(metadata.balances);
+    const interest = ensureObject(metadata.interestInformation);
+    const additional = ensureObject(metadata.additionalInformation);
+
+    return {
+      institution: ensureObject(metadata.institution),
+      account: ensureObject(metadata.account),
+      statement: {
+        statementNumber: statement.statementNumber || '',
+        period: {
+          startDate: formatDateInput(period.startDate || metadata.period?.start || metrics.period?.start),
+          endDate: formatDateInput(period.endDate || metadata.period?.end || metrics.period?.end),
+          Date: formatMonthInput(period.Date || metadata.displayMonth || metadata.documentMonth || metrics.period?.month),
+        },
+      },
+      balances: {
+        openingBalance: balances.openingBalance ?? metrics.openingBalance ?? '',
+        closingBalance: balances.closingBalance ?? metrics.closingBalance ?? '',
+        totalMoneyIn: balances.totalMoneyIn ?? metrics.totalMoneyIn ?? '',
+        totalMoneyOut: balances.totalMoneyOut ?? metrics.totalMoneyOut ?? '',
+        overdraftLimit: balances.overdraftLimit ?? metrics.overdraftLimit ?? '',
+        averageBalances: ensureObject(balances.averageBalances || metrics.averageBalances),
+      },
+      interestInformation: {
+        creditInterestRate: interest.creditInterestRate || '',
+        overdraftInterestRate: interest.overdraftInterestRate || '',
+        interestPaid: {
+          date: formatDateInput(interest.interestPaid?.date),
+          description: interest.interestPaid?.description || '',
+          amount: interest.interestPaid?.amount ?? '',
+        },
+      },
+      transactions: Array.isArray(json.transactions)
+        ? json.transactions.map((tx) => ({
+            date: formatDateInput(tx.date),
+            description: tx.description || '',
+            moneyIn: tx.moneyIn ?? (tx.amount > 0 ? tx.amount : ''),
+            moneyOut: tx.moneyOut ?? (tx.amount < 0 ? Math.abs(tx.amount) : ''),
+            balance: tx.balance ?? '',
+            transactionType: tx.transactionType || '',
+            paymentMethod: tx.paymentMethod || '',
+            counterparty: tx.counterparty || '',
+            reference: tx.reference || '',
+          }))
+        : [],
+      additionalInformation: {
+        fscsInformation: additional.fscsInformation || '',
+        serviceQualitySurvey: ensureObject(additional.serviceQualitySurvey),
+        news: Array.isArray(additional.news)
+          ? additional.news.map((item) => ({ title: item.title || '', content: item.content || '' }))
+          : [],
+      },
+    };
+  }
+
+  function mapPayslipPayloadToForm(json) {
+    const metadata = ensureObject(json.metadata);
+    const totals = ensureObject(metadata.totals);
+    const period = ensureObject(metadata.period);
+
+    return {
+      employee: ensureObject(metadata.employee),
+      employer: ensureObject(metadata.employer),
+      period: {
+        Date: formatMonthInput(period.Date || json.metrics?.payDate || json.metadata?.documentMonth),
+        start: formatDateInput(period.start || json.metrics?.period?.start),
+        end: formatDateInput(period.end || json.metrics?.period?.end),
+        payFrequency: period.payFrequency || json.metrics?.period?.payFrequency || '',
+      },
+      currency: metadata.currency || json.metrics?.currency || '',
+      earnings: Array.isArray(metadata.earnings) ? metadata.earnings.map((item) => ({
+        rawLabel: item.rawLabel || '',
+        category: item.category || '',
+        amountPeriod: item.amountPeriod ?? '',
+        amountYtd: item.amountYtd ?? '',
+      })) : [],
+      deductions: Array.isArray(metadata.deductions) ? metadata.deductions.map((item) => ({
+        rawLabel: item.rawLabel || '',
+        category: item.category || '',
+        amountPeriod: item.amountPeriod ?? '',
+        amountYtd: item.amountYtd ?? '',
+      })) : [],
+      totals: {
+        grossPeriod: totals.grossPeriod ?? json.metrics?.grossPeriod ?? '',
+        netPeriod: totals.netPeriod ?? json.metrics?.netPeriod ?? '',
+        grossYtd: totals.grossYtd ?? json.metrics?.grossYtd ?? '',
+        netYtd: totals.netYtd ?? json.metrics?.netYtd ?? '',
+      },
+      meta: ensureObject(metadata.meta),
+    };
+  }
+
+  function resolveManualEditorSchema(file, schema, meta) {
+    if (schema && MANUAL_EDITOR_SCHEMAS[schema]) return schema;
+    const classification = (file?.catalogueKey || file?.classification || meta?.classification?.key || meta?.catalogueKey || '')
+      .toString()
+      .toLowerCase();
+    if (!classification) return null;
+    if (classification.includes('payslip')) return 'payslip';
+    if (
+      classification.includes('statement') ||
+      classification.includes('current_account') ||
+      classification.includes('savings_account') ||
+      classification.includes('isa') ||
+      classification.includes('investment') ||
+      classification.includes('pension')
+    ) {
+      return 'bank_statement';
+    }
+    return null;
+  }
   async function submitManualEditorPayload(payload) {
     if (!manualEditorDocId || !manualEditorSave) return;
     const restore = withButtonSpinner(manualEditorSave, 'Saving…');
@@ -2089,7 +2979,7 @@
       const response = await apiFetch(`/json/${encodeURIComponent(manualEditorDocId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ json: payload }),
+        body: JSON.stringify({ schema: manualEditorSchemaKey, json: payload }),
       });
       const result = await response.json().catch(() => null);
       if (response.status === 401) {
@@ -2125,225 +3015,6 @@
     } finally {
       restore();
     }
-  }
-
-  function collectManualEditorData() {
-    const errors = [];
-    const metadata = gatherKeyValueSection('metadata', errors);
-    const metrics = gatherKeyValueSection('metrics', errors);
-    const transactions = gatherTransactions(errors);
-    const narrative = gatherNarrative(errors);
-    return { payload: { metadata, metrics, transactions, narrative }, errors };
-  }
-
-  function gatherKeyValueSection(section, errors) {
-    const list = manualEditorSections?.querySelector(`.json-editor-list[data-section="${section}"]`);
-    if (!list) return {};
-    const rows = Array.from(list.querySelectorAll('[data-editor-row]'));
-    const result = {};
-    rows.forEach((row) => {
-      const keyInput = row.querySelector('[data-editor-field="key"]');
-      const typeSelect = row.querySelector('[data-editor-field="type"]');
-      const valueControl = row.querySelector('[data-editor-field="value"]');
-      if (!keyInput || !typeSelect || !valueControl) return;
-      const key = keyInput.value.trim();
-      if (!key) return;
-      const parsed = parseEditorValue(typeSelect.value, valueControl, { allowEmpty: true });
-      if (!parsed.ok) {
-        errors.push({ path: `${section}.${key}`, message: parsed.message });
-        showRowError(row, parsed.message);
-        return;
-      }
-      if (typeof parsed.value === 'undefined') return;
-      result[key] = parsed.value;
-    });
-    return result;
-  }
-
-  function gatherTransactions(errors) {
-    const list = manualEditorSections?.querySelector('[data-editor-transactions]');
-    if (!list) return [];
-    const cards = Array.from(list.querySelectorAll('[data-editor-transaction]'));
-    const results = [];
-    cards.forEach((card, index) => {
-      card.dataset.editorTransactionIndex = String(index);
-      const rows = Array.from(card.querySelectorAll('[data-editor-row]'));
-      const record = {};
-      rows.forEach((row) => {
-        const keyInput = row.querySelector('[data-editor-field="key"]');
-        const typeSelect = row.querySelector('[data-editor-field="type"]');
-        const valueControl = row.querySelector('[data-editor-field="value"]');
-        if (!keyInput || !typeSelect || !valueControl) return;
-        const key = keyInput.value.trim();
-        if (!key) return;
-        const parsed = parseEditorValue(typeSelect.value, valueControl, { allowEmpty: true });
-        if (!parsed.ok) {
-          errors.push({ path: `transactions[${index}].${key}`, message: parsed.message });
-          showRowError(row, parsed.message);
-          return;
-        }
-        if (typeof parsed.value === 'undefined') return;
-        record[key] = parsed.value;
-      });
-      if (Object.keys(record).length) {
-        results.push(record);
-      }
-    });
-    return results;
-  }
-
-  function gatherNarrative(errors) {
-    const list = manualEditorSections?.querySelector('[data-editor-narrative]');
-    if (!list) return [];
-    const items = Array.from(list.querySelectorAll('[data-editor-narrative-item]'));
-    const entries = [];
-    items.forEach((item, index) => {
-      const textarea = item.querySelector('textarea');
-      if (!textarea) return;
-      const text = textarea.value.trim();
-      if (!text) return;
-      if (text.length > 2000) {
-        const message = 'Narrative entries must be under 2000 characters.';
-        errors.push({ path: `narrative[${index}]`, message });
-        item.classList.add('has-error');
-        const error = item.querySelector('[data-editor-error]');
-        if (error) error.textContent = message;
-        return;
-      }
-      entries.push(text);
-    });
-    return entries;
-  }
-
-  function parseEditorValue(type, control, { allowEmpty = false } = {}) {
-    if (!control) return { ok: false, message: 'Field missing.' };
-    if (type === 'number') {
-      const raw = control.value.trim();
-      if (!raw) return { ok: true, value: allowEmpty ? undefined : null };
-      const parsed = Number(raw.replace(/[, ]+/g, ''));
-      if (!Number.isFinite(parsed)) {
-        return { ok: false, message: 'Enter a valid number.' };
-      }
-      return { ok: true, value: parsed };
-    }
-    if (type === 'date') {
-      const raw = control.value.trim();
-      if (!raw) return { ok: true, value: allowEmpty ? undefined : null };
-      if (/^\d{4}-\d{2}$/.test(raw)) {
-        return { ok: true, value: raw };
-      }
-      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-        return { ok: true, value: raw };
-      }
-      const parsed = Date.parse(raw);
-      if (Number.isNaN(parsed)) {
-        return { ok: false, message: 'Enter a valid date.' };
-      }
-      return { ok: true, value: new Date(parsed).toISOString() };
-    }
-    if (type === 'boolean') {
-      return { ok: true, value: control.value === 'true' };
-    }
-    if (type === 'json') {
-      const raw = control.value.trim();
-      if (!raw) return { ok: true, value: allowEmpty ? undefined : {} };
-      try {
-        return { ok: true, value: JSON.parse(raw) };
-      } catch (error) {
-        return { ok: false, message: 'Enter valid JSON.' };
-      }
-    }
-    const raw = control.value.trim();
-    if (!raw) return { ok: true, value: allowEmpty ? undefined : '' };
-    if (raw.length > 500) {
-      return { ok: false, message: 'Value is too long (max 500 characters).' };
-    }
-    return { ok: true, value: raw };
-  }
-
-  function showRowError(row, message) {
-    if (!row) return;
-    row.classList.add('has-error');
-    const error = row.querySelector('[data-editor-error]');
-    if (error) error.textContent = message;
-  }
-
-  function clearManualEditorErrors() {
-    if (manualEditorSections) {
-      manualEditorSections.querySelectorAll('.has-error').forEach((element) => {
-        element.classList.remove('has-error');
-      });
-      manualEditorSections.querySelectorAll('[data-editor-error]').forEach((element) => {
-        element.textContent = '';
-      });
-    }
-    if (manualEditorError) {
-      manualEditorError.hidden = true;
-      manualEditorError.textContent = '';
-    }
-  }
-
-  function highlightServerValidation(details) {
-    details.forEach((detail) => {
-      const path = typeof detail.path === 'string' ? detail.path : '';
-      const message = detail.message || 'Invalid value.';
-      highlightPathError(path, message);
-    });
-  }
-
-  function highlightPathError(path, message) {
-    if (!path || !manualEditorSections) return;
-    const normalised = path.replace(/\[(\d+)\]/g, '.$1');
-    const parts = normalised.split('.').filter(Boolean);
-    if (!parts.length) return;
-    const root = parts.shift();
-    if (root === 'metadata' || root === 'metrics') {
-      const key = parts.join('.');
-      const section = manualEditorSections.querySelector(`.json-editor-list[data-section="${root}"]`);
-      if (!section) return;
-      const rows = Array.from(section.querySelectorAll('[data-editor-row]'));
-      rows.forEach((row) => {
-        const input = row.querySelector('[data-editor-field="key"]');
-        if (input && input.value.trim() === key) {
-          showRowError(row, message);
-        }
-      });
-      return;
-    }
-    if (root === 'transactions') {
-      const index = Number(parts.shift());
-      const key = parts.join('.');
-      const card = manualEditorSections.querySelector(`[data-editor-transaction-index="${index}"]`);
-      if (!card) return;
-      const rows = Array.from(card.querySelectorAll('[data-editor-row]'));
-      rows.forEach((row) => {
-        const input = row.querySelector('[data-editor-field="key"]');
-        if (input && input.value.trim() === key) {
-          showRowError(row, message);
-        }
-      });
-      return;
-    }
-    if (root === 'narrative') {
-      const index = Number(parts.shift());
-      const items = manualEditorSections.querySelectorAll('[data-editor-narrative-item]');
-      const item = items[index];
-      if (item) {
-        item.classList.add('has-error');
-        const error = item.querySelector('[data-editor-error]');
-        if (error) error.textContent = message;
-      }
-    }
-  }
-
-  function updateTransactionIndexes() {
-    const list = manualEditorSections?.querySelector('[data-editor-transactions]');
-    if (!list) return;
-    Array.from(list.querySelectorAll('[data-editor-transaction]')).forEach((card, index) => {
-      card.dataset.editorTransactionIndex = String(index);
-      const title = card.querySelector('.json-editor-transaction__title');
-      if (title) title.textContent = `Transaction ${index + 1}`;
-    });
   }
 
   function injectTrimModalStyles() {

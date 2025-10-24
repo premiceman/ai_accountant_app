@@ -49,6 +49,17 @@ const TILE_KEY_MAP = {
   hmrc: ['hmrc_correspondence'],
 };
 
+const MANUAL_SCHEMA_BY_CLASSIFICATION = {
+  payslip: 'payslip',
+  current_account_statement: 'bank_statement',
+  savings_account_statement: 'bank_statement',
+  isa_statement: 'bank_statement',
+  investment_statement: 'bank_statement',
+  pension_statement: 'bank_statement',
+};
+
+const SUPPORTED_MANUAL_SCHEMAS = new Set(Object.values(MANUAL_SCHEMA_BY_CLASSIFICATION));
+
 const STATEMENT_CATALOGUE_KEYS = [
   'current_account_statement',
   'savings_account_statement',
@@ -188,6 +199,35 @@ function decodeFileKey(fileId) {
   } catch (error) {
     return null;
   }
+}
+
+function resolveManualSchemaKey({ job = null, insight = null, requested = null } = {}) {
+  const requestedKey = normaliseManualSchemaKey(requested);
+  if (requestedKey && SUPPORTED_MANUAL_SCHEMAS.has(requestedKey)) {
+    return requestedKey;
+  }
+
+  const jobKey = normaliseManualSchemaKey(job?.classification?.key);
+  if (jobKey && MANUAL_SCHEMA_BY_CLASSIFICATION[jobKey]) {
+    return MANUAL_SCHEMA_BY_CLASSIFICATION[jobKey];
+  }
+
+  const jobType = normaliseManualSchemaKey(job?.classification?.type);
+  if (jobType && MANUAL_SCHEMA_BY_CLASSIFICATION[jobType]) {
+    return MANUAL_SCHEMA_BY_CLASSIFICATION[jobType];
+  }
+
+  const insightKey = normaliseManualSchemaKey(insight?.catalogueKey);
+  if (insightKey && MANUAL_SCHEMA_BY_CLASSIFICATION[insightKey]) {
+    return MANUAL_SCHEMA_BY_CLASSIFICATION[insightKey];
+  }
+
+  return null;
+}
+
+function normaliseManualSchemaKey(value) {
+  if (!value) return null;
+  return String(value).trim().toLowerCase();
 }
 
 async function streamFile(res, key, { inline = true, filename = null } = {}) {
@@ -339,6 +379,7 @@ router.get('/json', async (req, res) => {
     let meta = null;
     let processing = null;
     let result = null;
+    let insight = null;
 
     if (job) {
       meta = {
@@ -377,7 +418,7 @@ router.get('/json', async (req, res) => {
     }
 
     if (!payload) {
-      const insight = await DocumentInsight.findOne({ userId: userObjectId, fileId: docId }).lean();
+      insight = await DocumentInsight.findOne({ userId: userObjectId, fileId: docId }).lean();
       if (insight) {
         payload = {
           metadata: insight.metadata || {},
@@ -396,11 +437,13 @@ router.get('/json', async (req, res) => {
       }
     }
 
+    const schemaKey = resolveManualSchemaKey({ job, insight });
+
     if (!payload) {
-      return res.json({ ok: false, error: 'JSON_NOT_READY' });
+      return res.json({ ok: false, error: 'JSON_NOT_READY', schema: schemaKey });
     }
 
-    res.json({ ok: true, json: payload, meta, processing, result });
+    res.json({ ok: true, json: payload, meta, processing, result, schema: schemaKey });
   } catch (error) {
     console.error('processed json error', error);
     res.status(500).json({ ok: false, error: 'JSON_FETCH_FAILED' });
@@ -419,14 +462,10 @@ router.put('/json/:docId', express.json({ limit: '1mb' }), async (req, res) => {
   }
 
   const userObjectId = new mongoose.Types.ObjectId(userId);
-  const rawPayload = req.body?.json ?? req.body?.payload ?? req.body;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const rawPayload = body?.json ?? body?.payload ?? body;
   if (!rawPayload || typeof rawPayload !== 'object') {
     return res.status(400).json({ ok: false, error: 'INVALID_PAYLOAD' });
-  }
-
-  const { payload, errors } = normaliseManualJsonPayload(rawPayload);
-  if (errors.length) {
-    return res.status(422).json({ ok: false, error: 'VALIDATION_FAILED', details: errors });
   }
 
   const decodedKey = decodeFileKey(docId);
@@ -439,6 +478,17 @@ router.put('/json/:docId', express.json({ limit: '1mb' }), async (req, res) => {
     job = await VaultDocumentJob.findOne({ userId: userObjectId, fileId: docId });
   } catch (error) {
     console.warn('manual json job lookup failed', error);
+  }
+
+  const requestedSchema = body?.schema ?? body?.manualSchema ?? body?.type ?? rawPayload?.schema ?? rawPayload?.manualSchema;
+  const schemaKey = resolveManualSchemaKey({ job, requested: requestedSchema });
+  if (!schemaKey || !SUPPORTED_MANUAL_SCHEMAS.has(schemaKey)) {
+    return res.status(400).json({ ok: false, error: 'SCHEMA_UNSUPPORTED' });
+  }
+
+  const { payload, errors } = normaliseManualJsonPayload(rawPayload, schemaKey);
+  if (errors.length) {
+    return res.status(422).json({ ok: false, error: 'VALIDATION_FAILED', details: errors });
   }
 
   const now = new Date();
@@ -531,7 +581,7 @@ router.put('/json/:docId', express.json({ limit: '1mb' }), async (req, res) => {
     console.warn('manual json analytics scheduling failed', error);
   }
 
-  res.json({ ok: true, json: payload, jsonKey, catalogueKey: classificationKey });
+  res.json({ ok: true, json: payload, jsonKey, catalogueKey: classificationKey, schema: schemaKey });
 });
 
 router.delete('/files/:fileId', async (req, res) => {
@@ -1562,15 +1612,30 @@ function parseAmount(text) {
 }
 
 function normaliseDate(text) {
-  if (/^\d{4}-\d{2}$/.test(text)) {
-    return text;
+  if (!text && text !== 0) return null;
+  const value = String(text).trim();
+  if (!value) return null;
+  if (/^\d{2}\/\d{4}$/.test(value)) {
+    const [month, year] = value.split('/');
+    return `${month.padStart(2, '0')}/${year.padStart(4, '0')}`;
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return text;
+  if (/^\d{4}-\d{2}$/.test(value)) {
+    return value;
   }
-  const timestamp = Date.parse(text);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  if (/^\d{4}-\d{2}-\d{2}t/i.test(value)) {
+    const parsed = Date.parse(value);
+    if (Number.isNaN(parsed)) return null;
+    return new Date(parsed).toISOString();
+  }
+  const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return null;
-  return new Date(timestamp).toISOString();
+  const date = new Date(timestamp);
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const year = String(date.getUTCFullYear());
+  return `${month}/${year}`;
 }
 
 function formatPath(parts) {
