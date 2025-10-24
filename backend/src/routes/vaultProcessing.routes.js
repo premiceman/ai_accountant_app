@@ -10,6 +10,7 @@ const {
 } = require('../services/docupipe.async');
 const { getObject, putObject, fileIdToKey } = require('../lib/r2');
 const { readJsonSafe, writeJsonSafe, paths } = require('../store/jsondb');
+const { normaliseDateFields } = require('../services/documents/dateFieldNormaliser');
 
 const router = express.Router();
 
@@ -373,7 +374,8 @@ router.get('/status', async (req, res) => {
     }
 
     const jsonKey = `${originalKey}.std.json`;
-    await writeJsonToR2(jsonKey, std.data);
+    const normalisedJson = normaliseDateFields(std.data);
+    await writeJsonToR2(jsonKey, normalisedJson);
 
     const processingState = ensureObject(doc.processing);
     processingState.status = 'completed';
@@ -384,6 +386,7 @@ router.get('/status', async (req, res) => {
     result.schemaId = result.schemaId || processingState.schemaId || null;
     result.json_key = jsonKey;
     result.json_fetched_at = new Date().toISOString();
+    result.json_normalised = true;
 
     const storage = ensureObject(doc.storage);
     storage.jsonKey = jsonKey;
