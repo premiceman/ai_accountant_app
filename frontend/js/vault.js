@@ -1400,7 +1400,7 @@
         .vault-json-editor__body { padding: 16px; }
         .manual-editor__section-body { grid-template-columns: 1fr; }
       }
-    `; `;
+    `;
     document.head.appendChild(style);
   }
 
