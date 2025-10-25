@@ -231,6 +231,215 @@ function normaliseSourcesWithPreferred(sources = {}) {
   return result;
 }
 
+function normaliseMonthToken(token) {
+  if (!token) return null;
+  const raw = String(token).trim();
+  if (!raw) return null;
+  if (/^\d{2}\/\d{4}$/.test(raw)) {
+    return raw;
+  }
+  const isoMonthMatch = raw.match(/^(\d{4})-(\d{2})$/);
+  if (isoMonthMatch) {
+    return `${isoMonthMatch[2]}/${isoMonthMatch[1]}`;
+  }
+  const slashMonthMatch = raw.match(/^(\d{4})\/(\d{2})$/);
+  if (slashMonthMatch) {
+    return `${slashMonthMatch[2]}/${slashMonthMatch[1]}`;
+  }
+  const parsed = dayjs(raw);
+  if (parsed.isValid()) {
+    return parsed.format('MM/YYYY');
+  }
+  return null;
+}
+
+function coercePeriodDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{2}\/\d{4}$/.test(raw)) {
+    const [month, year] = raw.split('/');
+    return toDate(`${year}-${month}-01`);
+  }
+  if (/^\d{4}\/\d{2}$/.test(raw)) {
+    const [year, month] = raw.split('/');
+    return toDate(`${year}-${month}-01`);
+  }
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return toDate(`${raw}-01`);
+  }
+  return toDate(raw);
+}
+
+function derivePeriodLabel(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const containers = [
+    entry.metadata?.period,
+    entry.period,
+    entry.metrics?.period,
+    entry.__preferred?.period,
+    entry.__preferred?.metricsV1?.period,
+  ];
+  for (const container of containers) {
+    if (!container) continue;
+    if (typeof container === 'string') {
+      const label = normaliseMonthToken(container);
+      if (label) return label;
+      continue;
+    }
+    if (typeof container === 'object') {
+      const candidates = [
+        container.month,
+        container.Month,
+        container.Date,
+        container.date,
+        container.label,
+      ];
+      for (const candidate of candidates) {
+        const label = normaliseMonthToken(candidate);
+        if (label) return label;
+      }
+    }
+  }
+  const extras = [
+    entry.metadata?.documentMonth,
+    entry.metadata?.periodMonth,
+    entry.metrics?.periodMonth,
+  ];
+  for (const extra of extras) {
+    const label = normaliseMonthToken(extra);
+    if (label) return label;
+  }
+  const dateCandidates = [
+    entry.metrics?.payDate,
+    entry.metadata?.payDate,
+    entry.metrics?.periodEnd,
+    entry.metadata?.period?.end,
+    entry.metrics?.period?.end,
+    entry.period?.end,
+    entry.metadata?.period?.start,
+    entry.metrics?.period?.start,
+    entry.period?.start,
+    entry.metadata?.documentDate,
+    entry.period?.Date,
+    entry.metadata?.period?.Date,
+    entry.__preferred?.metricsV1?.period?.end,
+    entry.__preferred?.metricsV1?.period?.start,
+    entry.__preferred?.documentDate,
+  ];
+  for (const candidate of dateCandidates) {
+    const date = coercePeriodDate(candidate);
+    if (date) {
+      return dayjs(date).format('MM/YYYY');
+    }
+  }
+  return null;
+}
+
+function entrySortTimestamp(entry) {
+  if (!entry || typeof entry !== 'object') return 0;
+  const candidates = [
+    entry.metrics?.payDate,
+    entry.metadata?.payDate,
+    entry.metrics?.period?.end,
+    entry.metadata?.period?.end,
+    entry.period?.end,
+    entry.metrics?.period?.start,
+    entry.metadata?.period?.start,
+    entry.period?.start,
+    entry.period?.Date,
+    entry.metadata?.period?.Date,
+    entry.metadata?.documentMonth,
+    entry.metadata?.documentDate,
+    entry.metrics?.period?.month,
+    entry.period?.month,
+    entry.__preferred?.metricsV1?.period?.end,
+    entry.__preferred?.metricsV1?.period?.start,
+    entry.__preferred?.documentDate,
+  ];
+  for (const value of candidates) {
+    const date = coercePeriodDate(value);
+    if (date) return date.getTime();
+  }
+  if (Array.isArray(entry.files)) {
+    for (const file of entry.files) {
+      const date = coercePeriodDate(file?.uploadedAt);
+      if (date) return date.getTime();
+    }
+  }
+  return 0;
+}
+
+function latestEntry(entries = []) {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  return entries
+    .slice()
+    .sort((a, b) => entrySortTimestamp(b) - entrySortTimestamp(a))[0] || null;
+}
+
+function cloneLineItems(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => ({
+    label: item?.label || null,
+    amount: item?.amount != null && Number.isFinite(Number(item.amount))
+      ? Number(item.amount)
+      : item?.amount ?? null,
+    code: item?.code || null,
+    type: item?.type || null,
+  }));
+}
+
+function buildDocInsightsSummary(docSources = {}) {
+  const grouped = groupSourcesByBase(docSources);
+
+  const payslipEntries = Array.isArray(grouped.payslip) ? grouped.payslip : [];
+  const payslipLatest = latestEntry(payslipEntries);
+  const payslipMetrics = payslipLatest?.metrics || {};
+  const payslipTotals = {};
+  const totalKeys = ['gross', 'net', 'tax', 'nationalInsurance', 'ni', 'pension', 'studentLoan', 'totalDeductions'];
+  totalKeys.forEach((key) => {
+    if (payslipMetrics[key] == null) return;
+    const value = Number(payslipMetrics[key]);
+    payslipTotals[key] = Number.isFinite(value) ? value : payslipMetrics[key];
+  });
+
+  const statementEntries = Array.isArray(grouped.current_account_statement)
+    ? grouped.current_account_statement
+    : [];
+  const statementRange = {
+    start: new Date('1900-01-01T00:00:00Z'),
+    end: new Date('2100-12-31T23:59:59Z'),
+  };
+  const statementSummary = summariseStatementRange(statementEntries, statementRange);
+  const income = Number(statementSummary?.totals?.income || 0);
+  const spend = Number(statementSummary?.totals?.spend || 0);
+  const netRaw = statementSummary?.totals?.net;
+  const net = netRaw != null && Number.isFinite(Number(netRaw)) ? Number(netRaw) : income - spend;
+  const bankTotals = {
+    income,
+    spend,
+    net,
+  };
+
+  return {
+    payslip: {
+      periodLabel: derivePeriodLabel(payslipLatest),
+      totals: payslipTotals,
+      earnings: cloneLineItems(payslipMetrics.earnings),
+      deductions: cloneLineItems(payslipMetrics.deductions),
+    },
+    bankStatement: {
+      periodLabel: derivePeriodLabel(latestEntry(statementEntries)),
+      totals: bankTotals,
+      moneyIn: income,
+      moneyOut: spend,
+      transactions: Array.isArray(statementSummary?.transactions)
+        ? statementSummary.transactions.map((tx) => ({ ...tx }))
+        : [],
+    },
+  };
+}
+
 function latestDocumentMonthKey(docSources = {}) {
   let latest = null;
   const consider = (value) => {
@@ -760,6 +969,17 @@ function buildRangeView(docSources = {}, range) {
   };
 }
 
+router.get('/doc-insights', auth, async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const docInsights = user.documentInsights || {};
+  const docSources = normaliseSourcesWithPreferred(docInsights.sources || {});
+  const summary = buildDocInsightsSummary(docSources);
+
+  return res.json(summary);
+});
+
 // GET /api/analytics/dashboard
 router.get('/dashboard', auth, async (req, res) => {
   if (!featureFlags.enableAnalyticsLegacy) {
@@ -1139,6 +1359,6 @@ router.post('/reprocess', auth, async (req, res) => {
   }
 });
 
-router.__test = { normaliseSourcesWithPreferred };
+router.__test = { normaliseSourcesWithPreferred, buildDocInsightsSummary };
 
 module.exports = router;
