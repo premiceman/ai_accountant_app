@@ -1194,7 +1194,7 @@ async function createJobsForUploadedFiles({ userId, sessionId, files, collection
     // eslint-disable-next-line no-await-in-loop
     const job = await createJobForFile({ userId, sessionId, file, collectionId });
     jobs.push(job);
-    if (job.state === 'queued' || job.state === 'needs_trim') {
+    if (job.state === 'queued') {
       dispatchDocupipe(job);
     }
   }
@@ -1312,6 +1312,7 @@ async function createJobForFile({ userId, sessionId, file, collectionId }) {
     };
     baseDoc.docupipe = {
       schemaId,
+      stdVersion: process.env.DOCUPIPE_STD_VERSION || null,
     };
 
     if (shouldTrimForClass(classification.key)) {

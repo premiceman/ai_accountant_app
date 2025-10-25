@@ -10,10 +10,117 @@ const {
   getJob,
   getStandardization,
 } = require('../docupipe.async');
+const { normaliseDateFields } = require('../documents/dateFieldNormaliser');
 
 const POLL_INITIAL_DELAY = 750;
 const POLL_MAX_DELAY = 8000;
 const POLL_TIMEOUT_MS = 6 * 60 * 1000; // 6 minutes
+const MONTH_YEAR_REGEX = /^(0[1-9]|1[0-2])\/\d{4}$/;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneStandardizationData(data) {
+  if (!isPlainObject(data) && !Array.isArray(data)) {
+    return data;
+  }
+  try {
+    return JSON.parse(JSON.stringify(data));
+  } catch (error) {
+    console.warn('[vault:docupipeDispatcher] failed to clone standardization payload', error);
+    return data;
+  }
+}
+
+function extractDataSection(payload) {
+  if (isPlainObject(payload?.data)) return payload.data;
+  return isPlainObject(payload) ? payload : {};
+}
+
+function getValueAtPath(source, path) {
+  if (!path || !isPlainObject(source)) return null;
+  const segments = path.split('.');
+  let current = source;
+  for (const segment of segments) {
+    if (!isPlainObject(current) || !(segment in current)) {
+      return null;
+    }
+    current = current[segment];
+  }
+  return current;
+}
+
+function containsMonthValue(value) {
+  if (!value && value !== 0) return false;
+  if (typeof value === 'string') {
+    return MONTH_YEAR_REGEX.test(value.trim());
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => containsMonthValue(entry));
+  }
+  if (isPlainObject(value)) {
+    return Object.values(value).some((entry) => containsMonthValue(entry));
+  }
+  return false;
+}
+
+function hasPeriodMonthValue(data, preferredPaths = []) {
+  for (const path of preferredPaths) {
+    const candidate = getValueAtPath(data, path);
+    if (containsMonthValue(candidate)) {
+      return true;
+    }
+  }
+  return containsMonthValue(data);
+}
+
+function resolveDocTypeFromClassification(classificationKey) {
+  if (!classificationKey) return null;
+  const lower = String(classificationKey).toLowerCase();
+  if (lower.includes('payslip')) return 'payslip';
+  if (lower.includes('statement')) return 'statement';
+  return null;
+}
+
+function determineRequiredFields(job, payload) {
+  const docType = resolveDocTypeFromClassification(job?.classification?.key);
+  if (!docType) return [];
+  const dataSection = extractDataSection(payload);
+  const missing = [];
+
+  if (docType === 'payslip') {
+    const hasMonth = hasPeriodMonthValue(dataSection, ['period', 'metadata.period']);
+    if (!hasMonth) {
+      missing.push('Period Date (MM/YYYY)');
+    }
+  } else if (docType === 'statement') {
+    const hasMonth = hasPeriodMonthValue(dataSection, [
+      'statement.period',
+      'period',
+      'metadata.period',
+      'metrics.period',
+    ]);
+    if (!hasMonth) {
+      missing.push('Period Date (MM/YYYY)');
+    }
+  }
+
+  return missing;
+}
+
+function prepareStandardizationResult(job, rawData) {
+  let cloned = cloneStandardizationData(rawData);
+  if (isPlainObject(cloned) || Array.isArray(cloned)) {
+    normaliseDateFields(cloned);
+  } else if (cloned == null) {
+    cloned = {};
+  } else {
+    cloned = { value: cloned };
+  }
+  const required = determineRequiredFields(job, cloned);
+  return { data: cloned, missingRequiredFields: required };
+}
 
 async function streamToBuffer(body) {
   if (!body) return Buffer.alloc(0);
@@ -145,6 +252,7 @@ async function completeJob(job, { jsonKey, data }) {
   job.storage = job.storage || {};
   job.storage.jsonKey = jsonKey;
   job.completedAt = new Date();
+  job.requiresManualFields = null;
   pushAudit(job, 'completed', 'DocuPipe standardisation complete');
   await VaultDocumentJob.updateOne(
     { _id: job._id },
@@ -153,6 +261,7 @@ async function completeJob(job, { jsonKey, data }) {
         state: 'completed',
         completedAt: job.completedAt,
         'storage.jsonKey': jsonKey,
+        requiresManualFields: null,
         updatedAt: new Date(),
       },
       $push: { audit: { state: 'completed', at: job.completedAt, note: 'DocuPipe standardisation complete' } },
@@ -181,6 +290,9 @@ async function failJob(job, error) {
 
 async function performDocupipe(job) {
   try {
+    if (job?.state && !['queued', 'processing'].includes(job.state)) {
+      return;
+    }
     if (!job?.storage?.pdfKey && !job?.storage?.trimmedKey) {
       throw new Error('PDF key missing');
     }
@@ -249,9 +361,24 @@ async function performDocupipe(job) {
       throw new Error('JSON storage key missing');
     }
 
-    await writeJsonToR2(jsonKey, std.data);
+    const { data: processedData, missingRequiredFields } = prepareStandardizationResult(job, std.data);
 
-    await completeJob(job, { jsonKey, data: std.data });
+    await writeJsonToR2(jsonKey, processedData);
+
+    if (Array.isArray(missingRequiredFields) && missingRequiredFields.length > 0) {
+      job.storage = job.storage || {};
+      job.storage.jsonKey = jsonKey;
+      job.requiresManualFields = missingRequiredFields;
+      job.state = 'awaiting_manual_json';
+      await markJobState(job, 'awaiting_manual_json', {
+        'storage.jsonKey': jsonKey,
+        requiresManualFields: missingRequiredFields,
+        note: `Manual data required: ${missingRequiredFields.join(', ')}`,
+      });
+      return;
+    }
+
+    await completeJob(job, { jsonKey, data: processedData });
   } catch (error) {
     console.error('[vault:docupipeDispatcher] job failed', job?.fileId, error);
     await failJob(job, error);
@@ -271,4 +398,10 @@ module.exports = {
   dispatch,
   performDocupipe,
   readR2Buffer,
+  __private__: {
+    prepareStandardizationResult,
+    determineRequiredFields,
+    containsMonthValue,
+    resolveDocTypeFromClassification,
+  },
 };
