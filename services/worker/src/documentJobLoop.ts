@@ -40,6 +40,7 @@ import {
   type UserDocumentJob,
 } from './models/index.js';
 import { rebuildMonthlyAnalytics } from './services/analytics.js';
+import { buildPayslipMetricsV1 } from './services/insights/payslipMetrics.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 const TRIAGE_AREA = 'statement-triage';
@@ -549,47 +550,29 @@ export function enrichPayloadWithV1(
   );
 
   payload.version = 'v1';
-  payload.currency = v1.normaliseCurrency((metadata.currency as string | undefined) ?? 'GBP');
+  const currencySource =
+    (typeof payload.currency === 'string' ? payload.currency : null) ??
+    (metadata.currency as string | undefined) ??
+    'GBP';
+  payload.currency = v1.normaliseCurrency(currencySource);
   payload.documentDateV1 = fallbackIso ?? payload.documentDateV1 ?? null;
   if (inferredMonth) {
     payload.documentMonth = inferredMonth;
   }
 
-  const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
   const triageJobId = options?.jobId ?? null;
   const shouldLogTriage = featureFlags.enableTriageLogs && isStatementClassification(classification.type);
 
   if (classification.type === 'payslip') {
-    const employerName = typeof metadata.employerName === 'string' ? metadata.employerName : null;
-    const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
-    const periodMetric = (metrics.period ?? {}) as Record<string, unknown>;
-    const periodStart = v1.ensureIsoDate(periodMetric.start ?? periodMeta.start) ?? null;
-    const periodEnd = v1.ensureIsoDate(periodMetric.end ?? periodMeta.end) ?? null;
-    const periodMonth =
-      v1.ensureIsoMonth(periodMetric.month ?? periodMeta.month ?? inferredMonth) ??
-      (fallbackIso ? fallbackIso.slice(0, 7) : null);
-    const payDate = v1.ensureIsoDate(metrics.payDate ?? metadata.payDate ?? fallbackIso) ?? null;
+    try {
+      const metricsV1 = buildPayslipMetricsV1({
+        ...payload,
+        insightType: 'payslip',
+        metadata: payload.metadata ?? {},
+        metrics: payload.metrics ?? {},
+      });
 
-    if (payDate && periodStart && periodEnd && periodMonth) {
-      const normalizedMetrics = {
-        payDate,
-        period: { start: periodStart, end: periodEnd, month: periodMonth },
-        employer: employerName,
-        grossMinor: v1.toMinorUnits(metrics.gross),
-        netMinor: v1.toMinorUnits(metrics.net),
-        taxMinor: v1.toMinorUnits(metrics.tax),
-        nationalInsuranceMinor: v1.toMinorUnits(metrics.ni ?? metrics.nationalInsurance),
-        pensionMinor: v1.toMinorUnits(metrics.pension),
-        studentLoanMinor: v1.toMinorUnits(metrics.studentLoan),
-        taxCode:
-          typeof metrics.taxCode === 'string'
-            ? metrics.taxCode
-            : typeof metadata.taxCode === 'string'
-            ? metadata.taxCode
-            : null,
-      } satisfies v1.PayslipMetricsV1;
-
-      if (!v1.validatePayslipMetricsV1(normalizedMetrics)) {
+      if (!v1.validatePayslipMetricsV1(metricsV1)) {
         const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
         if (featureFlags.enableAjvStrict) {
           throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
@@ -603,20 +586,16 @@ export function enrichPayloadWithV1(
           'Payslip v1 metrics failed validation'
         );
       } else {
-        payload.metricsV1 = normalizedMetrics;
+        payload.metricsV1 = metricsV1;
       }
-    } else if (featureFlags.enableTriageLogs) {
+    } catch (error) {
       logger.warn(
         {
           fileId: payload.fileId,
           type: classification.type,
-          reason: 'missing_period_fields',
-          payDate,
-          periodStart,
-          periodEnd,
-          periodMonth,
+          error: error instanceof Error ? error.message : String(error),
         },
-        'Payslip v1 metrics skipped'
+        'Payslip v1 metrics build failed'
       );
     }
   }

@@ -11,7 +11,7 @@ type ValidateFunction<T> = ((data: unknown) => boolean) & { errors: unknown };
 export type PayslipMetricsV1 = {
   payDate: string;
   period: { start: string; end: string; month: string };
-  employer: string | null;
+  employer: { name?: string | null } | string | null;
   grossMinor: number;
   netMinor: number;
   taxMinor: number;

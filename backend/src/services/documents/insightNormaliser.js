@@ -282,10 +282,17 @@ function normalisePayslip(insight) {
     month,
   };
 
+  const employerRecord = rawMetadata.employer || {};
+  const employerFromObject =
+    employerRecord && typeof employerRecord === 'object' && typeof employerRecord.name === 'string'
+      ? employerRecord.name
+      : null;
+  const employerName = employerFromObject || rawMetadata.employerName || rawMetrics.employerName || null;
+
   const metricsV1 = {
     payDate: payDate ?? fallbackDate,
     period,
-    employer: rawMetadata.employerName ?? rawMetrics.employerName ?? null,
+    employer: employerName ? { name: employerName } : null,
     grossMinor: toMinorUnits(gross),
     netMinor: toMinorUnits(net),
     taxMinor: toMinorUnits(tax),

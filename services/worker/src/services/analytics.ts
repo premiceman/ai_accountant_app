@@ -12,6 +12,7 @@ import type { Types } from 'mongoose';
 import pino from 'pino';
 import * as v1 from '../../../../shared/v1/index.js';
 import { featureFlags } from '../config/featureFlags.js';
+import { buildPayslipMetricsV1 } from './insights/payslipMetrics.js';
 import {
   DocumentInsightModel,
   UserAnalyticsModel,
@@ -243,9 +244,51 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
       }
     }
     if (!metricsV1) {
+      try {
+        const built = buildPayslipMetricsV1({
+          ...insight,
+          insightType: 'payslip',
+          metadata,
+          metrics: (insight.metrics ?? {}) as Record<string, unknown>,
+        });
+        if (v1.validatePayslipMetricsV1(built)) {
+          metricsV1 = built;
+        } else {
+          const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
+          if (featureFlags.enableAjvStrict) {
+            throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
+          }
+          logger.warn(
+            {
+              fileId: insight.fileId,
+              errors: formatAjvErrors(errors),
+            },
+            'Computed payslip metrics failed validation; falling back'
+          );
+        }
+      } catch (error) {
+        logger.warn(
+          {
+            fileId: insight.fileId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          'Failed to compute payslip metrics from structured metadata'
+        );
+      }
+    }
+    if (!metricsV1) {
       const periodMeta = (legacyMetrics.period ?? metadata.period ?? {}) as Record<string, unknown>;
       const payDate =
         v1.ensureIsoDate(legacyMetrics.payDate ?? metadata.payDate ?? fallbackDate) ?? fallbackDate;
+      const employerRecord = (metadata.employer ?? {}) as Record<string, unknown>;
+      const employerName =
+        typeof employerRecord.name === 'string'
+          ? employerRecord.name
+          : typeof metadata.employerName === 'string'
+          ? metadata.employerName
+          : typeof legacyMetrics.employerName === 'string'
+          ? (legacyMetrics.employerName as string)
+          : null;
       metricsV1 = {
         payDate,
         period: {
@@ -253,7 +296,7 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
           end: v1.ensureIsoDate(periodMeta.end) ?? payDate,
           month: v1.ensureIsoMonth(periodMeta.month ?? documentMonth) ?? payDate.slice(0, 7),
         },
-        employer: typeof metadata.employerName === 'string' ? metadata.employerName : null,
+        employer: employerName ? { name: employerName } : null,
         grossMinor: v1.toMinorUnits(legacyMetrics.gross),
         netMinor: v1.toMinorUnits(legacyMetrics.net),
         taxMinor: v1.toMinorUnits(legacyMetrics.tax),
