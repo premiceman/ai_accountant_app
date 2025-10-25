@@ -22,9 +22,29 @@ const PAY_FREQUENCY_PERIODS = new Map([
 
 function parseNumber(value) {
   if (value == null || value === '') return null;
-  const num = Number(value);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  let candidate = text;
+  let negative = false;
+
+  if (candidate.startsWith('(') && candidate.endsWith(')')) {
+    negative = true;
+    candidate = candidate.slice(1, -1);
+  }
+
+  const match = candidate.match(/[-+]?\d[\d,]*(?:\.\d+)?/);
+  if (!match) return null;
+
+  const cleaned = match[0].replace(/,/g, '');
+  const num = Number(cleaned);
   if (!Number.isFinite(num)) return null;
-  return num;
+
+  return negative ? -Math.abs(num) : num;
 }
 
 function normalisePayFrequency(raw) {
@@ -45,7 +65,8 @@ function normalisePayFrequency(raw) {
   return { label: text, periods: null };
 }
 
-function normaliseLineItems(list, fallbackLabel) {
+function normaliseLineItems(list, fallbackLabel, options = {}) {
+  const { absolute = false } = options;
   if (!Array.isArray(list)) return [];
   return list
     .map((item) => ({
@@ -53,6 +74,11 @@ function normaliseLineItems(list, fallbackLabel) {
       category: item?.category || item?.label || item?.rawLabel || fallbackLabel,
       amount: parseNumber(item?.amount ?? item?.amountPeriod ?? item?.value),
       amountYtd: parseNumber(item?.amountYtd ?? item?.amountYearToDate ?? item?.ytd),
+    }))
+    .map((item) => ({
+      ...item,
+      amount: item.amount != null && absolute ? Math.abs(item.amount) : item.amount,
+      amountYtd: item.amountYtd != null && absolute ? Math.abs(item.amountYtd) : item.amountYtd,
     }))
     .filter((item) => item.amount != null);
 }
@@ -93,7 +119,7 @@ function normalisePayslip(insight) {
   const rawMetadata = insight.metadata || {};
 
   const earnings = normaliseLineItems(rawMetrics.earnings, 'Earning');
-  const deductions = normaliseLineItems(rawMetrics.deductions, 'Deduction');
+  const deductions = normaliseLineItems(rawMetrics.deductions, 'Deduction', { absolute: true });
   const allowances = normaliseAllowances(rawMetrics.allowances);
 
   const gross = parseNumber(rawMetrics.gross ?? rawMetrics.grossPeriod ?? rawMetrics.totals?.grossPeriod);
