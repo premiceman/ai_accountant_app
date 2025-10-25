@@ -99,3 +99,30 @@ test('manual edits recompute derived payslip metrics', () => {
   assert.equal(edited.metadata.documentMonth, '2024-06');
   assert.equal(edited.metricsV1.netMinor, 250000);
 });
+
+test('statement insights derive v1 metrics from transactions', () => {
+  const result = normaliseDocumentInsight({
+    baseKey: 'current_account_statement',
+    metrics: {
+      totals: {},
+    },
+    metadata: {
+      period: { start: '2024-04-01', end: '2024-04-30' },
+    },
+    transactions: [
+      { description: 'Salary', amount: 1500, direction: 'inflow' },
+      { description: 'Rent', amount: 800, direction: 'outflow' },
+    ],
+  });
+
+  assert.equal(result.metrics.totals.income, 1500);
+  assert.equal(result.metrics.totals.spend, 800);
+  assert.equal(result.metrics.totals.net, 700);
+  assert.equal(result.metadata.period.start, '2024-04-01');
+  assert.equal(result.metadata.period.end, '2024-04-30');
+  assert.equal(result.metadata.period.month, '2024-04');
+  assert.ok(result.metricsV1);
+  assert.equal(result.metricsV1.inflowsMinor, 150000);
+  assert.equal(result.metricsV1.outflowsMinor, 80000);
+  assert.equal(result.metricsV1.netMinor, 70000);
+});
