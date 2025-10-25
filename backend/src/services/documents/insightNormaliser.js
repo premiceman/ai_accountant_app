@@ -5,7 +5,16 @@ const {
   ensureIsoMonth,
   toMinorUnits,
   validatePayslipMetricsV1,
+  validateStatementMetricsV1,
 } = require('../../../../shared/v1/index.js');
+
+const STATEMENT_BASE_KEYS = new Set([
+  'current_account_statement',
+  'savings_account_statement',
+  'isa_statement',
+  'investment_statement',
+  'pension_statement',
+]);
 
 const PAY_FREQUENCY_PERIODS = new Map([
   ['weekly', 52],
@@ -310,6 +319,162 @@ function normalisePayslip(insight) {
   return { metrics, metricsV1, metadata };
 }
 
+function roundCurrency(value) {
+  if (value == null) return null;
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function firstNumber(...candidates) {
+  for (const value of candidates) {
+    const parsed = parseNumber(value);
+    if (parsed != null) return parsed;
+  }
+  return null;
+}
+
+function deriveStatementPeriod(metadata = {}, metrics = {}) {
+  const periodMeta = { ...(metadata.period || {}) };
+  const metricPeriod = metrics.period || {};
+  const periodStart =
+    ensureIsoDate(periodMeta.start)
+    || ensureIsoDate(metricPeriod.start)
+    || ensureIsoDate(metrics.periodStart)
+    || ensureIsoDate(metrics.startDate)
+    || ensureIsoDate(metrics.start);
+  const periodEnd =
+    ensureIsoDate(periodMeta.end)
+    || ensureIsoDate(metricPeriod.end)
+    || ensureIsoDate(metrics.periodEnd)
+    || ensureIsoDate(metrics.endDate)
+    || ensureIsoDate(metrics.end);
+  const fallbackDate =
+    periodEnd
+    || periodStart
+    || ensureIsoDate(metadata.documentDate)
+    || new Date().toISOString().slice(0, 10);
+  const month =
+    ensureIsoMonth(periodMeta.month)
+    || ensureIsoMonth(metricPeriod.month)
+    || ensureIsoMonth(metrics.periodMonth)
+    || ensureIsoMonth(metrics.month)
+    || ensureIsoMonth(fallbackDate)
+    || fallbackDate.slice(0, 7);
+
+  const nextPeriod = { ...periodMeta };
+  if (periodStart || nextPeriod.start == null) nextPeriod.start = periodStart || fallbackDate;
+  if (periodEnd || nextPeriod.end == null) nextPeriod.end = periodEnd || fallbackDate;
+  nextPeriod.month = month;
+
+  const nextMetadata = { ...metadata, period: nextPeriod };
+  if (!nextMetadata.documentDate) nextMetadata.documentDate = nextPeriod.end || fallbackDate;
+  if (!nextMetadata.documentMonth) nextMetadata.documentMonth = month;
+
+  return {
+    periodStart: nextPeriod.start,
+    periodEnd: nextPeriod.end,
+    periodMonth: month,
+    fallbackDate,
+    metadata: nextMetadata,
+  };
+}
+
+function normaliseStatement(insight = {}) {
+  const rawMetrics = insight.metrics || {};
+  const rawMetadata = insight.metadata || {};
+  const { periodStart, periodEnd, periodMonth, fallbackDate, metadata } = deriveStatementPeriod(
+    rawMetadata,
+    rawMetrics,
+  );
+
+  const totals = rawMetrics.totals || {};
+  const inflowsDirect = firstNumber(
+    rawMetrics.inflows,
+    rawMetrics.income,
+    rawMetrics.moneyIn,
+    totals.inflows,
+    totals.income,
+    totals.moneyIn,
+    rawMetadata.income,
+    rawMetadata.moneyIn,
+  );
+  const outflowsDirect = firstNumber(
+    rawMetrics.outflows,
+    rawMetrics.spend,
+    rawMetrics.moneyOut,
+    totals.outflows,
+    totals.spend,
+    totals.moneyOut,
+    rawMetadata.spend,
+    rawMetadata.moneyOut,
+  );
+
+  let inflowsFromTransactions = 0;
+  let outflowsFromTransactions = 0;
+  const transactions = Array.isArray(insight.transactions) ? insight.transactions : [];
+  transactions.forEach((tx) => {
+    const moneyIn = parseNumber(tx?.moneyIn);
+    const moneyOut = parseNumber(tx?.moneyOut);
+    const amount = parseNumber(tx?.amount ?? tx?.value ?? tx?.total);
+    const direction = String(tx?.direction || '').toLowerCase();
+
+    if (moneyIn != null && moneyIn !== 0) {
+      inflowsFromTransactions += Math.abs(moneyIn);
+      return;
+    }
+    if (moneyOut != null && moneyOut !== 0) {
+      outflowsFromTransactions += Math.abs(moneyOut);
+      return;
+    }
+    if (amount == null || amount === 0) return;
+    if (direction === 'outflow') {
+      outflowsFromTransactions += Math.abs(amount);
+      return;
+    }
+    if (direction === 'inflow') {
+      inflowsFromTransactions += Math.abs(amount);
+      return;
+    }
+    if (amount < 0) {
+      outflowsFromTransactions += Math.abs(amount);
+    } else {
+      inflowsFromTransactions += Math.abs(amount);
+    }
+  });
+
+  const inflowsValue =
+    inflowsDirect != null ? Math.abs(inflowsDirect) : inflowsFromTransactions || 0;
+  const outflowsValue =
+    outflowsDirect != null ? Math.abs(outflowsDirect) : outflowsFromTransactions || 0;
+  const netValue = inflowsValue - outflowsValue;
+
+  const metrics = { ...rawMetrics };
+  const totalsPatch = { ...(metrics.totals || {}) };
+  if (metrics.income == null && inflowsDirect != null) metrics.income = roundCurrency(inflowsValue);
+  if (metrics.spend == null && outflowsDirect != null) metrics.spend = roundCurrency(outflowsValue);
+  totalsPatch.income = roundCurrency(inflowsValue);
+  totalsPatch.spend = roundCurrency(outflowsValue);
+  totalsPatch.net = roundCurrency(netValue);
+  metrics.totals = totalsPatch;
+
+  const metricsV1 = {
+    period: {
+      start: periodStart,
+      end: periodEnd,
+      month: periodMonth,
+    },
+    inflowsMinor: toMinorUnits(inflowsValue),
+    outflowsMinor: toMinorUnits(outflowsValue),
+    netMinor: toMinorUnits(netValue),
+  };
+
+  if (!validateStatementMetricsV1(metricsV1)) {
+    console.warn('[insightNormaliser] statement metricsV1 failed validation', validateStatementMetricsV1.errors);
+    return { metrics, metricsV1: null, metadata };
+  }
+
+  return { metrics, metricsV1, metadata };
+}
+
 function normaliseDocumentInsight(insight = {}) {
   const baseKey = insight.baseKey || insight.catalogueKey || insight.key || null;
   if (!baseKey) {
@@ -322,6 +487,10 @@ function normaliseDocumentInsight(insight = {}) {
 
   if (baseKey === 'payslip') {
     return normalisePayslip(insight);
+  }
+
+  if (STATEMENT_BASE_KEYS.has(baseKey)) {
+    return normaliseStatement(insight);
   }
 
   return {
