@@ -13,6 +13,7 @@ type SharedFeatureFlagsModule = {
   ENABLE_RECONCILIATION: boolean;
   ENABLE_STAGED_LOADER_ANALYTICS: boolean;
   ENABLE_TRIAGE_LOGS: boolean;
+  STRICT_METRICS_V1: boolean;
   featureFlags: {
     enableAnalyticsV1: boolean;
     enableReconciliation: boolean;
@@ -23,6 +24,7 @@ type SharedFeatureFlagsModule = {
     enableStagedLoaderAnalytics: boolean;
     enableQaDevEndpoints: boolean;
     enableTriageLogs: boolean;
+    strictMetricsV1: boolean;
   };
   getAllFlags(): Record<string, boolean>;
   getFlag(name: string): boolean;
@@ -57,6 +59,7 @@ export const {
   ENABLE_RECONCILIATION,
   ENABLE_STAGED_LOADER_ANALYTICS,
   ENABLE_TRIAGE_LOGS,
+  STRICT_METRICS_V1,
   featureFlags,
   getAllFlags,
   getFlag,

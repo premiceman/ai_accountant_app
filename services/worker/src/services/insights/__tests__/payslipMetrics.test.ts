@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildPayslipMetricsV1 } from '../payslipMetrics.js';
+import { buildPayslipMetricsV1 } from '../../../../../../shared/lib/insights/normalizeV1.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,6 +20,9 @@ async function loadFixture() {
 (async () => {
   const fixture = await loadFixture();
   const metrics = buildPayslipMetricsV1(fixture);
+  if (!metrics) {
+    throw new Error('Expected payslip metrics to be generated');
+  }
 
   assert.equal(metrics.payDate, '2025-09-30');
   assert.deepEqual(metrics.period, { start: '2025-09-01', end: '2025-09-30', month: '2025-09' });

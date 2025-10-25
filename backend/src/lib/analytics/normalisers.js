@@ -11,6 +11,7 @@ const {
   validateStatementMetricsV1,
   validateTransactionV1,
 } = require('../../../../shared/v1/index.js');
+const { normalizeInsightV1 } = require('../../../../shared/lib/insights/normalizeV1.js');
 const { featureFlags } = require('../featureFlags.js');
 
 const logger = createLogger({ name: 'analytics-normalisers', level: process.env.LOG_LEVEL ?? 'info' });
@@ -343,20 +344,6 @@ function parseStructuredStatement(statement, metadata, fallbackDate, currency) {
   return { metricsV1, legacyPatch, transactionsV1, legacyTransactions, metadataPatch };
 }
 
-function buildSchemaError(path, errors, hint) {
-  const payload = {
-    code: 'SCHEMA_VALIDATION_FAILED',
-    path,
-    details: Array.isArray(errors) ? errors : [],
-  };
-  if (hint) payload.hint = hint;
-  const error = new Error('Schema validation failed');
-  error.statusCode = 422;
-  error.expose = true;
-  error.details = payload;
-  return error;
-}
-
 function normaliseTransactionRecord(source, fallbackDate, currency, prefix, index, metadata, base) {
   const rawId = source.id ?? source.transactionId ?? base?.id ?? `${prefix}-${index}`;
   const isoDate =
@@ -402,10 +389,8 @@ function normaliseTransactionRecord(source, fallbackDate, currency, prefix, inde
       id: candidate.id,
       errors: validateTransactionV1.errors,
     };
-    if (featureFlags.enableAjvStrict) {
-      throw buildSchemaError('shared/schemas/transactionV1.json', validateTransactionV1.errors, 'Data shape invalid; try re-uploading the document.');
-    }
-    logger.warn(context, 'Transaction normalisation failed v1 validation');
+    const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+    logger[level](context, 'Transaction normalisation failed v1 validation');
     return base ?? null;
   }
   return candidate;
@@ -437,10 +422,19 @@ function preferV1(insight) {
   const transactionsV1 = [];
 
   if (insight.catalogueKey === 'payslip') {
-    const existing = insight.metricsV1;
-    if (existing && validatePayslipMetricsV1(existing)) {
-      metricsV1 = { ...existing };
-    } else {
+    const normalised = normalizeInsightV1({ ...insight, insightType: 'payslip' });
+    if (normalised?.metricsV1) {
+      metricsV1 = { ...(normalised.metricsV1 ?? {}) };
+      if (!validatePayslipMetricsV1(metricsV1)) {
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
+          { fileId: insight.fileId, errors: validatePayslipMetricsV1.errors },
+          'Payslip metricsV1 validation failed; continuing with best-effort values'
+        );
+      }
+    }
+    if (!metricsV1) {
+      const existing = insight.metricsV1;
       const structuredCandidates = [];
       if (existing && typeof existing === 'object') structuredCandidates.push(existing);
       if (metadata.standardised && typeof metadata.standardised === 'object') structuredCandidates.push(metadata.standardised);
@@ -497,11 +491,11 @@ function preferV1(insight) {
           taxCode: typeof legacyMetrics.taxCode === 'string' ? legacyMetrics.taxCode : null,
         };
         if (!validatePayslipMetricsV1(metricsV1)) {
-          const details = validatePayslipMetricsV1.errors;
-          if (featureFlags.enableAjvStrict) {
-            throw buildSchemaError('shared/schemas/payslipMetricsV1.json', details, 'Data shape invalid; try re-uploading the document.');
-          }
-          logger.warn({ fileId: insight.fileId, errors: details }, 'Legacy payslip mapping failed validation');
+          const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+          logger[level](
+            { fileId: insight.fileId, errors: validatePayslipMetricsV1.errors },
+            'Legacy payslip mapping failed validation'
+          );
         }
       }
     }
@@ -514,9 +508,25 @@ function preferV1(insight) {
 
     const existingMetrics = insight.metricsV1;
     let structured = null;
-    if (existingMetrics && validateStatementMetricsV1(existingMetrics)) {
+    const normalised = normalizeInsightV1({
+      ...insight,
+      insightType: insight.catalogueKey,
+      transactionsV1: existingTx,
+    });
+    if (normalised?.metricsV1) {
+      metricsV1 = { ...(normalised.metricsV1 ?? {}) };
+      if (!validateStatementMetricsV1(metricsV1)) {
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
+          { fileId: insight.fileId, errors: validateStatementMetricsV1.errors },
+          'Statement metricsV1 validation failed; continuing with best-effort values'
+        );
+      }
+    }
+    if (!metricsV1 && existingMetrics && validateStatementMetricsV1(existingMetrics)) {
       metricsV1 = { ...existingMetrics };
-    } else {
+    }
+    if (!metricsV1) {
       const structuredCandidates = [];
       if (existingMetrics && typeof existingMetrics === 'object') structuredCandidates.push(existingMetrics);
       if (metadata.standardised && typeof metadata.standardised === 'object') structuredCandidates.push(metadata.standardised);
@@ -572,11 +582,11 @@ function preferV1(insight) {
           netMinor: inflowsMinor - outflowsMinor,
         };
         if (!validateStatementMetricsV1(metricsV1)) {
-          const details = validateStatementMetricsV1.errors;
-          if (featureFlags.enableAjvStrict) {
-            throw buildSchemaError('shared/schemas/statementMetricsV1.json', details, 'Data shape invalid; try re-uploading the document.');
-          }
-          logger.warn({ fileId: insight.fileId, errors: details }, 'Legacy statement mapping failed validation');
+          const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+          logger[level](
+            { fileId: insight.fileId, errors: validateStatementMetricsV1.errors },
+            'Legacy statement mapping failed validation'
+          );
         }
       }
     }
@@ -617,7 +627,6 @@ function computeBackfillPatch(insight) {
 
 module.exports = {
   STATEMENT_TYPES,
-  buildSchemaError,
   normaliseTransactionRecord,
   buildDocumentMonth,
   preferV1,
