@@ -142,6 +142,7 @@
   let manualEditorModal = null;
   let manualEditorDialog = null;
   let manualEditorTitle = null;
+  let manualEditorSubtitle = null;
   let manualEditorMessage = null;
   let manualEditorError = null;
   let manualEditorLoading = null;
@@ -149,6 +150,11 @@
   let manualEditorSections = null;
   let manualEditorSave = null;
   let manualEditorCancel = null;
+  let manualEditorMeta = null;
+  let manualEditorMetaDoc = null;
+  let manualEditorMetaSchema = null;
+  let manualEditorMetaStatus = null;
+  let manualEditorMetaStatusContainer = null;
   let manualEditorReturnFocus = null;
   let manualEditorDocId = null;
   let manualEditorFile = null;
@@ -1351,55 +1357,148 @@
     jsonModalStylesInjected = true;
     const style = document.createElement('style');
     style.textContent = `
-      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.55); z-index: 1320; }
+      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: clamp(16px, 4vw, 40px); background: radial-gradient(circle at top left, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.94)); backdrop-filter: blur(14px); z-index: 1320; }
       .vault-json-editor.is-visible { display: flex; }
-      .vault-json-editor__dialog { position: relative; width: min(960px, 100%); max-height: min(90vh, 780px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: var(--vault-shadow, 0 18px 52px rgba(15, 23, 42, 0.16)); display: flex; flex-direction: column; }
-      .vault-json-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 26px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
-      .vault-json-editor__title { margin: 0; font-size: 1.05rem; font-weight: 600; }
-      .vault-json-editor__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; padding: 4px; cursor: pointer; }
-      .vault-json-editor__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
-      .vault-json-editor__body { padding: 20px 26px 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 18px; }
-      .vault-json-editor__message { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 0; }
-      .vault-json-editor__message strong { color: var(--vault-accent, #6759ff); }
-      .vault-json-editor__error { font-size: 0.9rem; color: var(--light-red, #ef4444); margin: 0; }
-      .vault-json-editor__loading { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 12px 0; }
-      .vault-json-editor__form { display: flex; flex-direction: column; gap: 20px; }
-      .vault-json-editor__sections { display: flex; flex-direction: column; gap: 20px; }
-      .manual-editor__empty { margin: 0; padding: 24px; text-align: center; font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); border: 1px dashed rgba(15, 23, 42, 0.12); border-radius: 16px; background: rgba(15, 23, 42, 0.03); }
-      .manual-editor__section { display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 16px; border: 1px solid rgba(15, 23, 42, 0.08); background: rgba(255, 255, 255, 0.9); box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08); }
-      .manual-editor__section-header { display: flex; flex-direction: column; gap: 6px; }
-      .manual-editor__section-title { margin: 0; font-size: 0.95rem; font-weight: 600; }
-      .manual-editor__section-description { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.65)); }
-      .manual-editor__section-body { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-      .manual-editor__section--array .manual-editor__section-body { display: flex; flex-direction: column; }
-      .manual-editor__array { display: flex; flex-direction: column; gap: 14px; }
-      .manual-editor__array-item { border: 1px solid rgba(15, 23, 42, 0.1); border-radius: 14px; background: rgba(255, 255, 255, 0.95); padding: 16px; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08); display: flex; flex-direction: column; gap: 12px; }
-      .manual-editor__array-item-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      .manual-editor__array-item-title { margin: 0; font-size: 0.9rem; font-weight: 600; }
-      .manual-editor__field { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; border: 1px solid rgba(15, 23, 42, 0.1); background: rgba(255, 255, 255, 0.92); transition: border-color 160ms ease, box-shadow 160ms ease; }
-      .manual-editor__field.has-error { border-color: rgba(239, 68, 68, 0.55); background: rgba(239, 68, 68, 0.05); box-shadow: 0 6px 20px rgba(239, 68, 68, 0.12); }
-      .manual-editor__label { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
-      .manual-editor__input { width: 100%; border: 1px solid rgba(15, 23, 42, 0.15); border-radius: 10px; padding: 9px 12px; font-size: 0.92rem; line-height: 1.45; background: #fff; color: inherit; box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05); transition: border-color 140ms ease, box-shadow 140ms ease; }
-      .manual-editor__input:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; box-shadow: 0 0 0 2px rgba(103, 89, 255, 0.18); }
-      .manual-editor__input--textarea { min-height: 72px; resize: vertical; }
-      .manual-editor__input--select { height: 38px; }
-      .manual-editor__error { font-size: 0.78rem; color: rgba(239, 68, 68, 1); min-height: 1em; }
-      .manual-editor__array-actions { display: flex; justify-content: flex-start; }
-      .manual-editor__add { border: none; background: rgba(103, 89, 255, 0.12); color: var(--vault-accent, #6759ff); border-radius: 999px; padding: 7px 16px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
-      .manual-editor__add:hover { background: rgba(103, 89, 255, 0.18); transform: translateY(-1px); }
-      .manual-editor__remove { border: none; background: rgba(239, 68, 68, 0.12); color: rgba(220, 38, 38, 1); border-radius: 999px; padding: 6px 14px; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
-      .manual-editor__remove:hover { background: rgba(239, 68, 68, 0.18); transform: translateY(-1px); }
-      .vault-json-editor__footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 26px 22px; border-top: 1px solid rgba(15, 23, 42, 0.08); background: rgba(249, 250, 251, 0.9); }
-      .vault-json-editor__footer button { min-width: 120px; border-radius: 999px; padding: 10px 18px; font-size: 0.9rem; border: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease; }
-      .vault-json-editor__footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: inherit; }
-      .vault-json-editor__footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); }
-      .vault-json-editor__footer .btn-primary { background: var(--vault-accent, #6759ff); color: #fff; box-shadow: 0 10px 20px rgba(103, 89, 255, 0.24); }
-      .vault-json-editor__footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(103, 89, 255, 0.28); }
-      @media (max-width: 680px) {
-        .vault-json-editor__dialog { width: 100%; height: 100%; max-height: none; border-radius: 0; }
-        .vault-json-editor__body { padding: 16px; }
+      .vault-json-editor__dialog { position: relative; width: min(1120px, 100%); max-height: min(94vh, 860px); background: rgba(248, 250, 252, 0.96); color: var(--bs-body-color, #0f172a); border-radius: 28px; border: 1px solid rgba(148, 163, 184, 0.28); box-shadow: 0 40px 90px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column; overflow: hidden; }
+      .vault-json-editor__header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: clamp(16px, 3vw, 28px); padding: clamp(24px, 5vw, 36px); background: linear-gradient(135deg, #4338ca, #6366f1); color: #f8fafc; }
+      .vault-json-editor__header::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.32), transparent 55%); pointer-events: none; opacity: 0.9; }
+      .vault-json-editor__title-group { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+      .vault-json-editor__title { margin: 0; font-size: clamp(1.3rem, 2.4vw, 1.75rem); font-weight: 700; letter-spacing: -0.01em; color: inherit; }
+      .vault-json-editor__subtitle { margin: 0; font-size: clamp(0.95rem, 1.4vw, 1.05rem); color: rgba(240, 249, 255, 0.82); line-height: 1.6; }
+      .vault-json-editor__close { position: relative; z-index: 1; border: none; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 1.5rem; line-height: 1; padding: 6px 12px; border-radius: 14px; cursor: pointer; transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+      .vault-json-editor__close:hover { background: rgba(255, 255, 255, 0.26); transform: translateY(-1px); box-shadow: 0 10px 26px rgba(15, 23, 42, 0.2); }
+      .vault-json-editor__close:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 3px; }
+      .vault-json-editor__body { position: relative; padding: clamp(24px, 4vw, 36px); overflow-y: auto; flex: 1; background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98)); }
+      .vault-json-editor__body::-webkit-scrollbar { width: 10px; }
+      .vault-json-editor__body::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.45); border-radius: 999px; }
+      .vault-json-editor__body::-webkit-scrollbar-track { background: rgba(226, 232, 240, 0.6); border-radius: 999px; }
+      .vault-json-editor__layout { display: grid; grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1fr); gap: clamp(20px, 4vw, 32px); align-items: start; }
+      .vault-json-editor__aside { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 24px); position: sticky; top: clamp(8px, 2vw, 20px); }
+      .vault-json-editor__main { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 26px); }
+      .vault-json-editor__aside-card { display: flex; flex-direction: column; gap: 14px; padding: clamp(18px, 3vw, 24px); border-radius: 22px; border: 1px solid rgba(148, 163, 184, 0.24); background: rgba(255, 255, 255, 0.92); box-shadow: 0 28px 60px rgba(15, 23, 42, 0.14); backdrop-filter: blur(8px); }
+      .vault-json-editor__aside-card--meta { background: rgba(238, 242, 255, 0.92); border-color: rgba(99, 102, 241, 0.28); box-shadow: 0 32px 68px rgba(79, 70, 229, 0.16); }
+      .vault-json-editor__aside-title { margin: 0; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(79, 70, 229, 0.95); }
+      .vault-json-editor__aside-description { margin: 0; font-size: 0.9rem; line-height: 1.55; color: rgba(71, 85, 105, 0.85); }
+      .vault-json-editor__meta { display: flex; flex-direction: column; gap: 16px; }
+      .vault-json-editor__meta[hidden] { display: none !important; }
+      .vault-json-editor__meta-item { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border-radius: 18px; border: 1px solid rgba(99, 102, 241, 0.18); background: rgba(255, 255, 255, 0.96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
+      .vault-json-editor__meta-item:hover { transform: translateY(-1px); }
+      .vault-json-editor__meta-item[data-state='warning'] { border-color: rgba(217, 119, 6, 0.32); background: rgba(255, 247, 237, 0.98); }
+      .vault-json-editor__meta-item[data-state='danger'] { border-color: rgba(220, 38, 38, 0.35); background: rgba(254, 242, 242, 0.96); }
+      .vault-json-editor__meta-item[data-state='success'] { border-color: rgba(16, 185, 129, 0.35); background: rgba(236, 253, 245, 0.96); }
+      .vault-json-editor__meta-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(79, 70, 229, 0.85); }
+      .vault-json-editor__meta-value { font-size: 0.98rem; font-weight: 600; color: rgba(15, 23, 42, 0.9); word-break: break-word; }
+      .vault-json-editor__meta-value--status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #4338ca; }
+      .vault-json-editor__meta-value--status::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+      .vault-json-editor__meta-value--status[data-state='warning'] { color: #b45309; }
+      .vault-json-editor__meta-value--status[data-state='danger'] { color: #b91c1c; }
+      .vault-json-editor__meta-value--status[data-state='success'] { color: #047857; }
+      .vault-json-editor__message,
+      .vault-json-editor__error,
+      .vault-json-editor__loading { position: relative; margin: 0; padding: 18px 20px 18px 56px; border-radius: 18px; border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(255, 255, 255, 0.95); box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12); font-size: 0.97rem; line-height: 1.55; }
+      .vault-json-editor__message[hidden],
+      .vault-json-editor__error[hidden],
+      .vault-json-editor__loading[hidden] { display: none !important; }
+      .vault-json-editor__message::before,
+      .vault-json-editor__error::before,
+      .vault-json-editor__loading::before { content: 'ℹ️'; position: absolute; left: 22px; top: 50%; transform: translateY(-50%); font-size: 1.35rem; }
+      .vault-json-editor__message { border-left: 5px solid rgba(79, 70, 229, 0.75); background: rgba(237, 242, 255, 0.96); color: rgba(49, 46, 129, 0.95); }
+      .vault-json-editor__message strong { color: rgba(67, 56, 202, 1); }
+      .vault-json-editor__error { border-left: 5px solid rgba(220, 38, 38, 0.78); background: rgba(254, 226, 226, 0.94); color: rgba(153, 27, 27, 0.95); }
+      .vault-json-editor__error::before { content: '⚠️'; }
+      .vault-json-editor__loading { border-left: 5px solid rgba(37, 99, 235, 0.65); background: rgba(219, 234, 254, 0.9); color: rgba(30, 41, 59, 0.85); }
+      .vault-json-editor__loading::before { content: '⏳'; }
+      .vault-json-editor__form { display: flex; flex-direction: column; gap: 28px; }
+      .vault-json-editor__sections { display: flex; flex-direction: column; gap: 22px; }
+      .manual-editor__empty { margin: 0; padding: 30px; text-align: center; font-size: 0.98rem; color: rgba(15, 23, 42, 0.68); border: 2px dashed rgba(148, 163, 184, 0.45); border-radius: 22px; background: rgba(248, 250, 252, 0.96); }
+      .manual-editor__section { display: flex; flex-direction: column; gap: 20px; padding: clamp(22px, 3vw, 28px); border-radius: 24px; border: 1px solid rgba(148, 163, 184, 0.26); background: rgba(255, 255, 255, 0.97); box-shadow: 0 28px 62px rgba(15, 23, 42, 0.14); position: relative; overflow: hidden; }
+      .manual-editor__section::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(120deg, rgba(79, 70, 229, 0.12), transparent 65%); opacity: 0; transition: opacity 180ms ease; pointer-events: none; }
+      .manual-editor__section:hover::before { opacity: 1; }
+      .manual-editor__section-header { position: relative; display: flex; flex-direction: column; gap: 8px; z-index: 1; }
+      .manual-editor__section-title { margin: 0; font-size: clamp(1.02rem, 1.5vw, 1.12rem); font-weight: 600; letter-spacing: -0.01em; color: rgba(15, 23, 42, 0.9); }
+      .manual-editor__section-description { margin: 0; font-size: 0.9rem; color: rgba(71, 85, 105, 0.88); line-height: 1.6; }
+      .manual-editor__section-body { position: relative; z-index: 1; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .manual-editor__section--array .manual-editor__section-body { display: flex; flex-direction: column; gap: 16px; }
+      .manual-editor__array { display: flex; flex-direction: column; gap: 18px; }
+      .manual-editor__array-item { border: 1px solid rgba(99, 102, 241, 0.22); border-radius: 20px; background: rgba(248, 250, 252, 0.96); box-shadow: 0 24px 54px rgba(15, 23, 42, 0.12); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+      .manual-editor__array-item-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.28); }
+      .manual-editor__array-item-title { margin: 0; font-size: 0.96rem; font-weight: 600; color: rgba(15, 23, 42, 0.88); }
+      .manual-editor__array-actions { display: flex; justify-content: flex-end; gap: 10px; }
+      .manual-editor__field { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 18px; border: 1px solid rgba(203, 213, 225, 0.65); background: rgba(255, 255, 255, 0.98); transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease; }
+      .manual-editor__field:hover { transform: translateY(-1px); box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12); }
+      .manual-editor__field:focus-within { border-color: rgba(79, 70, 229, 0.6); box-shadow: 0 24px 46px rgba(79, 70, 229, 0.16); background: rgba(248, 250, 252, 0.98); }
+      .manual-editor__field.has-error { border-color: rgba(220, 38, 38, 0.65); background: rgba(254, 226, 226, 0.95); box-shadow: 0 20px 40px rgba(220, 38, 38, 0.16); }
+      .manual-editor__label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(71, 85, 105, 0.9); }
+      .manual-editor__input { width: 100%; border: 1px solid rgba(148, 163, 184, 0.45); border-radius: 14px; padding: 12px 16px; font-size: 0.96rem; line-height: 1.5; background: rgba(241, 245, 249, 0.9); color: inherit; transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease; }
+      .manual-editor__input:focus-visible { outline: none; border-color: rgba(79, 70, 229, 0.72); background: #fff; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.25); }
+      .manual-editor__input::placeholder { color: rgba(100, 116, 139, 0.7); }
+      .manual-editor__input--textarea { min-height: 110px; resize: vertical; }
+      .manual-editor__input--select { height: 46px; }
+      .manual-editor__error { font-size: 0.78rem; color: rgba(220, 38, 38, 1); min-height: 1em; letter-spacing: 0.02em; }
+      .manual-editor__add { border: none; background: rgba(16, 185, 129, 0.22); color: #047857; border-radius: 999px; padding: 9px 20px; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
+      .manual-editor__add:hover { background: rgba(16, 185, 129, 0.3); transform: translateY(-1px); box-shadow: 0 16px 34px rgba(16, 185, 129, 0.22); }
+      .manual-editor__remove { border: none; background: rgba(239, 68, 68, 0.22); color: #b91c1c; border-radius: 999px; padding: 9px 20px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
+      .manual-editor__remove:hover { background: rgba(239, 68, 68, 0.32); transform: translateY(-1px); box-shadow: 0 16px 34px rgba(239, 68, 68, 0.22); }
+      .vault-json-editor__footer { display: flex; justify-content: flex-end; gap: 16px; padding: clamp(22px, 4vw, 32px); border-top: 1px solid rgba(148, 163, 184, 0.26); background: rgba(248, 250, 252, 0.97); }
+      .vault-json-editor__footer button { min-width: 150px; border-radius: 16px; padding: 12px 24px; font-size: 0.98rem; font-weight: 600; border: none; cursor: pointer; transition: transform 150ms ease, box-shadow 160ms ease, background 150ms ease; }
+      .vault-json-editor__footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.85); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
+      .vault-json-editor__footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); transform: translateY(-1px); box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12); }
+      .vault-json-editor__footer .btn-primary { background: linear-gradient(135deg, #4f46e5, #8b5cf6); color: #fff; box-shadow: 0 28px 58px rgba(99, 102, 241, 0.38); }
+      .vault-json-editor__footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 32px 68px rgba(99, 102, 241, 0.46); }
+      .vault-json-editor__footer .btn-primary:disabled { opacity: 0.65; filter: grayscale(0.1); box-shadow: none; transform: none; }
+      .json-editor-section { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 20px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12); }
+      .json-editor-section__header { display: flex; flex-direction: column; gap: 8px; }
+      .json-editor-section__title { margin: 0; font-size: 1rem; font-weight: 600; }
+      .json-editor-section__description { margin: 0; font-size: 0.88rem; color: rgba(71, 85, 105, 0.88); }
+      .json-editor-list { display: flex; flex-direction: column; gap: 14px; }
+      .json-editor-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(120px, 0.7fr) minmax(200px, 1.2fr) auto; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 16px; background: rgba(255, 255, 255, 0.96); border: 1px solid rgba(148, 163, 184, 0.22); transition: border-color 160ms ease, box-shadow 160ms ease; }
+      .json-editor-row.has-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(254, 226, 226, 0.94); }
+      .json-editor-row.is-required { border-color: rgba(99, 102, 241, 0.45); }
+      .json-editor-col { display: flex; flex-direction: column; gap: 6px; }
+      .json-editor-label { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(71, 85, 105, 0.9); }
+      .json-editor-input, .json-editor-select, .json-editor-textarea { width: 100%; border: 1px solid rgba(148, 163, 184, 0.4); border-radius: 12px; padding: 10px 14px; font-size: 0.94rem; line-height: 1.45; background: rgba(241, 245, 249, 0.92); color: inherit; transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease; }
+      .json-editor-input:focus-visible, .json-editor-select:focus-visible, .json-editor-textarea:focus-visible { outline: none; border-color: rgba(99, 102, 241, 0.65); background: #fff; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18); }
+      .json-editor-textarea { resize: vertical; min-height: 60px; }
+      .json-editor-select { height: 42px; }
+      .json-editor-remove { border: none; background: rgba(239, 68, 68, 0.2); color: #b91c1c; border-radius: 14px; padding: 9px 16px; font-size: 0.86rem; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
+      .json-editor-remove:hover { background: rgba(239, 68, 68, 0.28); transform: translateY(-1px); }
+      .json-editor-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+      .json-editor-row__error { grid-column: 1 / -1; font-size: 0.82rem; color: rgba(220, 38, 38, 0.95); }
+      .json-editor-add { align-self: flex-start; border: none; background: rgba(99, 102, 241, 0.22); color: rgba(67, 56, 202, 1); border-radius: 999px; padding: 8px 18px; font-size: 0.86rem; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
+      .json-editor-add:hover { background: rgba(99, 102, 241, 0.3); transform: translateY(-1px); }
+      .json-editor-transaction { display: flex; flex-direction: column; gap: 14px; padding: 18px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 18px; background: rgba(255, 255, 255, 0.95); }
+      .json-editor-transaction__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .json-editor-transaction__title { margin: 0; font-size: 0.94rem; font-weight: 600; }
+      .json-editor-transaction-list { display: flex; flex-direction: column; gap: 12px; }
+      .json-editor-narrative { display: flex; flex-direction: column; gap: 12px; }
+      .json-editor-narrative-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-start; padding: 16px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 16px; background: rgba(255, 255, 255, 0.95); transition: border-color 160ms ease, box-shadow 160ms ease; }
+      .json-editor-narrative-item.has-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(254, 226, 226, 0.94); }
+      .json-editor-footer { display: flex; justify-content: flex-end; gap: 14px; padding: 18px 24px; border-top: 1px solid rgba(148, 163, 184, 0.24); background: rgba(248, 250, 252, 0.95); }
+      .json-editor-footer button { min-width: 130px; border-radius: 14px; padding: 10px 20px; font-size: 0.92rem; border: none; cursor: pointer; transition: transform 130ms ease, box-shadow 130ms ease; }
+      .json-editor-footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.85); }
+      .json-editor-footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.14); transform: translateY(-1px); }
+      .json-editor-footer .btn-primary { background: linear-gradient(135deg, #4f46e5, #8b5cf6); color: #fff; box-shadow: 0 20px 40px rgba(99, 102, 241, 0.32); }
+      .json-editor-footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 24px 48px rgba(99, 102, 241, 0.4); }
+      .json-editor-footer .btn-primary:disabled { opacity: 0.65; }
+      @media (max-width: 1080px) {
+        .vault-json-editor__dialog { width: min(100%, 940px); }
+      }
+      @media (max-width: 960px) {
+        .vault-json-editor__layout { grid-template-columns: 1fr; }
+        .vault-json-editor__aside { position: static; }
+        .vault-json-editor__main { order: 2; }
+      }
+      @media (max-width: 720px) {
+        .vault-json-editor__dialog { width: 100%; max-height: 100vh; border-radius: 0; }
+        .vault-json-editor__header { padding: 24px 20px; border-radius: 0; }
+        .vault-json-editor__body { padding: 24px 20px 28px; }
+        .vault-json-editor__footer { padding: 20px; flex-direction: column; align-items: stretch; }
+        .vault-json-editor__footer button { width: 100%; }
+        .manual-editor__section { padding: 22px; }
         .manual-editor__section-body { grid-template-columns: 1fr; }
       }
+      .viewer__file-alert { margin: 12px 0 0; padding: 14px 16px; border-radius: 14px; background: rgba(253, 186, 116, 0.24); border: 1px solid rgba(234, 88, 12, 0.32); font-size: 0.9rem; color: rgba(120, 53, 15, 0.95); display: flex; flex-direction: column; gap: 6px; }
+      .viewer__file-alert strong { font-weight: 600; }
     `;
     document.head.appendChild(style);
   }
@@ -1616,52 +1715,147 @@
     manualEditorStylesInjected = true;
     const style = document.createElement('style');
     style.textContent = `
-      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.55); z-index: 1320; }
+      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: clamp(16px, 4vw, 40px); background: radial-gradient(circle at top left, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.94)); backdrop-filter: blur(14px); z-index: 1320; }
       .vault-json-editor.is-visible { display: flex; }
-      .vault-json-editor__dialog { position: relative; width: min(920px, 100%); max-height: min(90vh, 760px); background: var(--vault-card-bg, #fff); color: var(--bs-body-color, #0f172a); border-radius: var(--vault-radius, 18px); border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: var(--vault-shadow, 0 18px 52px rgba(15, 23, 42, 0.16)); display: flex; flex-direction: column; }
-      .vault-json-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 24px; border-bottom: 1px solid rgba(15, 23, 42, 0.08); }
-      .vault-json-editor__title { margin: 0; font-size: 1.05rem; font-weight: 600; }
-      .vault-json-editor__close { border: none; background: transparent; color: inherit; font-size: 1.5rem; line-height: 1; padding: 4px; cursor: pointer; }
-      .vault-json-editor__close:focus-visible { outline: 2px solid var(--vault-accent, #6759ff); outline-offset: 2px; }
-      .vault-json-editor__body { padding: 20px 24px 0; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px; }
-      .vault-json-editor__message { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 0; }
-      .vault-json-editor__message strong { color: var(--vault-accent, #6759ff); }
-      .vault-json-editor__error { font-size: 0.9rem; color: var(--light-red, #ef4444); margin: 0; }
-      .vault-json-editor__loading { font-size: 0.9rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.7)); margin: 12px 0; }
-      .vault-json-editor__form { display: flex; flex-direction: column; gap: 18px; }
-      .json-editor-section { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 14px; background: rgba(15, 23, 42, 0.02); }
-      .json-editor-section__header { display: flex; flex-direction: column; gap: 4px; }
-      .json-editor-section__title { margin: 0; font-size: 0.95rem; font-weight: 600; }
-      .json-editor-section__description { margin: 0; font-size: 0.85rem; color: var(--viewer-muted, rgba(15, 23, 42, 0.65)); }
-      .json-editor-list { display: flex; flex-direction: column; gap: 12px; }
-      .json-editor-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 0.6fr) minmax(200px, 1.2fr) auto; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.75); border: 1px solid transparent; transition: border-color 160ms ease; }
-      .json-editor-row.has-error { border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.05); }
-      .json-editor-row.is-required { border-color: rgba(103, 89, 255, 0.35); }
-      .json-editor-col { display: flex; flex-direction: column; gap: 4px; }
-      .json-editor-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--viewer-muted, rgba(15, 23, 42, 0.6)); }
-      .json-editor-input, .json-editor-select, .json-editor-textarea { width: 100%; border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 10px; padding: 8px 10px; font-size: 0.9rem; line-height: 1.45; background: #fff; color: inherit; }
-      .json-editor-textarea { resize: vertical; min-height: 48px; }
-      .json-editor-select { height: 38px; }
-      .json-editor-remove { border: none; background: rgba(239, 68, 68, 0.1); color: rgba(239, 68, 68, 1); border-radius: 10px; padding: 8px 12px; font-size: 0.85rem; cursor: pointer; transition: background 140ms ease; }
-      .json-editor-remove:hover { background: rgba(239, 68, 68, 0.16); }
+      .vault-json-editor__dialog { position: relative; width: min(1120px, 100%); max-height: min(94vh, 860px); background: rgba(248, 250, 252, 0.96); color: var(--bs-body-color, #0f172a); border-radius: 28px; border: 1px solid rgba(148, 163, 184, 0.28); box-shadow: 0 40px 90px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column; overflow: hidden; }
+      .vault-json-editor__header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: clamp(16px, 3vw, 28px); padding: clamp(24px, 5vw, 36px); background: linear-gradient(135deg, #4338ca, #6366f1); color: #f8fafc; }
+      .vault-json-editor__header::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.32), transparent 55%); pointer-events: none; opacity: 0.9; }
+      .vault-json-editor__title-group { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+      .vault-json-editor__title { margin: 0; font-size: clamp(1.3rem, 2.4vw, 1.75rem); font-weight: 700; letter-spacing: -0.01em; color: inherit; }
+      .vault-json-editor__subtitle { margin: 0; font-size: clamp(0.95rem, 1.4vw, 1.05rem); color: rgba(240, 249, 255, 0.82); line-height: 1.6; }
+      .vault-json-editor__close { position: relative; z-index: 1; border: none; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 1.5rem; line-height: 1; padding: 6px 12px; border-radius: 14px; cursor: pointer; transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+      .vault-json-editor__close:hover { background: rgba(255, 255, 255, 0.26); transform: translateY(-1px); box-shadow: 0 10px 26px rgba(15, 23, 42, 0.2); }
+      .vault-json-editor__close:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 3px; }
+      .vault-json-editor__body { position: relative; padding: clamp(24px, 4vw, 36px); overflow-y: auto; flex: 1; background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98)); }
+      .vault-json-editor__body::-webkit-scrollbar { width: 10px; }
+      .vault-json-editor__body::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.45); border-radius: 999px; }
+      .vault-json-editor__body::-webkit-scrollbar-track { background: rgba(226, 232, 240, 0.6); border-radius: 999px; }
+      .vault-json-editor__layout { display: grid; grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1fr); gap: clamp(20px, 4vw, 32px); align-items: start; }
+      .vault-json-editor__aside { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 24px); position: sticky; top: clamp(8px, 2vw, 20px); }
+      .vault-json-editor__main { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 26px); }
+      .vault-json-editor__aside-card { display: flex; flex-direction: column; gap: 14px; padding: clamp(18px, 3vw, 24px); border-radius: 22px; border: 1px solid rgba(148, 163, 184, 0.24); background: rgba(255, 255, 255, 0.92); box-shadow: 0 28px 60px rgba(15, 23, 42, 0.14); backdrop-filter: blur(8px); }
+      .vault-json-editor__aside-card--meta { background: rgba(238, 242, 255, 0.92); border-color: rgba(99, 102, 241, 0.28); box-shadow: 0 32px 68px rgba(79, 70, 229, 0.16); }
+      .vault-json-editor__aside-title { margin: 0; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(79, 70, 229, 0.95); }
+      .vault-json-editor__aside-description { margin: 0; font-size: 0.9rem; line-height: 1.55; color: rgba(71, 85, 105, 0.85); }
+      .vault-json-editor__meta { display: flex; flex-direction: column; gap: 16px; }
+      .vault-json-editor__meta[hidden] { display: none !important; }
+      .vault-json-editor__meta-item { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border-radius: 18px; border: 1px solid rgba(99, 102, 241, 0.18); background: rgba(255, 255, 255, 0.96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
+      .vault-json-editor__meta-item:hover { transform: translateY(-1px); }
+      .vault-json-editor__meta-item[data-state='warning'] { border-color: rgba(217, 119, 6, 0.32); background: rgba(255, 247, 237, 0.98); }
+      .vault-json-editor__meta-item[data-state='danger'] { border-color: rgba(220, 38, 38, 0.35); background: rgba(254, 242, 242, 0.96); }
+      .vault-json-editor__meta-item[data-state='success'] { border-color: rgba(16, 185, 129, 0.35); background: rgba(236, 253, 245, 0.96); }
+      .vault-json-editor__meta-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(79, 70, 229, 0.85); }
+      .vault-json-editor__meta-value { font-size: 0.98rem; font-weight: 600; color: rgba(15, 23, 42, 0.9); word-break: break-word; }
+      .vault-json-editor__meta-value--status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #4338ca; }
+      .vault-json-editor__meta-value--status::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+      .vault-json-editor__meta-value--status[data-state='warning'] { color: #b45309; }
+      .vault-json-editor__meta-value--status[data-state='danger'] { color: #b91c1c; }
+      .vault-json-editor__meta-value--status[data-state='success'] { color: #047857; }
+      .vault-json-editor__message,
+      .vault-json-editor__error,
+      .vault-json-editor__loading { position: relative; margin: 0; padding: 18px 20px 18px 56px; border-radius: 18px; border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(255, 255, 255, 0.95); box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12); font-size: 0.97rem; line-height: 1.55; }
+      .vault-json-editor__message[hidden],
+      .vault-json-editor__error[hidden],
+      .vault-json-editor__loading[hidden] { display: none !important; }
+      .vault-json-editor__message::before,
+      .vault-json-editor__error::before,
+      .vault-json-editor__loading::before { content: 'ℹ️'; position: absolute; left: 22px; top: 50%; transform: translateY(-50%); font-size: 1.35rem; }
+      .vault-json-editor__message { border-left: 5px solid rgba(79, 70, 229, 0.75); background: rgba(237, 242, 255, 0.96); color: rgba(49, 46, 129, 0.95); }
+      .vault-json-editor__message strong { color: rgba(67, 56, 202, 1); }
+      .vault-json-editor__error { border-left: 5px solid rgba(220, 38, 38, 0.78); background: rgba(254, 226, 226, 0.94); color: rgba(153, 27, 27, 0.95); }
+      .vault-json-editor__error::before { content: '⚠️'; }
+      .vault-json-editor__loading { border-left: 5px solid rgba(37, 99, 235, 0.65); background: rgba(219, 234, 254, 0.9); color: rgba(30, 41, 59, 0.85); }
+      .vault-json-editor__loading::before { content: '⏳'; }
+      .vault-json-editor__form { display: flex; flex-direction: column; gap: 28px; }
+      .vault-json-editor__sections { display: flex; flex-direction: column; gap: 22px; }
+      .manual-editor__empty { margin: 0; padding: 30px; text-align: center; font-size: 0.98rem; color: rgba(15, 23, 42, 0.68); border: 2px dashed rgba(148, 163, 184, 0.45); border-radius: 22px; background: rgba(248, 250, 252, 0.96); }
+      .manual-editor__section { display: flex; flex-direction: column; gap: 20px; padding: clamp(22px, 3vw, 28px); border-radius: 24px; border: 1px solid rgba(148, 163, 184, 0.26); background: rgba(255, 255, 255, 0.97); box-shadow: 0 28px 62px rgba(15, 23, 42, 0.14); position: relative; overflow: hidden; }
+      .manual-editor__section::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(120deg, rgba(79, 70, 229, 0.12), transparent 65%); opacity: 0; transition: opacity 180ms ease; pointer-events: none; }
+      .manual-editor__section:hover::before { opacity: 1; }
+      .manual-editor__section-header { position: relative; display: flex; flex-direction: column; gap: 8px; z-index: 1; }
+      .manual-editor__section-title { margin: 0; font-size: clamp(1.02rem, 1.5vw, 1.12rem); font-weight: 600; letter-spacing: -0.01em; color: rgba(15, 23, 42, 0.9); }
+      .manual-editor__section-description { margin: 0; font-size: 0.9rem; color: rgba(71, 85, 105, 0.88); line-height: 1.6; }
+      .manual-editor__section-body { position: relative; z-index: 1; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .manual-editor__section--array .manual-editor__section-body { display: flex; flex-direction: column; gap: 16px; }
+      .manual-editor__array { display: flex; flex-direction: column; gap: 18px; }
+      .manual-editor__array-item { border: 1px solid rgba(99, 102, 241, 0.22); border-radius: 20px; background: rgba(248, 250, 252, 0.96); box-shadow: 0 24px 54px rgba(15, 23, 42, 0.12); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+      .manual-editor__array-item-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.28); }
+      .manual-editor__array-item-title { margin: 0; font-size: 0.96rem; font-weight: 600; color: rgba(15, 23, 42, 0.88); }
+      .manual-editor__array-actions { display: flex; justify-content: flex-end; gap: 10px; }
+      .manual-editor__field { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 18px; border: 1px solid rgba(203, 213, 225, 0.65); background: rgba(255, 255, 255, 0.98); transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease; }
+      .manual-editor__field:hover { transform: translateY(-1px); box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12); }
+      .manual-editor__field:focus-within { border-color: rgba(79, 70, 229, 0.6); box-shadow: 0 24px 46px rgba(79, 70, 229, 0.16); background: rgba(248, 250, 252, 0.98); }
+      .manual-editor__field.has-error { border-color: rgba(220, 38, 38, 0.65); background: rgba(254, 226, 226, 0.95); box-shadow: 0 20px 40px rgba(220, 38, 38, 0.16); }
+      .manual-editor__label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(71, 85, 105, 0.9); }
+      .manual-editor__input { width: 100%; border: 1px solid rgba(148, 163, 184, 0.45); border-radius: 14px; padding: 12px 16px; font-size: 0.96rem; line-height: 1.5; background: rgba(241, 245, 249, 0.9); color: inherit; transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease; }
+      .manual-editor__input:focus-visible { outline: none; border-color: rgba(79, 70, 229, 0.72); background: #fff; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.25); }
+      .manual-editor__input::placeholder { color: rgba(100, 116, 139, 0.7); }
+      .manual-editor__input--textarea { min-height: 110px; resize: vertical; }
+      .manual-editor__input--select { height: 46px; }
+      .manual-editor__error { font-size: 0.78rem; color: rgba(220, 38, 38, 1); min-height: 1em; letter-spacing: 0.02em; }
+      .manual-editor__add { border: none; background: rgba(16, 185, 129, 0.22); color: #047857; border-radius: 999px; padding: 9px 20px; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
+      .manual-editor__add:hover { background: rgba(16, 185, 129, 0.3); transform: translateY(-1px); box-shadow: 0 16px 34px rgba(16, 185, 129, 0.22); }
+      .manual-editor__remove { border: none; background: rgba(239, 68, 68, 0.22); color: #b91c1c; border-radius: 999px; padding: 9px 20px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
+      .manual-editor__remove:hover { background: rgba(239, 68, 68, 0.32); transform: translateY(-1px); box-shadow: 0 16px 34px rgba(239, 68, 68, 0.22); }
+      .vault-json-editor__footer { display: flex; justify-content: flex-end; gap: 16px; padding: clamp(22px, 4vw, 32px); border-top: 1px solid rgba(148, 163, 184, 0.26); background: rgba(248, 250, 252, 0.97); }
+      .vault-json-editor__footer button { min-width: 150px; border-radius: 16px; padding: 12px 24px; font-size: 0.98rem; font-weight: 600; border: none; cursor: pointer; transition: transform 150ms ease, box-shadow 160ms ease, background 150ms ease; }
+      .vault-json-editor__footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.85); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
+      .vault-json-editor__footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); transform: translateY(-1px); box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12); }
+      .vault-json-editor__footer .btn-primary { background: linear-gradient(135deg, #4f46e5, #8b5cf6); color: #fff; box-shadow: 0 28px 58px rgba(99, 102, 241, 0.38); }
+      .vault-json-editor__footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 32px 68px rgba(99, 102, 241, 0.46); }
+      .vault-json-editor__footer .btn-primary:disabled { opacity: 0.65; filter: grayscale(0.1); box-shadow: none; transform: none; }
+      .json-editor-section { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 20px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12); }
+      .json-editor-section__header { display: flex; flex-direction: column; gap: 8px; }
+      .json-editor-section__title { margin: 0; font-size: 1rem; font-weight: 600; }
+      .json-editor-section__description { margin: 0; font-size: 0.88rem; color: rgba(71, 85, 105, 0.88); }
+      .json-editor-list { display: flex; flex-direction: column; gap: 14px; }
+      .json-editor-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(120px, 0.7fr) minmax(200px, 1.2fr) auto; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 16px; background: rgba(255, 255, 255, 0.96); border: 1px solid rgba(148, 163, 184, 0.22); transition: border-color 160ms ease, box-shadow 160ms ease; }
+      .json-editor-row.has-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(254, 226, 226, 0.94); }
+      .json-editor-row.is-required { border-color: rgba(99, 102, 241, 0.45); }
+      .json-editor-col { display: flex; flex-direction: column; gap: 6px; }
+      .json-editor-label { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(71, 85, 105, 0.9); }
+      .json-editor-input, .json-editor-select, .json-editor-textarea { width: 100%; border: 1px solid rgba(148, 163, 184, 0.4); border-radius: 12px; padding: 10px 14px; font-size: 0.94rem; line-height: 1.45; background: rgba(241, 245, 249, 0.92); color: inherit; transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease; }
+      .json-editor-input:focus-visible, .json-editor-select:focus-visible, .json-editor-textarea:focus-visible { outline: none; border-color: rgba(99, 102, 241, 0.65); background: #fff; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18); }
+      .json-editor-textarea { resize: vertical; min-height: 60px; }
+      .json-editor-select { height: 42px; }
+      .json-editor-remove { border: none; background: rgba(239, 68, 68, 0.2); color: #b91c1c; border-radius: 14px; padding: 9px 16px; font-size: 0.86rem; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
+      .json-editor-remove:hover { background: rgba(239, 68, 68, 0.28); transform: translateY(-1px); }
       .json-editor-remove:disabled { opacity: 0.5; cursor: not-allowed; }
-      .json-editor-row__error { grid-column: 1 / -1; font-size: 0.8rem; color: rgba(239, 68, 68, 1); }
-      .json-editor-add { align-self: flex-start; border: none; background: rgba(103, 89, 255, 0.12); color: var(--vault-accent, #6759ff); border-radius: 999px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer; transition: background 140ms ease; }
-      .json-editor-add:hover { background: rgba(103, 89, 255, 0.18); }
-      .json-editor-transaction { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.85); }
+      .json-editor-row__error { grid-column: 1 / -1; font-size: 0.82rem; color: rgba(220, 38, 38, 0.95); }
+      .json-editor-add { align-self: flex-start; border: none; background: rgba(99, 102, 241, 0.22); color: rgba(67, 56, 202, 1); border-radius: 999px; padding: 8px 18px; font-size: 0.86rem; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
+      .json-editor-add:hover { background: rgba(99, 102, 241, 0.3); transform: translateY(-1px); }
+      .json-editor-transaction { display: flex; flex-direction: column; gap: 14px; padding: 18px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 18px; background: rgba(255, 255, 255, 0.95); }
       .json-editor-transaction__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      .json-editor-transaction__title { margin: 0; font-size: 0.9rem; font-weight: 600; }
+      .json-editor-transaction__title { margin: 0; font-size: 0.94rem; font-weight: 600; }
       .json-editor-transaction-list { display: flex; flex-direction: column; gap: 12px; }
       .json-editor-narrative { display: flex; flex-direction: column; gap: 12px; }
-      .json-editor-narrative-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.85); }
-      .json-editor-narrative-item.has-error { border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.05); }
-      .json-editor-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 24px; border-top: 1px solid rgba(15, 23, 42, 0.08); background: rgba(249, 250, 251, 0.85); }
-      .json-editor-footer button { min-width: 120px; border-radius: 999px; padding: 10px 18px; font-size: 0.9rem; border: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease; }
-      .json-editor-footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: inherit; }
-      .json-editor-footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); }
-      .json-editor-footer .btn-primary { background: var(--vault-accent, #6759ff); color: #fff; box-shadow: 0 10px 20px rgba(103, 89, 255, 0.24); }
-      .json-editor-footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 14px 26px rgba(103, 89, 255, 0.28); }
-      .viewer__file-alert { margin: 12px 0 0; padding: 12px 14px; border-radius: 12px; background: rgba(253, 186, 116, 0.22); border: 1px solid rgba(234, 88, 12, 0.32); font-size: 0.9rem; color: rgba(120, 53, 15, 0.95); display: flex; flex-direction: column; gap: 6px; }
+      .json-editor-narrative-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-start; padding: 16px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 16px; background: rgba(255, 255, 255, 0.95); transition: border-color 160ms ease, box-shadow 160ms ease; }
+      .json-editor-narrative-item.has-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(254, 226, 226, 0.94); }
+      .json-editor-footer { display: flex; justify-content: flex-end; gap: 14px; padding: 18px 24px; border-top: 1px solid rgba(148, 163, 184, 0.24); background: rgba(248, 250, 252, 0.95); }
+      .json-editor-footer button { min-width: 130px; border-radius: 14px; padding: 10px 20px; font-size: 0.92rem; border: none; cursor: pointer; transition: transform 130ms ease, box-shadow 130ms ease; }
+      .json-editor-footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.85); }
+      .json-editor-footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.14); transform: translateY(-1px); }
+      .json-editor-footer .btn-primary { background: linear-gradient(135deg, #4f46e5, #8b5cf6); color: #fff; box-shadow: 0 20px 40px rgba(99, 102, 241, 0.32); }
+      .json-editor-footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 24px 48px rgba(99, 102, 241, 0.4); }
+      .json-editor-footer .btn-primary:disabled { opacity: 0.65; }
+      @media (max-width: 1080px) {
+        .vault-json-editor__dialog { width: min(100%, 940px); }
+      }
+      @media (max-width: 960px) {
+        .vault-json-editor__layout { grid-template-columns: 1fr; }
+        .vault-json-editor__aside { position: static; }
+        .vault-json-editor__main { order: 2; }
+      }
+      @media (max-width: 720px) {
+        .vault-json-editor__dialog { width: 100%; max-height: 100vh; border-radius: 0; }
+        .vault-json-editor__header { padding: 24px 20px; border-radius: 0; }
+        .vault-json-editor__body { padding: 24px 20px 28px; }
+        .vault-json-editor__footer { padding: 20px; flex-direction: column; align-items: stretch; }
+        .vault-json-editor__footer button { width: 100%; }
+        .manual-editor__section { padding: 22px; }
+        .manual-editor__section-body { grid-template-columns: 1fr; }
+      }
+      .viewer__file-alert { margin: 12px 0 0; padding: 14px 16px; border-radius: 14px; background: rgba(253, 186, 116, 0.24); border: 1px solid rgba(234, 88, 12, 0.32); font-size: 0.9rem; color: rgba(120, 53, 15, 0.95); display: flex; flex-direction: column; gap: 6px; }
       .viewer__file-alert strong { font-weight: 600; }
     `;
     document.head.appendChild(style);
@@ -1685,10 +1879,19 @@
     const header = document.createElement('header');
     header.className = 'vault-json-editor__header';
 
+    const titleGroup = document.createElement('div');
+    titleGroup.className = 'vault-json-editor__title-group';
+
     const title = document.createElement('h4');
     title.className = 'vault-json-editor__title';
     title.id = 'vault-json-editor-title';
     title.textContent = 'Edit data';
+
+    const subtitle = document.createElement('p');
+    subtitle.className = 'vault-json-editor__subtitle';
+    subtitle.textContent = 'Structured manual data entry for this document.';
+
+    titleGroup.append(title, subtitle);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -1698,6 +1901,82 @@
 
     const body = document.createElement('div');
     body.className = 'vault-json-editor__body';
+
+    const layout = document.createElement('div');
+    layout.className = 'vault-json-editor__layout';
+
+    const aside = document.createElement('aside');
+    aside.className = 'vault-json-editor__aside';
+
+    const metaCard = document.createElement('section');
+    metaCard.className = 'vault-json-editor__aside-card vault-json-editor__aside-card--meta';
+
+    const metaTitle = document.createElement('h6');
+    metaTitle.className = 'vault-json-editor__aside-title';
+    metaTitle.textContent = 'Document context';
+
+    const meta = document.createElement('div');
+    meta.className = 'vault-json-editor__meta';
+    meta.hidden = true;
+
+    const metaDocItem = document.createElement('div');
+    metaDocItem.className = 'vault-json-editor__meta-item';
+
+    const metaDocLabel = document.createElement('span');
+    metaDocLabel.className = 'vault-json-editor__meta-label';
+    metaDocLabel.textContent = 'Document';
+
+    const metaDocValue = document.createElement('span');
+    metaDocValue.className = 'vault-json-editor__meta-value';
+    metaDocValue.textContent = 'Document details';
+
+    metaDocItem.append(metaDocLabel, metaDocValue);
+
+    const metaSchemaItem = document.createElement('div');
+    metaSchemaItem.className = 'vault-json-editor__meta-item';
+
+    const metaSchemaLabel = document.createElement('span');
+    metaSchemaLabel.className = 'vault-json-editor__meta-label';
+    metaSchemaLabel.textContent = 'Schema';
+
+    const metaSchemaValue = document.createElement('span');
+    metaSchemaValue.className = 'vault-json-editor__meta-value';
+    metaSchemaValue.textContent = 'Schema';
+
+    metaSchemaItem.append(metaSchemaLabel, metaSchemaValue);
+
+    const metaStatusItem = document.createElement('div');
+    metaStatusItem.className = 'vault-json-editor__meta-item';
+
+    const metaStatusLabel = document.createElement('span');
+    metaStatusLabel.className = 'vault-json-editor__meta-label';
+    metaStatusLabel.textContent = 'Status';
+
+    const metaStatusValue = document.createElement('span');
+    metaStatusValue.className = 'vault-json-editor__meta-value vault-json-editor__meta-value--status';
+    metaStatusValue.textContent = 'Status';
+
+    metaStatusItem.append(metaStatusLabel, metaStatusValue);
+
+    meta.append(metaDocItem, metaSchemaItem, metaStatusItem);
+    metaCard.append(metaTitle, meta);
+
+    const guidanceCard = document.createElement('section');
+    guidanceCard.className = 'vault-json-editor__aside-card';
+
+    const guidanceTitle = document.createElement('h6');
+    guidanceTitle.className = 'vault-json-editor__aside-title';
+    guidanceTitle.textContent = 'Manual entry tips';
+
+    const guidanceCopy = document.createElement('p');
+    guidanceCopy.className = 'vault-json-editor__aside-description';
+    guidanceCopy.textContent = 'Cross-check key totals and statement dates before saving. Manual updates refresh your analytics instantly.';
+
+    guidanceCard.append(guidanceTitle, guidanceCopy);
+    aside.append(metaCard, guidanceCard);
+
+    const main = document.createElement('div');
+    main.className = 'vault-json-editor__main';
 
     const message = document.createElement('p');
     message.className = 'vault-json-editor__message';
@@ -1736,9 +2015,11 @@
     footer.append(cancelBtn, saveBtn);
     form.appendChild(footer);
 
-    body.append(message, error, loading, form);
+    main.append(message, error, loading, form);
+    layout.append(aside, main);
+    body.append(layout);
 
-    header.append(title, closeBtn);
+    header.append(titleGroup, closeBtn);
     dialog.append(header, body);
     modal.appendChild(dialog);
     document.body.appendChild(modal);
@@ -1773,6 +2054,7 @@
     manualEditorModal = modal;
     manualEditorDialog = dialog;
     manualEditorTitle = title;
+    manualEditorSubtitle = subtitle;
     manualEditorMessage = message;
     manualEditorError = error;
     manualEditorLoading = loading;
@@ -1780,6 +2062,11 @@
     manualEditorSections = sections;
     manualEditorSave = saveBtn;
     manualEditorCancel = cancelBtn;
+    manualEditorMeta = meta;
+    manualEditorMetaDoc = metaDocValue;
+    manualEditorMetaSchema = metaSchemaValue;
+    manualEditorMetaStatus = metaStatusValue;
+    manualEditorMetaStatusContainer = metaStatusItem;
     return modal;
   }
 
@@ -1808,6 +2095,25 @@
     }
     if (manualEditorSections) {
       manualEditorSections.innerHTML = '';
+    }
+    if (manualEditorSubtitle) {
+      manualEditorSubtitle.textContent = 'Structured manual data entry for this document.';
+    }
+    if (manualEditorMeta) {
+      manualEditorMeta.hidden = true;
+    }
+    if (manualEditorMetaDoc) {
+      manualEditorMetaDoc.textContent = 'Document details';
+    }
+    if (manualEditorMetaSchema) {
+      manualEditorMetaSchema.textContent = 'Schema';
+    }
+    if (manualEditorMetaStatus) {
+      manualEditorMetaStatus.textContent = 'Status';
+      manualEditorMetaStatus.removeAttribute('data-state');
+    }
+    if (manualEditorMetaStatusContainer) {
+      manualEditorMetaStatusContainer.removeAttribute('data-state');
     }
     const target = manualEditorReturnFocus;
     manualEditorReturnFocus = null;
@@ -1846,6 +2152,26 @@
     if (manualEditorError) {
       manualEditorError.hidden = true;
       manualEditorError.textContent = '';
+    }
+
+    if (manualEditorSubtitle) {
+      manualEditorSubtitle.textContent = 'Fetching structured data…';
+    }
+    if (manualEditorMeta) {
+      manualEditorMeta.hidden = true;
+    }
+    if (manualEditorMetaDoc) {
+      manualEditorMetaDoc.textContent = 'Document details';
+    }
+    if (manualEditorMetaSchema) {
+      manualEditorMetaSchema.textContent = 'Schema';
+    }
+    if (manualEditorMetaStatus) {
+      manualEditorMetaStatus.textContent = 'Status';
+      manualEditorMetaStatus.removeAttribute('data-state');
+    }
+    if (manualEditorMetaStatusContainer) {
+      manualEditorMetaStatusContainer.removeAttribute('data-state');
     }
 
     const restore = trigger ? withButtonSpinner(trigger, 'Opening…') : () => {};
@@ -1946,7 +2272,32 @@
         manualEditorMessage.hidden = false;
         manualEditorMessage.textContent = unavailable.textContent;
       }
+      if (manualEditorSubtitle) {
+        manualEditorSubtitle.textContent = 'Manual editing is not available for this document yet.';
+      }
+      if (manualEditorMeta) {
+        manualEditorMeta.hidden = true;
+      }
       return;
+    }
+
+    if (manualEditorSubtitle) {
+      const schemaLabel = schema.title || 'this document';
+      manualEditorSubtitle.textContent = `Manual entry for ${schemaLabel}`;
+    }
+
+    if (manualEditorMetaDoc || manualEditorMetaSchema) {
+      const raw = ensureObject(manualEditorFile?.raw);
+      const docParts = [];
+      if (manualEditorFile?.title) docParts.push(manualEditorFile.title);
+      if (raw?.originalName && raw.originalName !== manualEditorFile?.title) docParts.push(raw.originalName);
+      if (!docParts.length && manualEditorFile?.fileId) docParts.push(`ID ${manualEditorFile.fileId}`);
+      if (manualEditorMetaDoc) {
+        manualEditorMetaDoc.textContent = docParts.join(' • ') || 'Document details';
+      }
+      if (manualEditorMetaSchema) {
+        manualEditorMetaSchema.textContent = schema.title || 'Schema';
+      }
     }
 
     schema.sections.forEach((section) => {
@@ -1969,6 +2320,25 @@
         manualEditorMessage.hidden = true;
         manualEditorMessage.textContent = '';
       }
+    }
+
+    if (manualEditorMetaStatus) {
+      if (requiresManual.length) {
+        manualEditorMetaStatus.textContent = `${requiresManual.length} manual field${requiresManual.length === 1 ? '' : 's'} pending`;
+        manualEditorMetaStatus.dataset.state = 'warning';
+        if (manualEditorMetaStatusContainer) {
+          manualEditorMetaStatusContainer.dataset.state = 'warning';
+        }
+      } else {
+        manualEditorMetaStatus.textContent = 'All manual fields captured';
+        manualEditorMetaStatus.dataset.state = 'success';
+        if (manualEditorMetaStatusContainer) {
+          manualEditorMetaStatusContainer.dataset.state = 'success';
+        }
+      }
+    }
+    if (manualEditorMeta) {
+      manualEditorMeta.hidden = false;
     }
   }
 
