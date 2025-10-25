@@ -1,7 +1,11 @@
 /* eslint-disable no-console */
 import { MongoClient } from 'mongodb';
 
-import { buildPayslipMetricsV1, type DocumentInsightLike, type MetricsV1 } from '../services/insights/payslipMetrics.js';
+import {
+  buildPayslipMetricsV1,
+  type DocumentInsightLike,
+  type PayslipMetricsV1 as MetricsV1,
+} from '../../../../shared/lib/insights/normalizeV1.js';
 
 const MONGO_URI = process.env.MONGO_URI ?? 'mongodb://localhost:27017';
 const MONGO_DB = process.env.MONGO_DB_NAME ?? 'app';
@@ -29,7 +33,13 @@ async function run(): Promise<void> {
     const doc = await cursor.next();
     if (!doc) break;
     try {
-      const metricsV1 = buildPayslipMetricsV1({ ...doc, insightType: doc.insightType ?? doc.catalogueKey ?? 'payslip' });
+      const fallbackType =
+        typeof doc.insightType === 'string'
+          ? doc.insightType
+          : ('catalogueKey' in doc && typeof (doc as Record<string, unknown>).catalogueKey === 'string'
+              ? ((doc as Record<string, unknown>).catalogueKey as string)
+              : 'payslip');
+      const metricsV1 = buildPayslipMetricsV1({ ...doc, insightType: fallbackType });
       await collection.updateOne({ _id: doc._id }, { $set: { metricsV1 } });
       updated += 1;
     } catch (error) {

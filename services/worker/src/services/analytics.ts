@@ -12,7 +12,7 @@ import type { Types } from 'mongoose';
 import pino from 'pino';
 import * as v1 from '../../../../shared/v1/index.js';
 import { featureFlags } from '../config/featureFlags.js';
-import { buildPayslipMetricsV1 } from './insights/payslipMetrics.js';
+import { normalizeInsightV1 } from '../../../../shared/lib/insights/normalizeV1.js';
 import {
   DocumentInsightModel,
   UserAnalyticsModel,
@@ -32,19 +32,6 @@ const STATEMENT_TYPES = new Set<DocumentInsight['catalogueKey']>([
 ]);
 
 type ValidationError = { instancePath?: string; schemaPath?: string; message?: string };
-
-function buildSchemaError(path: string, errors: ValidationError[] | null | undefined): Error {
-  const error = new Error('Schema validation failed');
-  (error as Error & { statusCode?: number; details?: unknown }).statusCode = 422;
-  (error as Error & { code?: string }).code = 'SCHEMA_VALIDATION_FAILED';
-  (error as Error & { details?: unknown }).details = {
-    code: 'SCHEMA_VALIDATION_FAILED',
-    path,
-    details: Array.isArray(errors) ? errors : [],
-    hint: 'Data shape invalid; try re-uploading the document.',
-  };
-  return error;
-}
 
 function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
   if (!errors || !errors.length) return 'unknown validation error';
@@ -106,10 +93,8 @@ function normaliseTransactionRecord(
   };
   if (!v1.validateTransactionV1(candidate)) {
     const errors = v1.validateTransactionV1.errors as ValidationError[] | null | undefined;
-    if (featureFlags.enableAjvStrict) {
-      throw buildSchemaError('shared/schemas/transactionV1.json', errors);
-    }
-    logger.warn(
+    const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+    logger[level](
       {
         id: candidate.id,
         errors: formatAjvErrors(errors),
@@ -225,54 +210,18 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
   const transactionsV1: v1.TransactionV1[] = [];
 
   if (insight.catalogueKey === 'payslip') {
-    const existing = insight.metricsV1 as v1.PayslipMetricsV1 | null | undefined;
-    if (existing) {
-      if (v1.validatePayslipMetricsV1(existing)) {
-        metricsV1 = { ...existing };
-      } else {
+    const normalised = normalizeInsightV1({ ...insight, insightType: 'payslip' });
+    if (normalised?.metricsV1) {
+      metricsV1 = { ...(normalised.metricsV1 as v1.PayslipMetricsV1) };
+      if (!v1.validatePayslipMetricsV1(metricsV1)) {
         const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
-        if (featureFlags.enableAjvStrict) {
-          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
-        }
-        logger.warn(
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
           {
             fileId: insight.fileId,
             errors: formatAjvErrors(errors),
           },
-          'Ignoring invalid payslip metricsV1; falling back to legacy mapping'
-        );
-      }
-    }
-    if (!metricsV1) {
-      try {
-        const built = buildPayslipMetricsV1({
-          ...insight,
-          insightType: 'payslip',
-          metadata,
-          metrics: (insight.metrics ?? {}) as Record<string, unknown>,
-        });
-        if (v1.validatePayslipMetricsV1(built)) {
-          metricsV1 = built;
-        } else {
-          const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
-          if (featureFlags.enableAjvStrict) {
-            throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
-          }
-          logger.warn(
-            {
-              fileId: insight.fileId,
-              errors: formatAjvErrors(errors),
-            },
-            'Computed payslip metrics failed validation; falling back'
-          );
-        }
-      } catch (error) {
-        logger.warn(
-          {
-            fileId: insight.fileId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          'Failed to compute payslip metrics from structured metadata'
+          'Payslip metricsV1 validation failed; continuing with best-effort values'
         );
       }
     }
@@ -307,10 +256,8 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
       } satisfies v1.PayslipMetricsV1;
       if (!v1.validatePayslipMetricsV1(metricsV1)) {
         const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
-        if (featureFlags.enableAjvStrict) {
-          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
-        }
-        logger.warn(
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
           {
             fileId: insight.fileId,
             errors: formatAjvErrors(errors),
@@ -351,21 +298,22 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
         }
       });
     }
-    const existing = insight.metricsV1 as v1.StatementMetricsV1 | null | undefined;
-    if (existing) {
-      if (v1.validateStatementMetricsV1(existing)) {
-        metricsV1 = { ...existing };
-      } else {
+    const normalised = normalizeInsightV1({
+      ...insight,
+      insightType: insight.catalogueKey,
+      transactionsV1,
+    });
+    if (normalised?.metricsV1) {
+      metricsV1 = { ...(normalised.metricsV1 as v1.StatementMetricsV1) };
+      if (!v1.validateStatementMetricsV1(metricsV1)) {
         const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
-        if (featureFlags.enableAjvStrict) {
-          throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
-        }
-        logger.warn(
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
           {
             fileId: insight.fileId,
             errors: formatAjvErrors(errors),
           },
-          'Ignoring invalid statement metricsV1; computing from transactions'
+          'Statement metricsV1 validation failed; continuing with best-effort values'
         );
       }
     }
@@ -389,10 +337,8 @@ function preferV1(insight: DocumentInsight): PreferredInsight {
       } satisfies v1.StatementMetricsV1;
       if (!v1.validateStatementMetricsV1(metricsV1)) {
         const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
-        if (featureFlags.enableAjvStrict) {
-          throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
-        }
-        logger.warn(
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
           {
             fileId: insight.fileId,
             errors: formatAjvErrors(errors),

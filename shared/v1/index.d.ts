@@ -34,10 +34,19 @@ export type TransactionV1 = {
 };
 
 export type StatementMetricsV1 = {
+  account?: { name?: string | null; iban?: string | null; sortCode?: string | null; accountNumber?: string | null } | null;
   period: { start: string; end: string; month: string };
+  openingBalanceMinor?: number | null;
+  closingBalanceMinor?: number | null;
   inflowsMinor: number;
   outflowsMinor: number;
   netMinor: number;
+  transactionsV1?: Array<{
+    date: string;
+    description: string;
+    amountMinor: number;
+    balanceMinor?: number | null;
+  }>;
 };
 
 export type DashboardSummaryV1 = {
