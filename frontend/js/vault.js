@@ -2222,8 +2222,14 @@
         Array.isArray(embedded.narrative)
       );
     const payload = hasEmbeddedContent ? embedded : source;
+    const preserved = Object.fromEntries(
+      Object.entries(ensureObject(payload)).filter(
+        ([key]) => !['metadata', 'metrics', 'transactions', 'narrative'].includes(key)
+      )
+    );
 
     return {
+      ...preserved,
       metadata: ensureObject(payload.metadata),
       metrics: ensureObject(payload.metrics),
       transactions: Array.isArray(payload.transactions)
