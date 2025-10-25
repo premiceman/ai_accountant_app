@@ -15,7 +15,19 @@
         "month": { "type": "string", "pattern": "^\\d{4}-\\d{2}$" }
       }
     },
-    "employer": { "type": ["string", "null"], "maxLength": 256 },
+    "employer": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "maxLength": 256 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "maxLength": 256 }
+          }
+        }
+      ]
+    },
     "grossMinor": { "type": "integer" },
     "netMinor": { "type": "integer" },
     "taxMinor": { "type": "integer" },

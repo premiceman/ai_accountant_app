@@ -471,6 +471,15 @@ function preferV1(insight) {
       if (!metricsV1) {
         const payDate = ensureIsoDate(legacyMetrics.payDate ?? metadata.payDate ?? fallbackDate) ?? fallbackDate;
         const periodMeta = legacyMetrics.period ?? metadata.period ?? {};
+        const employerRecord = (metadata.employer ?? {}) || {};
+        const employerName =
+          typeof employerRecord.name === 'string'
+            ? employerRecord.name
+            : typeof metadata.employerName === 'string'
+            ? metadata.employerName
+            : typeof legacyMetrics.employerName === 'string'
+            ? legacyMetrics.employerName
+            : null;
         metricsV1 = {
           payDate,
           period: {
@@ -478,7 +487,7 @@ function preferV1(insight) {
             end: ensureIsoDate(periodMeta.end) ?? payDate,
             month: ensureIsoMonth(periodMeta.month ?? documentMonth) ?? payDate.slice(0, 7),
           },
-          employer: typeof metadata.employerName === 'string' ? metadata.employerName : null,
+          employer: employerName ? { name: employerName } : null,
           grossMinor: toMinorUnits(legacyMetrics.gross),
           netMinor: toMinorUnits(legacyMetrics.net),
           taxMinor: toMinorUnits(legacyMetrics.tax),

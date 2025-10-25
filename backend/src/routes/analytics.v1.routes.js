@@ -210,7 +210,15 @@ router.get('/timeseries', async (req, res, next) => {
         series: aggregateTimeseries(summary.transactions, range, granularity, metric),
         paydayEvents: summary.payslips
           .filter((p) => p?.netMinor)
-          .map((p) => ({ ts: p.payDate, amountMinor: p.netMinor, employer: p.employer ?? null })),
+          .map((p) => {
+            const employer =
+              typeof p?.employer === 'string'
+                ? p.employer
+                : p?.employer && typeof p.employer === 'object'
+                ? p.employer.name ?? null
+                : null;
+            return { ts: p.payDate, amountMinor: p.netMinor, employer: employer ?? null };
+          }),
         version: 'v1',
       };
     });
