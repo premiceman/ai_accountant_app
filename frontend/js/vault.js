@@ -2249,11 +2249,27 @@
   }
 
   function normaliseManualJsonShape(data) {
+    const source = ensureObject(data);
+    const embedded = ensureObject(source.data);
+    const hasEmbeddedContent =
+      embedded &&
+      (
+        embedded.metadata != null ||
+        embedded.metrics != null ||
+        Array.isArray(embedded.transactions) ||
+        Array.isArray(embedded.narrative)
+      );
+    const payload = hasEmbeddedContent ? embedded : source;
+
     return {
-      metadata: ensureObject(data?.metadata),
-      metrics: ensureObject(data?.metrics),
-      transactions: Array.isArray(data?.transactions) ? data.transactions.map((tx) => ensureObject(tx)) : [],
-      narrative: Array.isArray(data?.narrative) ? data.narrative.map((line) => (line == null ? '' : String(line))) : [],
+      metadata: ensureObject(payload.metadata),
+      metrics: ensureObject(payload.metrics),
+      transactions: Array.isArray(payload.transactions)
+        ? payload.transactions.map((tx) => ensureObject(tx))
+        : [],
+      narrative: Array.isArray(payload.narrative)
+        ? payload.narrative.map((line) => (line == null ? '' : String(line)))
+        : [],
     };
   }
 
