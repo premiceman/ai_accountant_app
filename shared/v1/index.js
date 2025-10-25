@@ -111,10 +111,55 @@ function normaliseCategory(raw) {
   return 'Misc';
 }
 
+function parseMonthYear(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const matchSlash = raw.match(/^(\d{1,2})[\/-](\d{4})$/);
+  if (matchSlash) {
+    const monthNum = Number(matchSlash[1]);
+    if (monthNum >= 1 && monthNum <= 12) {
+      return {
+        year: matchSlash[2],
+        month: String(monthNum).padStart(2, '0'),
+      };
+    }
+  }
+
+  const matchReverse = raw.match(/^(\d{4})[\/-](\d{1,2})$/);
+  if (matchReverse) {
+    const monthNum = Number(matchReverse[2]);
+    if (monthNum >= 1 && monthNum <= 12) {
+      return {
+        year: matchReverse[1],
+        month: String(monthNum).padStart(2, '0'),
+      };
+    }
+  }
+
+  const matchSpace = raw.match(/^(\d{1,2})\s+(\d{4})$/);
+  if (matchSpace) {
+    const monthNum = Number(matchSpace[1]);
+    if (monthNum >= 1 && monthNum <= 12) {
+      return {
+        year: matchSpace[2],
+        month: String(monthNum).padStart(2, '0'),
+      };
+    }
+  }
+
+  return null;
+}
+
 function ensureIsoDate(value) {
   if (!value) return null;
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return value;
+  }
+  const monthYear = parseMonthYear(value);
+  if (monthYear) {
+    return `${monthYear.year}-${monthYear.month}-01`;
   }
   const date = value instanceof Date ? value : new Date(value);
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
@@ -127,6 +172,10 @@ function ensureIsoMonth(value) {
   if (!value) return null;
   if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) {
     return value;
+  }
+  const monthYear = parseMonthYear(value);
+  if (monthYear) {
+    return `${monthYear.year}-${monthYear.month}`;
   }
   const date = value instanceof Date ? value : new Date(value);
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
