@@ -2,6 +2,7 @@ const dayjs = require('dayjs');
 const User = require('../../../models/User');
 const DocumentInsight = require('../../../models/DocumentInsight');
 const { sha256 } = require('../../lib/hash');
+const { normaliseDocumentInsight } = require('./insightNormaliser');
 
 const LEGACY_SCHEMA_VERSION = 'legacy-v1';
 const LEGACY_PARSER_VERSION = 'legacy-parser-v1';
@@ -537,17 +538,31 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
   const storeKey = insights.storeKey || key;
   const baseKey = insights.baseKey || key;
   const existing = sources[storeKey] || {};
-  const documentContext = deriveDocumentContext(insights, fileInfo);
+  const normalised = normaliseDocumentInsight({
+    ...insights,
+    baseKey,
+    catalogueKey: insights.catalogueKey || baseKey,
+  });
+  const mergedMetadata = { ...(insights.metadata || {}), ...(normalised.metadata || {}) };
+  const metricsV1 = normalised.metricsV1 || existing.metricsV1 || insights.metricsV1 || null;
+  const mergedInsights = {
+    ...insights,
+    metrics: normalised.metrics,
+    metricsV1,
+    metadata: mergedMetadata,
+  };
+  const documentContext = deriveDocumentContext(mergedInsights, fileInfo);
   sources[storeKey] = {
     ...existing,
     key: storeKey,
     baseKey,
-    metrics: insights.metrics || existing.metrics || {},
+    metrics: normalised.metrics || existing.metrics || {},
+    metricsV1,
     narrative: insights.narrative || existing.narrative || [],
     transactions: insights.transactions || existing.transactions || [],
     metadata: {
       ...(existing.metadata || {}),
-      ...(insights.metadata || {}),
+      ...mergedMetadata,
       documentMonth: documentContext.monthKey || existing.metadata?.documentMonth || null,
       documentLabel: documentContext.label || existing.metadata?.documentLabel || null,
       documentDate: documentContext.documentIso || existing.metadata?.documentDate || null,
@@ -586,18 +601,18 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
     try {
       const now = new Date();
       const extractionSource =
-        insights.metadata?.extractionSource || insights.metrics?.extractionSource || 'heuristic';
-      const currency = insights.metadata?.currency || 'GBP';
+        mergedInsights.metadata?.extractionSource || mergedInsights.metrics?.extractionSource || 'heuristic';
+      const currency = mergedInsights.metadata?.currency || 'GBP';
       const documentIso = documentContext.documentIso || null;
       const documentDate = documentIso ? new Date(documentIso) : null;
       const documentDateV1 = documentIso ? documentIso.slice(0, 10) : null;
-      const insightType = insights.insightType || insights.baseKey || baseKey;
+      const insightType = mergedInsights.insightType || mergedInsights.baseKey || baseKey;
       const contentHash = sha256(
         [
           fileInfo.id,
           documentIso || '',
-          JSON.stringify(insights.metrics || {}),
-          JSON.stringify(insights.transactions || []),
+          JSON.stringify(normalised.metrics || {}),
+          JSON.stringify(mergedInsights.transactions || []),
         ].join('|')
       );
 
@@ -613,15 +628,16 @@ async function applyDocumentInsights(userId, key, insights, fileInfo) {
             documentLabel: documentContext.label || null,
             documentName: documentContext.documentName || null,
             nameMatchesUser: documentContext.nameMatchesUser,
-            metrics: insights.metrics || {},
+            metrics: normalised.metrics || {},
+            metricsV1,
             metadata: {
-              ...(insights.metadata || {}),
+              ...mergedMetadata,
               documentMonth: documentContext.monthKey || null,
               documentLabel: documentContext.label || null,
               documentDate: documentIso || null,
             },
-            transactions: Array.isArray(insights.transactions) ? insights.transactions : [],
-            narrative: Array.isArray(insights.narrative) ? insights.narrative : [],
+            transactions: Array.isArray(mergedInsights.transactions) ? mergedInsights.transactions : [],
+            narrative: Array.isArray(mergedInsights.narrative) ? mergedInsights.narrative : [],
             extractedAt: now,
             updatedAt: now,
             schemaVersion: LEGACY_SCHEMA_VERSION,

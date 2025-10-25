@@ -18,6 +18,7 @@ const User = require('../models/User');
 const { getObject, deleteObject, putObject, fileIdToKey } = require('../src/lib/r2');
 const { dispatch: dispatchDocupipe, readR2Buffer } = require('../src/services/vault/docupipeDispatcher');
 const { applyDocumentInsights, setInsightsProcessing } = require('../src/services/documents/insightsStore');
+const { normaliseDocumentInsight } = require('../src/services/documents/insightNormaliser');
 const { rebuildMonthlyAnalytics } = require('../src/services/vault/analytics');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -508,6 +509,30 @@ router.put('/json/:docId', express.json({ limit: '1mb' }), async (req, res) => {
   }
   payload.metadata = manualMeta;
 
+  const transformedManual = normaliseDocumentInsight({
+    baseKey: classificationKey,
+    catalogueKey: classificationKey,
+    metadata: payload.metadata,
+    metrics: payload.metrics,
+    metricsV1: payload.metricsV1,
+  });
+
+  if (transformedManual.metadata) {
+    Object.keys(manualMeta).forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(transformedManual.metadata, key)) {
+        delete manualMeta[key];
+      }
+    });
+    Object.assign(manualMeta, transformedManual.metadata);
+  }
+  payload.metadata = manualMeta;
+  payload.metrics = transformedManual.metrics;
+  if (transformedManual.metricsV1) {
+    payload.metricsV1 = transformedManual.metricsV1;
+  } else {
+    delete payload.metricsV1;
+  }
+
   const jsonKey = `${decodedKey}.std.json`;
   const buffer = Buffer.from(JSON.stringify(payload, null, 2), 'utf8');
 
@@ -527,15 +552,21 @@ router.put('/json/:docId', express.json({ limit: '1mb' }), async (req, res) => {
   };
 
   try {
-    await applyDocumentInsights(userId, classificationKey, {
-      storeKey: classificationKey,
-      baseKey: classificationKey,
-      insightType: classificationKey,
-      metadata: manualMeta,
-      metrics: payload.metrics,
-      transactions: payload.transactions,
-      narrative: payload.narrative,
-    }, fileInfo);
+    await applyDocumentInsights(
+      userId,
+      classificationKey,
+      {
+        storeKey: classificationKey,
+        baseKey: classificationKey,
+        insightType: classificationKey,
+        metadata: payload.metadata,
+        metrics: payload.metrics,
+        metricsV1: transformedManual.metricsV1,
+        transactions: payload.transactions,
+        narrative: payload.narrative,
+      },
+      fileInfo,
+    );
   } catch (error) {
     console.error('manual json insight apply failed', error);
   }
