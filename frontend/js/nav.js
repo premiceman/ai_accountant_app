@@ -3,6 +3,15 @@ let topbarResizeObserver;
 let topbarReady = false;
 let sidebarReady = false;
 
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('phloat-theme-ready', () => {
+    if (!topbarReady) return;
+    try {
+      window.PhloatTheme?.refresh?.();
+    } catch { /* no-op */ }
+  });
+}
+
 (async function injectNav() {
   const body = document.body;
   const topbarHost = document.getElementById('topbar-container');
@@ -21,6 +30,9 @@ let sidebarReady = false;
       if (topbarEl) {
         topbarReady = true;
         initialiseTopbarLayout(topbarEl);
+        try {
+          window.PhloatTheme?.refresh?.();
+        } catch { /* no-op */ }
       }
       hydrateTopbarMeta();
     }
