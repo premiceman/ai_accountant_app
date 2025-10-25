@@ -230,13 +230,13 @@
           title: 'Balances',
           description: 'Key balances and totals for the statement period.',
           fields: [
-            { path: 'balances.openingBalance', label: 'Opening balance', type: 'number', required: true },
-            { path: 'balances.closingBalance', label: 'Closing balance', type: 'number', required: true },
-            { path: 'balances.totalMoneyIn', label: 'Total money in', type: 'number' },
-            { path: 'balances.totalMoneyOut', label: 'Total money out', type: 'number' },
-            { path: 'balances.overdraftLimit', label: 'Overdraft limit', type: 'number' },
-            { path: 'balances.averageBalances.averageCreditBalance', label: 'Average credit balance', type: 'number' },
-            { path: 'balances.averageBalances.averageDebitBalance', label: 'Average debit balance', type: 'number' },
+            { path: 'balances.openingBalance', label: 'Opening balance', type: 'number', format: 'currency', required: true },
+            { path: 'balances.closingBalance', label: 'Closing balance', type: 'number', format: 'currency', required: true },
+            { path: 'balances.totalMoneyIn', label: 'Total money in', type: 'number', format: 'currency' },
+            { path: 'balances.totalMoneyOut', label: 'Total money out', type: 'number', format: 'currency' },
+            { path: 'balances.overdraftLimit', label: 'Overdraft limit', type: 'number', format: 'currency' },
+            { path: 'balances.averageBalances.averageCreditBalance', label: 'Average credit balance', type: 'number', format: 'currency' },
+            { path: 'balances.averageBalances.averageDebitBalance', label: 'Average debit balance', type: 'number', format: 'currency' },
           ],
         },
         {
@@ -249,7 +249,7 @@
             { path: 'interestInformation.overdraftInterestRate', label: 'Overdraft interest rate', type: 'text' },
             { path: 'interestInformation.interestPaid.date', label: 'Interest paid date', type: 'date' },
             { path: 'interestInformation.interestPaid.description', label: 'Interest paid description', type: 'text' },
-            { path: 'interestInformation.interestPaid.amount', label: 'Interest paid amount', type: 'number' },
+            { path: 'interestInformation.interestPaid.amount', label: 'Interest paid amount', type: 'number', format: 'currency' },
           ],
         },
         {
@@ -263,9 +263,9 @@
           fields: [
             { path: 'date', label: 'Date', type: 'date', required: true },
             { path: 'description', label: 'Description', type: 'text', required: true },
-            { path: 'moneyIn', label: 'Money in', type: 'number' },
-            { path: 'moneyOut', label: 'Money out', type: 'number' },
-            { path: 'balance', label: 'Running balance', type: 'number' },
+            { path: 'moneyIn', label: 'Money in', type: 'number', format: 'currency' },
+            { path: 'moneyOut', label: 'Money out', type: 'number', format: 'currency' },
+            { path: 'balance', label: 'Running balance', type: 'number', format: 'currency' },
             {
               path: 'transactionType',
               label: 'Transaction type',
@@ -340,10 +340,10 @@
             { path: 'employer.name', label: 'Employer name', type: 'text', required: true },
             { path: 'employer.taxDistrict', label: 'Tax district', type: 'text' },
             { path: 'employer.taxReference', label: 'Tax reference', type: 'text' },
-            { path: 'employer.employersNicThisPeriod', label: 'Employer NI this period', type: 'number' },
-            { path: 'employer.employersNicYtd', label: 'Employer NI YTD', type: 'number' },
-            { path: 'employer.employersPensionThisPeriod', label: 'Employer pension this period', type: 'number' },
-            { path: 'employer.employersPensionYtd', label: 'Employer pension YTD', type: 'number' },
+            { path: 'employer.employersNicThisPeriod', label: 'Employer NI this period', type: 'number', format: 'currency' },
+            { path: 'employer.employersNicYtd', label: 'Employer NI YTD', type: 'number', format: 'currency' },
+            { path: 'employer.employersPensionThisPeriod', label: 'Employer pension this period', type: 'number', format: 'currency' },
+            { path: 'employer.employersPensionYtd', label: 'Employer pension YTD', type: 'number', format: 'currency' },
           ],
         },
         {
@@ -405,8 +405,8 @@
                 { value: 'other', label: 'Other' },
               ],
             },
-            { path: 'amountPeriod', label: 'Amount this period', type: 'number', required: true },
-            { path: 'amountYtd', label: 'Amount YTD', type: 'number' },
+            { path: 'amountPeriod', label: 'Amount this period', type: 'number', format: 'currency', required: true },
+            { path: 'amountYtd', label: 'Amount YTD', type: 'number', format: 'currency' },
           ],
         },
         {
@@ -438,8 +438,8 @@
                 { value: 'other', label: 'Other' },
               ],
             },
-            { path: 'amountPeriod', label: 'Amount this period', type: 'number', required: true },
-            { path: 'amountYtd', label: 'Amount YTD', type: 'number' },
+            { path: 'amountPeriod', label: 'Amount this period', type: 'number', format: 'currency', required: true },
+            { path: 'amountYtd', label: 'Amount YTD', type: 'number', format: 'currency' },
           ],
         },
         {
@@ -447,10 +447,10 @@
           type: 'group',
           title: 'Totals',
           fields: [
-            { path: 'totals.grossPeriod', label: 'Gross pay this period', type: 'number', required: true },
-            { path: 'totals.netPeriod', label: 'Net pay this period', type: 'number', required: true },
-            { path: 'totals.grossYtd', label: 'Gross pay YTD', type: 'number' },
-            { path: 'totals.netYtd', label: 'Net pay YTD', type: 'number' },
+            { path: 'totals.grossPeriod', label: 'Gross pay this period', type: 'number', format: 'currency', required: true },
+            { path: 'totals.netPeriod', label: 'Net pay this period', type: 'number', format: 'currency', required: true },
+            { path: 'totals.grossYtd', label: 'Gross pay YTD', type: 'number', format: 'currency' },
+            { path: 'totals.netYtd', label: 'Net pay YTD', type: 'number', format: 'currency' },
           ],
         },
         {
@@ -459,7 +459,7 @@
           title: 'Metadata',
           fields: [
             { path: 'meta.documentId', label: 'Document ID', type: 'text' },
-            { path: 'meta.confidence', label: 'Confidence score', type: 'number' },
+            { path: 'meta.confidence', label: 'Confidence score', type: 'number', format: 'decimal' },
           ],
         },
       ],
@@ -1357,147 +1357,108 @@
     jsonModalStylesInjected = true;
     const style = document.createElement('style');
     style.textContent = `
-      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: clamp(16px, 4vw, 40px); background: radial-gradient(circle at top left, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.94)); backdrop-filter: blur(14px); z-index: 1320; }
+      .vault-json-editor { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: clamp(24px, 5vw, 48px); background: rgba(12, 21, 32, 0.28); backdrop-filter: blur(18px); z-index: 1320; }
       .vault-json-editor.is-visible { display: flex; }
-      .vault-json-editor__dialog { position: relative; width: min(1120px, 100%); max-height: min(94vh, 860px); background: rgba(248, 250, 252, 0.96); color: var(--bs-body-color, #0f172a); border-radius: 28px; border: 1px solid rgba(148, 163, 184, 0.28); box-shadow: 0 40px 90px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column; overflow: hidden; }
-      .vault-json-editor__header { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: clamp(16px, 3vw, 28px); padding: clamp(24px, 5vw, 36px); background: linear-gradient(135deg, #4338ca, #6366f1); color: #f8fafc; }
-      .vault-json-editor__header::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.32), transparent 55%); pointer-events: none; opacity: 0.9; }
-      .vault-json-editor__title-group { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
-      .vault-json-editor__title { margin: 0; font-size: clamp(1.3rem, 2.4vw, 1.75rem); font-weight: 700; letter-spacing: -0.01em; color: inherit; }
-      .vault-json-editor__subtitle { margin: 0; font-size: clamp(0.95rem, 1.4vw, 1.05rem); color: rgba(240, 249, 255, 0.82); line-height: 1.6; }
-      .vault-json-editor__close { position: relative; z-index: 1; border: none; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 1.5rem; line-height: 1; padding: 6px 12px; border-radius: 14px; cursor: pointer; transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
-      .vault-json-editor__close:hover { background: rgba(255, 255, 255, 0.26); transform: translateY(-1px); box-shadow: 0 10px 26px rgba(15, 23, 42, 0.2); }
-      .vault-json-editor__close:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 3px; }
-      .vault-json-editor__body { position: relative; padding: clamp(24px, 4vw, 36px); overflow-y: auto; flex: 1; background: linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(241, 245, 249, 0.98)); }
-      .vault-json-editor__body::-webkit-scrollbar { width: 10px; }
-      .vault-json-editor__body::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.45); border-radius: 999px; }
-      .vault-json-editor__body::-webkit-scrollbar-track { background: rgba(226, 232, 240, 0.6); border-radius: 999px; }
-      .vault-json-editor__layout { display: grid; grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1fr); gap: clamp(20px, 4vw, 32px); align-items: start; }
-      .vault-json-editor__aside { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 24px); position: sticky; top: clamp(8px, 2vw, 20px); }
-      .vault-json-editor__main { display: flex; flex-direction: column; gap: clamp(18px, 3vw, 26px); }
-      .vault-json-editor__aside-card { display: flex; flex-direction: column; gap: 14px; padding: clamp(18px, 3vw, 24px); border-radius: 22px; border: 1px solid rgba(148, 163, 184, 0.24); background: rgba(255, 255, 255, 0.92); box-shadow: 0 28px 60px rgba(15, 23, 42, 0.14); backdrop-filter: blur(8px); }
-      .vault-json-editor__aside-card--meta { background: rgba(238, 242, 255, 0.92); border-color: rgba(99, 102, 241, 0.28); box-shadow: 0 32px 68px rgba(79, 70, 229, 0.16); }
-      .vault-json-editor__aside-title { margin: 0; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(79, 70, 229, 0.95); }
-      .vault-json-editor__aside-description { margin: 0; font-size: 0.9rem; line-height: 1.55; color: rgba(71, 85, 105, 0.85); }
-      .vault-json-editor__meta { display: flex; flex-direction: column; gap: 16px; }
+      .vault-json-editor__dialog { position: relative; width: min(1180px, 100%); max-height: min(92vh, 960px); background: var(--bg-surface, #ffffff); color: var(--fg, #0c1520); border-radius: 28px; box-shadow: 0 30px 80px rgba(12, 21, 32, 0.16); display: flex; flex-direction: column; overflow: hidden; }
+      .vault-json-editor__header { display: flex; align-items: flex-start; justify-content: space-between; gap: clamp(18px, 3vw, 28px); padding: clamp(28px, 3vw, 36px); background: linear-gradient(135deg, color-mix(in srgb, var(--brand, #00c2a8) 78%, white 22%), color-mix(in srgb, var(--brand-hover, #00b39b) 72%, white 28%)); color: #ffffff; }
+      .vault-json-editor__title-group { display: flex; flex-direction: column; gap: 8px; max-width: 540px; }
+      .vault-json-editor__title { margin: 0; font-size: clamp(1.35rem, 2.4vw, 1.8rem); font-weight: 700; letter-spacing: -0.01em; }
+      .vault-json-editor__subtitle { margin: 0; font-size: clamp(0.95rem, 1.4vw, 1.08rem); opacity: 0.92; line-height: 1.6; }
+      .vault-json-editor__close { border: none; background: rgba(255, 255, 255, 0.18); color: inherit; width: 40px; height: 40px; border-radius: 50%; font-size: 1.6rem; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+      .vault-json-editor__close:hover { background: rgba(255, 255, 255, 0.28); transform: translateY(-1px); box-shadow: 0 16px 32px rgba(12, 21, 32, 0.18); }
+      .vault-json-editor__close:focus-visible { outline: 3px solid rgba(255, 255, 255, 0.65); outline-offset: 3px; }
+      .vault-json-editor__body { flex: 1; display: flex; flex-direction: column; padding: clamp(24px, 3vw, 36px); background: linear-gradient(145deg, color-mix(in srgb, var(--bg-body, #f6faf9) 78%, transparent), transparent 52%); overflow: hidden; }
+      .vault-json-editor__layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px 1fr; gap: clamp(20px, 3vw, 36px); }
+      .vault-json-editor__aside { display: flex; flex-direction: column; gap: 24px; }
+      .vault-json-editor__aside-card { background: var(--bg-surface, #ffffff); border-radius: 24px; border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 80%, transparent); box-shadow: 0 24px 56px rgba(12, 21, 32, 0.12); padding: clamp(18px, 2vw, 26px); display: flex; flex-direction: column; gap: 14px; position: relative; overflow: hidden; }
+      .vault-json-editor__aside-card--meta::before { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--brand, #00c2a8) 18%, transparent), transparent 68%); opacity: 0.55; pointer-events: none; }
+      .vault-json-editor__aside-title { margin: 0; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: color-mix(in srgb, var(--fg, #0c1520) 82%, var(--brand, #00c2a8) 18%); }
+      .vault-json-editor__aside-description { margin: 0; font-size: 0.9rem; line-height: 1.6; color: var(--fg-2, #63727e); }
+      .vault-json-editor__meta { display: flex; flex-direction: column; gap: 12px; }
       .vault-json-editor__meta[hidden] { display: none !important; }
-      .vault-json-editor__meta-item { display: flex; flex-direction: column; gap: 6px; padding: 14px 18px; border-radius: 18px; border: 1px solid rgba(99, 102, 241, 0.18); background: rgba(255, 255, 255, 0.96); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); transition: border-color 160ms ease, background 160ms ease, transform 160ms ease; }
-      .vault-json-editor__meta-item:hover { transform: translateY(-1px); }
-      .vault-json-editor__meta-item[data-state='warning'] { border-color: rgba(217, 119, 6, 0.32); background: rgba(255, 247, 237, 0.98); }
-      .vault-json-editor__meta-item[data-state='danger'] { border-color: rgba(220, 38, 38, 0.35); background: rgba(254, 242, 242, 0.96); }
-      .vault-json-editor__meta-item[data-state='success'] { border-color: rgba(16, 185, 129, 0.35); background: rgba(236, 253, 245, 0.96); }
-      .vault-json-editor__meta-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(79, 70, 229, 0.85); }
-      .vault-json-editor__meta-value { font-size: 0.98rem; font-weight: 600; color: rgba(15, 23, 42, 0.9); word-break: break-word; }
-      .vault-json-editor__meta-value--status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #4338ca; }
-      .vault-json-editor__meta-value--status::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: 0.6; }
-      .vault-json-editor__meta-value--status[data-state='warning'] { color: #b45309; }
-      .vault-json-editor__meta-value--status[data-state='danger'] { color: #b91c1c; }
-      .vault-json-editor__meta-value--status[data-state='success'] { color: #047857; }
+      .vault-json-editor__meta-item { display: flex; flex-direction: column; gap: 6px; position: relative; padding: 14px 18px; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 85%, transparent); background: color-mix(in srgb, var(--bg-body, #f6faf9) 94%, transparent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+      .vault-json-editor__meta-label { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-2, #63727e); }
+      .vault-json-editor__meta-value { font-size: 0.98rem; font-weight: 600; color: var(--fg, #0c1520); word-break: break-word; }
+      .vault-json-editor__meta-value--status { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 6px 14px; font-size: 0.85rem; font-weight: 600; color: var(--fg, #0c1520); background: color-mix(in srgb, var(--bg-body, #f6faf9) 92%, transparent); border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 90%, transparent); transition: background 160ms ease, color 160ms ease, border-color 160ms ease; }
+      .vault-json-editor__meta-value--status[data-state='warning'] { color: color-mix(in srgb, var(--warning, #ffa600) 80%, #7c4a00); background: color-mix(in srgb, var(--warning, #ffa600) 18%, white); border-color: color-mix(in srgb, var(--warning, #ffa600) 32%, transparent); }
+      .vault-json-editor__meta-value--status[data-state='success'] { color: color-mix(in srgb, var(--success, #1db954) 88%, #0b5c33); background: color-mix(in srgb, var(--success, #1db954) 18%, white); border-color: color-mix(in srgb, var(--success, #1db954) 32%, transparent); }
+      .vault-json-editor__main { background: var(--bg-surface, #ffffff); border-radius: 26px; border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 85%, transparent); box-shadow: 0 26px 64px rgba(12, 21, 32, 0.14); padding: clamp(22px, 3vw, 32px); display: flex; flex-direction: column; gap: 24px; overflow: hidden; }
       .vault-json-editor__message,
       .vault-json-editor__error,
-      .vault-json-editor__loading { position: relative; margin: 0; padding: 18px 20px 18px 56px; border-radius: 18px; border: 1px solid rgba(148, 163, 184, 0.25); background: rgba(255, 255, 255, 0.95); box-shadow: 0 20px 40px rgba(15, 23, 42, 0.12); font-size: 0.97rem; line-height: 1.55; }
+      .vault-json-editor__loading { margin: 0; border-radius: 20px; padding: 18px 20px 18px 56px; position: relative; font-size: 0.96rem; line-height: 1.55; box-shadow: 0 20px 48px rgba(12, 21, 32, 0.12); border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 80%, transparent); background: color-mix(in srgb, var(--bg-surface, #ffffff) 98%, transparent); }
       .vault-json-editor__message[hidden],
       .vault-json-editor__error[hidden],
       .vault-json-editor__loading[hidden] { display: none !important; }
       .vault-json-editor__message::before,
       .vault-json-editor__error::before,
-      .vault-json-editor__loading::before { content: 'ℹ️'; position: absolute; left: 22px; top: 50%; transform: translateY(-50%); font-size: 1.35rem; }
-      .vault-json-editor__message { border-left: 5px solid rgba(79, 70, 229, 0.75); background: rgba(237, 242, 255, 0.96); color: rgba(49, 46, 129, 0.95); }
-      .vault-json-editor__message strong { color: rgba(67, 56, 202, 1); }
-      .vault-json-editor__error { border-left: 5px solid rgba(220, 38, 38, 0.78); background: rgba(254, 226, 226, 0.94); color: rgba(153, 27, 27, 0.95); }
-      .vault-json-editor__error::before { content: '⚠️'; }
-      .vault-json-editor__loading { border-left: 5px solid rgba(37, 99, 235, 0.65); background: rgba(219, 234, 254, 0.9); color: rgba(30, 41, 59, 0.85); }
-      .vault-json-editor__loading::before { content: '⏳'; }
-      .vault-json-editor__form { display: flex; flex-direction: column; gap: 28px; }
-      .vault-json-editor__sections { display: flex; flex-direction: column; gap: 22px; }
-      .manual-editor__empty { margin: 0; padding: 30px; text-align: center; font-size: 0.98rem; color: rgba(15, 23, 42, 0.68); border: 2px dashed rgba(148, 163, 184, 0.45); border-radius: 22px; background: rgba(248, 250, 252, 0.96); }
-      .manual-editor__section { display: flex; flex-direction: column; gap: 20px; padding: clamp(22px, 3vw, 28px); border-radius: 24px; border: 1px solid rgba(148, 163, 184, 0.26); background: rgba(255, 255, 255, 0.97); box-shadow: 0 28px 62px rgba(15, 23, 42, 0.14); position: relative; overflow: hidden; }
-      .manual-editor__section::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(120deg, rgba(79, 70, 229, 0.12), transparent 65%); opacity: 0; transition: opacity 180ms ease; pointer-events: none; }
+      .vault-json-editor__loading::before { content: ''; position: absolute; left: 22px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; background-repeat: no-repeat; background-size: contain; }
+      .vault-json-editor__message { color: color-mix(in srgb, var(--brand, #00c2a8) 68%, #0c1520); background: color-mix(in srgb, var(--brand, #00c2a8) 14%, white); border-color: color-mix(in srgb, var(--brand, #00c2a8) 34%, transparent); }
+      .vault-json-editor__message::before { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" fill="%2300b39b" viewBox="0 0 20 20"><path d="M10 18a8 8 0 118-8 8 8 0 01-8 8zm-.75-5.5a.75.75 0 001.5 0v-4a.75.75 0 00-1.5 0v4zm.75-7a1 1 0 100 2 1 1 0 000-2z"/></svg>'); }
+      .vault-json-editor__error { color: color-mix(in srgb, var(--danger, #ff4d4d) 78%, #7a1a1a); background: color-mix(in srgb, var(--danger, #ff4d4d) 16%, white); border-color: color-mix(in srgb, var(--danger, #ff4d4d) 34%, transparent); }
+      .vault-json-editor__error::before { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23ff4d4d" viewBox="0 0 20 20"><path d="M10 2a8 8 0 108 8 8 8 0 00-8-8zm-.75 4.75a.75.75 0 011.5 0v4a.75.75 0 01-1.5 0v-4zm.75 7.5a1 1 0 110 2 1 1 0 010-2z"/></svg>'); }
+      .vault-json-editor__loading { color: color-mix(in srgb, var(--brand, #00c2a8) 62%, #0c1520); background: color-mix(in srgb, var(--brand, #00c2a8) 10%, white); border-color: color-mix(in srgb, var(--brand, #00c2a8) 24%, transparent); }
+      .vault-json-editor__loading::before { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" fill="%2300b39b" viewBox="0 0 20 20"><path d="M10 2a8 8 0 108 8h-2a6 6 0 11-6-6V2z"/></svg>'); }
+      .vault-json-editor__form { display: flex; flex-direction: column; gap: 28px; min-height: 0; }
+      .vault-json-editor__sections { display: flex; flex-direction: column; gap: 22px; overflow: auto; padding-right: 4px; }
+      .manual-editor__empty { margin: 0; padding: 28px; border-radius: 22px; border: 2px dashed color-mix(in srgb, var(--bd-hairline, #e3eee9) 78%, transparent); background: color-mix(in srgb, var(--bg-body, #f6faf9) 94%, transparent); text-align: center; font-size: 0.96rem; color: var(--fg-2, #63727e); }
+      .manual-editor__section { display: flex; flex-direction: column; gap: 18px; padding: clamp(20px, 2.6vw, 28px); border-radius: 22px; border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 80%, transparent); background: var(--bg-surface, #ffffff); box-shadow: 0 24px 52px rgba(12, 21, 32, 0.1); position: relative; overflow: hidden; }
+      .manual-editor__section::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, color-mix(in srgb, var(--brand, #00c2a8) 10%, transparent), transparent 70%); opacity: 0; transition: opacity 180ms ease; pointer-events: none; }
       .manual-editor__section:hover::before { opacity: 1; }
-      .manual-editor__section-header { position: relative; display: flex; flex-direction: column; gap: 8px; z-index: 1; }
-      .manual-editor__section-title { margin: 0; font-size: clamp(1.02rem, 1.5vw, 1.12rem); font-weight: 600; letter-spacing: -0.01em; color: rgba(15, 23, 42, 0.9); }
-      .manual-editor__section-description { margin: 0; font-size: 0.9rem; color: rgba(71, 85, 105, 0.88); line-height: 1.6; }
+      .manual-editor__section-header { position: relative; display: flex; flex-direction: column; gap: 6px; z-index: 1; }
+      .manual-editor__section-title { margin: 0; font-size: clamp(1.05rem, 1.6vw, 1.2rem); font-weight: 700; letter-spacing: -0.01em; color: var(--fg, #0c1520); }
+      .manual-editor__section-description { margin: 0; font-size: 0.9rem; color: var(--fg-2, #63727e); line-height: 1.55; }
       .manual-editor__section-body { position: relative; z-index: 1; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
       .manual-editor__section--array .manual-editor__section-body { display: flex; flex-direction: column; gap: 16px; }
       .manual-editor__array { display: flex; flex-direction: column; gap: 18px; }
-      .manual-editor__array-item { border: 1px solid rgba(99, 102, 241, 0.22); border-radius: 20px; background: rgba(248, 250, 252, 0.96); box-shadow: 0 24px 54px rgba(15, 23, 42, 0.12); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-      .manual-editor__array-item-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.28); }
-      .manual-editor__array-item-title { margin: 0; font-size: 0.96rem; font-weight: 600; color: rgba(15, 23, 42, 0.88); }
+      .manual-editor__array-item { border: 1px solid color-mix(in srgb, var(--brand, #00c2a8) 25%, transparent); border-radius: 20px; background: color-mix(in srgb, var(--bg-body, #f6faf9) 92%, transparent); box-shadow: 0 18px 44px rgba(12, 21, 32, 0.08); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+      .manual-editor__array-item-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 70%, transparent); padding-bottom: 10px; }
+      .manual-editor__array-item-title { margin: 0; font-size: 0.95rem; font-weight: 700; color: var(--fg, #0c1520); }
       .manual-editor__array-actions { display: flex; justify-content: flex-end; gap: 10px; }
-      .manual-editor__field { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 18px; border: 1px solid rgba(203, 213, 225, 0.65); background: rgba(255, 255, 255, 0.98); transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease; }
-      .manual-editor__field:hover { transform: translateY(-1px); box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12); }
-      .manual-editor__field:focus-within { border-color: rgba(79, 70, 229, 0.6); box-shadow: 0 24px 46px rgba(79, 70, 229, 0.16); background: rgba(248, 250, 252, 0.98); }
-      .manual-editor__field.has-error { border-color: rgba(220, 38, 38, 0.65); background: rgba(254, 226, 226, 0.95); box-shadow: 0 20px 40px rgba(220, 38, 38, 0.16); }
-      .manual-editor__label { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(71, 85, 105, 0.9); }
-      .manual-editor__input { width: 100%; border: 1px solid rgba(148, 163, 184, 0.45); border-radius: 14px; padding: 12px 16px; font-size: 0.96rem; line-height: 1.5; background: rgba(241, 245, 249, 0.9); color: inherit; transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease; }
-      .manual-editor__input:focus-visible { outline: none; border-color: rgba(79, 70, 229, 0.72); background: #fff; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.25); }
-      .manual-editor__input::placeholder { color: rgba(100, 116, 139, 0.7); }
+      .manual-editor__field { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 82%, transparent); background: var(--bg-surface, #ffffff); transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, background 160ms ease; }
+      .manual-editor__field:hover { transform: translateY(-1px); box-shadow: 0 18px 40px rgba(12, 21, 32, 0.08); }
+      .manual-editor__field:focus-within { border-color: color-mix(in srgb, var(--brand, #00c2a8) 62%, transparent); box-shadow: 0 22px 48px rgba(0, 194, 168, 0.18); background: color-mix(in srgb, var(--bg-body, #f6faf9) 96%, transparent); }
+      .manual-editor__field.has-error { border-color: color-mix(in srgb, var(--danger, #ff4d4d) 60%, transparent); background: color-mix(in srgb, #ffe5e5 85%, transparent); box-shadow: 0 22px 48px rgba(255, 77, 77, 0.18); }
+      .manual-editor__label { font-size: 0.76rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-2, #63727e); }
+      .manual-editor__input { width: 100%; border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 85%, transparent); border-radius: 12px; padding: 11px 14px; font-size: 0.95rem; line-height: 1.45; background: color-mix(in srgb, var(--bg-body, #f6faf9) 96%, transparent); color: inherit; transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease; }
+      .manual-editor__input:focus-visible { outline: none; border-color: color-mix(in srgb, var(--brand, #00c2a8) 65%, transparent); background: #ffffff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand, #00c2a8) 25%, transparent); }
+      .manual-editor__input::placeholder { color: color-mix(in srgb, var(--fg-2, #63727e) 70%, transparent); }
       .manual-editor__input--textarea { min-height: 110px; resize: vertical; }
       .manual-editor__input--select { height: 46px; }
-      .manual-editor__error { font-size: 0.78rem; color: rgba(220, 38, 38, 1); min-height: 1em; letter-spacing: 0.02em; }
-      .manual-editor__add { border: none; background: rgba(16, 185, 129, 0.22); color: #047857; border-radius: 999px; padding: 9px 20px; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
-      .manual-editor__add:hover { background: rgba(16, 185, 129, 0.3); transform: translateY(-1px); box-shadow: 0 16px 34px rgba(16, 185, 129, 0.22); }
-      .manual-editor__remove { border: none; background: rgba(239, 68, 68, 0.22); color: #b91c1c; border-radius: 999px; padding: 9px 20px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease; }
-      .manual-editor__remove:hover { background: rgba(239, 68, 68, 0.32); transform: translateY(-1px); box-shadow: 0 16px 34px rgba(239, 68, 68, 0.22); }
-      .vault-json-editor__footer { display: flex; justify-content: flex-end; gap: 16px; padding: clamp(22px, 4vw, 32px); border-top: 1px solid rgba(148, 163, 184, 0.26); background: rgba(248, 250, 252, 0.97); }
+      .manual-editor__input--month { letter-spacing: 0.08em; text-transform: uppercase; }
+      .manual-editor__error { font-size: 0.8rem; color: color-mix(in srgb, var(--danger, #ff4d4d) 75%, #7a1a1a); min-height: 1em; letter-spacing: 0.01em; }
+      .manual-editor__add,
+      .manual-editor__remove { border: none; border-radius: 999px; padding: 9px 20px; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease; }
+      .manual-editor__add { background: color-mix(in srgb, var(--brand, #00c2a8) 24%, white); color: color-mix(in srgb, var(--brand, #00c2a8) 78%, #0c1520); }
+      .manual-editor__add:hover { transform: translateY(-1px); box-shadow: 0 18px 38px rgba(0, 194, 168, 0.22); }
+      .manual-editor__remove { background: color-mix(in srgb, var(--danger, #ff4d4d) 22%, white); color: color-mix(in srgb, var(--danger, #ff4d4d) 72%, #7a1a1a); }
+      .manual-editor__remove:hover { transform: translateY(-1px); box-shadow: 0 18px 38px rgba(255, 77, 77, 0.18); }
+      .manual-editor__remove:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+      .vault-json-editor__footer { display: flex; justify-content: flex-end; gap: 16px; padding: clamp(22px, 3.4vw, 30px); border-top: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 80%, transparent); background: color-mix(in srgb, var(--bg-surface-2, #f9fcfb) 96%, transparent); }
       .vault-json-editor__footer button { min-width: 150px; border-radius: 16px; padding: 12px 24px; font-size: 0.98rem; font-weight: 600; border: none; cursor: pointer; transition: transform 150ms ease, box-shadow 160ms ease, background 150ms ease; }
-      .vault-json-editor__footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.85); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
-      .vault-json-editor__footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.12); transform: translateY(-1px); box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12); }
-      .vault-json-editor__footer .btn-primary { background: linear-gradient(135deg, #4f46e5, #8b5cf6); color: #fff; box-shadow: 0 28px 58px rgba(99, 102, 241, 0.38); }
-      .vault-json-editor__footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 32px 68px rgba(99, 102, 241, 0.46); }
-      .vault-json-editor__footer .btn-primary:disabled { opacity: 0.65; filter: grayscale(0.1); box-shadow: none; transform: none; }
-      .json-editor-section { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 20px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12); }
-      .json-editor-section__header { display: flex; flex-direction: column; gap: 8px; }
-      .json-editor-section__title { margin: 0; font-size: 1rem; font-weight: 600; }
-      .json-editor-section__description { margin: 0; font-size: 0.88rem; color: rgba(71, 85, 105, 0.88); }
-      .json-editor-list { display: flex; flex-direction: column; gap: 14px; }
-      .json-editor-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(120px, 0.7fr) minmax(200px, 1.2fr) auto; gap: 14px; align-items: flex-start; padding: 16px; border-radius: 16px; background: rgba(255, 255, 255, 0.96); border: 1px solid rgba(148, 163, 184, 0.22); transition: border-color 160ms ease, box-shadow 160ms ease; }
-      .json-editor-row.has-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(254, 226, 226, 0.94); }
-      .json-editor-row.is-required { border-color: rgba(99, 102, 241, 0.45); }
-      .json-editor-col { display: flex; flex-direction: column; gap: 6px; }
-      .json-editor-label { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(71, 85, 105, 0.9); }
-      .json-editor-input, .json-editor-select, .json-editor-textarea { width: 100%; border: 1px solid rgba(148, 163, 184, 0.4); border-radius: 12px; padding: 10px 14px; font-size: 0.94rem; line-height: 1.45; background: rgba(241, 245, 249, 0.92); color: inherit; transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease; }
-      .json-editor-input:focus-visible, .json-editor-select:focus-visible, .json-editor-textarea:focus-visible { outline: none; border-color: rgba(99, 102, 241, 0.65); background: #fff; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18); }
-      .json-editor-textarea { resize: vertical; min-height: 60px; }
-      .json-editor-select { height: 42px; }
-      .json-editor-remove { border: none; background: rgba(239, 68, 68, 0.2); color: #b91c1c; border-radius: 14px; padding: 9px 16px; font-size: 0.86rem; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
-      .json-editor-remove:hover { background: rgba(239, 68, 68, 0.28); transform: translateY(-1px); }
-      .json-editor-remove:disabled { opacity: 0.5; cursor: not-allowed; }
-      .json-editor-row__error { grid-column: 1 / -1; font-size: 0.82rem; color: rgba(220, 38, 38, 0.95); }
-      .json-editor-add { align-self: flex-start; border: none; background: rgba(99, 102, 241, 0.22); color: rgba(67, 56, 202, 1); border-radius: 999px; padding: 8px 18px; font-size: 0.86rem; cursor: pointer; transition: background 140ms ease, transform 140ms ease; }
-      .json-editor-add:hover { background: rgba(99, 102, 241, 0.3); transform: translateY(-1px); }
-      .json-editor-transaction { display: flex; flex-direction: column; gap: 14px; padding: 18px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 18px; background: rgba(255, 255, 255, 0.95); }
-      .json-editor-transaction__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-      .json-editor-transaction__title { margin: 0; font-size: 0.94rem; font-weight: 600; }
-      .json-editor-transaction-list { display: flex; flex-direction: column; gap: 12px; }
-      .json-editor-narrative { display: flex; flex-direction: column; gap: 12px; }
-      .json-editor-narrative-item { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: flex-start; padding: 16px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 16px; background: rgba(255, 255, 255, 0.95); transition: border-color 160ms ease, box-shadow 160ms ease; }
-      .json-editor-narrative-item.has-error { border-color: rgba(220, 38, 38, 0.45); background: rgba(254, 226, 226, 0.94); }
-      .json-editor-footer { display: flex; justify-content: flex-end; gap: 14px; padding: 18px 24px; border-top: 1px solid rgba(148, 163, 184, 0.24); background: rgba(248, 250, 252, 0.95); }
-      .json-editor-footer button { min-width: 130px; border-radius: 14px; padding: 10px 20px; font-size: 0.92rem; border: none; cursor: pointer; transition: transform 130ms ease, box-shadow 130ms ease; }
-      .json-editor-footer .btn-secondary { background: rgba(15, 23, 42, 0.08); color: rgba(15, 23, 42, 0.85); }
-      .json-editor-footer .btn-secondary:hover { background: rgba(15, 23, 42, 0.14); transform: translateY(-1px); }
-      .json-editor-footer .btn-primary { background: linear-gradient(135deg, #4f46e5, #8b5cf6); color: #fff; box-shadow: 0 20px 40px rgba(99, 102, 241, 0.32); }
-      .json-editor-footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 24px 48px rgba(99, 102, 241, 0.4); }
-      .json-editor-footer .btn-primary:disabled { opacity: 0.65; }
+      .vault-json-editor__footer .btn-secondary { background: color-mix(in srgb, var(--bg-body, #f6faf9) 90%, transparent); color: var(--fg, #0c1520); border: 1px solid color-mix(in srgb, var(--bd-hairline, #e3eee9) 85%, transparent); }
+      .vault-json-editor__footer .btn-secondary:hover { transform: translateY(-1px); box-shadow: 0 18px 34px rgba(12, 21, 32, 0.1); }
+      .vault-json-editor__footer .btn-primary { background: linear-gradient(135deg, color-mix(in srgb, var(--brand, #00c2a8) 85%, white 15%), color-mix(in srgb, var(--brand-hover, #00b39b) 80%, white 20%)); color: #ffffff; box-shadow: 0 26px 54px rgba(0, 194, 168, 0.35); }
+      .vault-json-editor__footer .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 32px 64px rgba(0, 194, 168, 0.4); }
+      .vault-json-editor__footer .btn-primary:disabled { opacity: 0.65; filter: saturate(0.6); box-shadow: none; transform: none; }
       @media (max-width: 1080px) {
-        .vault-json-editor__dialog { width: min(100%, 940px); }
-      }
-      @media (max-width: 960px) {
         .vault-json-editor__layout { grid-template-columns: 1fr; }
-        .vault-json-editor__aside { position: static; }
-        .vault-json-editor__main { order: 2; }
+        .vault-json-editor__aside { flex-direction: row; overflow: auto; }
+        .vault-json-editor__aside-card { min-width: 260px; }
       }
-      @media (max-width: 720px) {
+      @media (max-width: 900px) {
+        .vault-json-editor { padding: 0; }
         .vault-json-editor__dialog { width: 100%; max-height: 100vh; border-radius: 0; }
-        .vault-json-editor__header { padding: 24px 20px; border-radius: 0; }
-        .vault-json-editor__body { padding: 24px 20px 28px; }
-        .vault-json-editor__footer { padding: 20px; flex-direction: column; align-items: stretch; }
-        .vault-json-editor__footer button { width: 100%; }
-        .manual-editor__section { padding: 22px; }
-        .manual-editor__section-body { grid-template-columns: 1fr; }
+        .vault-json-editor__header { border-radius: 0; }
+        .vault-json-editor__body { padding: 24px 18px; }
+        .vault-json-editor__aside { flex-direction: column; }
       }
-      .viewer__file-alert { margin: 12px 0 0; padding: 14px 16px; border-radius: 14px; background: rgba(253, 186, 116, 0.24); border: 1px solid rgba(234, 88, 12, 0.32); font-size: 0.9rem; color: rgba(120, 53, 15, 0.95); display: flex; flex-direction: column; gap: 6px; }
+      @media (max-width: 640px) {
+        .vault-json-editor__main { padding: 20px 18px; }
+        .manual-editor__section-body { grid-template-columns: 1fr; }
+        .vault-json-editor__footer { flex-direction: column; }
+        .vault-json-editor__footer button { width: 100%; }
+      }
+      .viewer__file-alert { margin: 12px 0 0; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--warning, #ffa600) 18%, white); border: 1px solid color-mix(in srgb, var(--warning, #ffa600) 32%, transparent); color: color-mix(in srgb, var(--warning, #ffa600) 78%, #7c4a00); font-size: 0.9rem; display: flex; flex-direction: column; gap: 6px; }
       .viewer__file-alert strong { font-weight: 600; }
     `;
     document.head.appendChild(style);
@@ -1885,18 +1846,18 @@
     const title = document.createElement('h4');
     title.className = 'vault-json-editor__title';
     title.id = 'vault-json-editor-title';
-    title.textContent = 'Edit data';
+    title.textContent = 'Preview Data';
 
     const subtitle = document.createElement('p');
     subtitle.className = 'vault-json-editor__subtitle';
-    subtitle.textContent = 'Structured manual data entry for this document.';
+    subtitle.textContent = 'Review and fine-tune the extracted fields for this document.';
 
     titleGroup.append(title, subtitle);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'vault-json-editor__close';
-    closeBtn.setAttribute('aria-label', 'Close editor');
+    closeBtn.setAttribute('aria-label', 'Close data preview');
     closeBtn.textContent = '×';
 
     const body = document.createElement('div');
@@ -1966,11 +1927,11 @@
 
     const guidanceTitle = document.createElement('h6');
     guidanceTitle.className = 'vault-json-editor__aside-title';
-    guidanceTitle.textContent = 'Manual entry tips';
+    guidanceTitle.textContent = 'Review checklist';
 
     const guidanceCopy = document.createElement('p');
     guidanceCopy.className = 'vault-json-editor__aside-description';
-    guidanceCopy.textContent = 'Cross-check key totals and statement dates before saving. Manual updates refresh your analytics instantly.';
+    guidanceCopy.textContent = 'Compare totals, statement periods, and key identifiers with the source document before saving any changes.';
 
     guidanceCard.append(guidanceTitle, guidanceCopy);
     aside.append(metaCard, guidanceCard);
@@ -2097,7 +2058,7 @@
       manualEditorSections.innerHTML = '';
     }
     if (manualEditorSubtitle) {
-      manualEditorSubtitle.textContent = 'Structured manual data entry for this document.';
+      manualEditorSubtitle.textContent = 'Review and fine-tune the extracted fields for this document.';
     }
     if (manualEditorMeta) {
       manualEditorMeta.hidden = true;
@@ -2124,10 +2085,10 @@
     }
   }
 
-  async function openManualJsonEditor(file, trigger) {
+  async function openDataPreview(file, trigger) {
     const docId = resolveDocId(file);
     if (!docId) {
-      window.alert('Unable to edit this document because it is missing an identifier.');
+      window.alert('Unable to preview this document because it is missing an identifier.');
       return;
     }
 
@@ -2144,7 +2105,7 @@
 
     manualEditorForm.hidden = true;
     manualEditorLoading.hidden = false;
-    manualEditorLoading.textContent = 'Loading document data…';
+    manualEditorLoading.textContent = 'Fetching structured data…';
     if (manualEditorMessage) {
       manualEditorMessage.hidden = true;
       manualEditorMessage.textContent = '';
@@ -2155,7 +2116,7 @@
     }
 
     if (manualEditorSubtitle) {
-      manualEditorSubtitle.textContent = 'Fetching structured data…';
+      manualEditorSubtitle.textContent = 'Syncing fields from Docupipe…';
     }
     if (manualEditorMeta) {
       manualEditorMeta.hidden = true;
@@ -2180,23 +2141,24 @@
       const { data, meta, processing, schema } = await fetchManualJsonPayload(docId);
       manualEditorSchemaKey = resolveManualEditorSchema(file, schema, meta);
       if (!manualEditorSchemaKey || !MANUAL_EDITOR_SCHEMAS[manualEditorSchemaKey]) {
-        throw new Error('Manual editing is not available for this document type yet.');
+        throw new Error('Data preview is not available for this document type yet.');
       }
       manualEditorFormData = mapManualPayloadToForm(manualEditorSchemaKey, data);
       manualEditorRequired = ensureObject(meta?.requiresManualFields);
       renderManualEditorForm(manualEditorFormData, manualEditorRequired, processing);
       if (manualEditorTitle) {
-        manualEditorTitle.textContent = file?.title ? `${file.title} — Edit data` : 'Edit document data';
+        manualEditorTitle.textContent = file?.title ? `${file.title} — Preview Data` : 'Preview Data';
       }
       if (manualEditorMessage) {
         const requires = Array.isArray(processing?.requiresManualFields)
           ? processing.requiresManualFields.filter((field) => typeof field === 'string' && field.trim())
           : [];
         if (requires.length) {
-          manualEditorMessage.innerHTML = `<strong>Action needed:</strong> Add the missing values for ${requires.join(', ')} so your analytics stay accurate.`;
+          manualEditorMessage.innerHTML = `<strong>Additional review required:</strong> Add values for ${requires.join(', ')} so analytics stay accurate.`;
           manualEditorMessage.hidden = false;
         } else {
-          manualEditorMessage.hidden = true;
+          manualEditorMessage.hidden = false;
+          manualEditorMessage.innerHTML = '<strong>Review extracted data:</strong> Validate the values below before saving to keep dashboards trustworthy.';
         }
       }
       manualEditorLoading.hidden = true;
@@ -2213,7 +2175,7 @@
         } catch {}
       });
     } catch (error) {
-      manualEditorLoading.textContent = error.message || 'Unable to load document data.';
+      manualEditorLoading.textContent = error.message || 'Unable to load the data preview right now.';
       manualEditorForm.hidden = true;
       modal.classList.add('is-visible');
       modal.setAttribute('aria-hidden', 'false');
@@ -2226,7 +2188,7 @@
     const response = await apiFetch(`/json?docId=${encodeURIComponent(docId)}`, { cache: 'no-store' });
     if (response.status === 401) {
       handleUnauthorised('Your session has expired. Please sign in again.');
-      throw new Error('Please sign in again to edit this document.');
+      throw new Error('Please sign in again to preview this document.');
     }
     const payload = await response.json().catch(() => null);
     if (response.ok && payload?.ok) {
@@ -2273,6 +2235,102 @@
     };
   }
 
+  function normalisePathToken(token) {
+    return String(token || '')
+      .replace(/[^a-z0-9]/gi, '')
+      .toLowerCase();
+  }
+
+  function getLooseValue(source, path) {
+    if (!source || !path) return undefined;
+    const tokens = String(path)
+      .replace(/\[(\d+)\]/g, '.$1')
+      .split('.')
+      .filter(Boolean);
+    let current = source;
+    for (const token of tokens) {
+      if (current == null) return undefined;
+      if (Array.isArray(current)) {
+        const index = Number(token);
+        if (Number.isInteger(index) && index >= 0 && index < current.length) {
+          current = current[index];
+          continue;
+        }
+        return undefined;
+      }
+      if (typeof current !== 'object') return undefined;
+      let next = current[token];
+      if (typeof next === 'undefined') {
+        const targetKey = normalisePathToken(token);
+        for (const key of Object.keys(current)) {
+          if (normalisePathToken(key) === targetKey) {
+            next = current[key];
+            break;
+          }
+        }
+      }
+      if (typeof next === 'undefined') return undefined;
+      current = next;
+    }
+    return current;
+  }
+
+  function looseGet(source, ...paths) {
+    for (const path of paths) {
+      if (!path && path !== 0) continue;
+      const value = getLooseValue(source, path);
+      if (typeof value !== 'undefined') return value;
+    }
+    return undefined;
+  }
+
+  function isNonEmptyObject(value) {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
+  }
+
+  function pickObjectLoose(...candidates) {
+    for (const candidate of candidates) {
+      if (isNonEmptyObject(candidate)) return candidate;
+    }
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+        return candidate;
+      }
+    }
+    return {};
+  }
+
+  function pickArrayLoose(...candidates) {
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate) && candidate.length) return candidate;
+    }
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) return candidate;
+    }
+    return [];
+  }
+
+  function firstDefined(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== '') {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  function normaliseNumericValue(value) {
+    if (value == null || value === '') return '';
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const cleaned = value.replace(/[£$,]/g, '').replace(/\s+/g, '');
+      const number = Number(cleaned);
+      if (Number.isFinite(number)) return number;
+      return value.trim();
+    }
+    return value;
+  }
+
   function renderManualEditorForm(data = {}, required = {}, processing = {}) {
     if (!manualEditorSections || !manualEditorForm) return;
     manualEditorSections.innerHTML = '';
@@ -2281,7 +2339,7 @@
     if (!schema) {
       const unavailable = document.createElement('p');
       unavailable.className = 'manual-editor__empty';
-      unavailable.textContent = 'Manual editing is not available for this document yet.';
+      unavailable.textContent = 'Data preview is not available for this document yet.';
       manualEditorSections.appendChild(unavailable);
       manualEditorForm.hidden = true;
       if (manualEditorMessage) {
@@ -2289,7 +2347,7 @@
         manualEditorMessage.textContent = unavailable.textContent;
       }
       if (manualEditorSubtitle) {
-        manualEditorSubtitle.textContent = 'Manual editing is not available for this document yet.';
+        manualEditorSubtitle.textContent = 'Data preview is not available for this document yet.';
       }
       if (manualEditorMeta) {
         manualEditorMeta.hidden = true;
@@ -2299,7 +2357,7 @@
 
     if (manualEditorSubtitle) {
       const schemaLabel = schema.title || 'this document';
-      manualEditorSubtitle.textContent = `Manual entry for ${schemaLabel}`;
+      manualEditorSubtitle.textContent = `Previewing structured data for ${schemaLabel}`;
     }
 
     if (manualEditorMetaDoc || manualEditorMetaSchema) {
@@ -2330,23 +2388,23 @@
       : [];
     if (manualEditorMessage) {
       if (requiresManual.length) {
-        manualEditorMessage.innerHTML = `<strong>Manual entry required:</strong> Add values for ${requiresManual.join(', ')}.`;
+        manualEditorMessage.innerHTML = `<strong>Additional review required:</strong> Add values for ${requiresManual.join(', ')} so analytics stay accurate.`;
         manualEditorMessage.hidden = false;
-      } else {
-        manualEditorMessage.hidden = true;
-        manualEditorMessage.textContent = '';
+      } else if (!manualEditorMessage.innerHTML) {
+        manualEditorMessage.innerHTML = '<strong>Review extracted data:</strong> Validate the values below before saving to keep dashboards trustworthy.';
+        manualEditorMessage.hidden = false;
       }
     }
 
     if (manualEditorMetaStatus) {
       if (requiresManual.length) {
-        manualEditorMetaStatus.textContent = `${requiresManual.length} manual field${requiresManual.length === 1 ? '' : 's'} pending`;
+        manualEditorMetaStatus.textContent = `${requiresManual.length} field${requiresManual.length === 1 ? '' : 's'} need attention`;
         manualEditorMetaStatus.dataset.state = 'warning';
         if (manualEditorMetaStatusContainer) {
           manualEditorMetaStatusContainer.dataset.state = 'warning';
         }
       } else {
-        manualEditorMetaStatus.textContent = 'All manual fields captured';
+        manualEditorMetaStatus.textContent = 'All fields ready for analytics';
         manualEditorMetaStatus.dataset.state = 'success';
         if (manualEditorMetaStatusContainer) {
           manualEditorMetaStatusContainer.dataset.state = 'success';
@@ -2500,6 +2558,15 @@
     return wrapper;
   }
 
+  function formatNumericDisplay(value, format) {
+    if (value == null || value === '') return '';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return String(value ?? '');
+    if (format === 'integer') return String(Math.trunc(number));
+    if (format === 'currency') return number.toFixed(2);
+    return String(number);
+  }
+
   function createManualEditorInput(field, value, fullPath, id, options = {}) {
     const type = field.type || 'text';
     let control;
@@ -2509,11 +2576,20 @@
       control.rows = field.rows || 3;
       control.value = value != null ? String(value) : '';
     } else if (type === 'number') {
+      const format = field.format || 'currency';
       control = document.createElement('input');
-      control.type = 'number';
-      control.step = '0.01';
+      control.type = 'text';
       control.className = 'manual-editor__input';
-      control.value = Number.isFinite(value) ? String(value) : value != null ? String(value) : '';
+      control.inputMode = format === 'integer' ? 'numeric' : 'decimal';
+      if (format === 'integer') {
+        control.pattern = '^-?\\d+$';
+        if (!field.placeholder) control.placeholder = '0';
+      } else {
+        control.pattern = format === 'currency' ? '^-?\\d*(?:\\.\\d{0,2})?$' : '^-?\\d*(?:\\.\\d{0,4})?$';
+        if (!field.placeholder) control.placeholder = format === 'currency' ? '0.00' : '0.0';
+      }
+      control.value = formatNumericDisplay(value, format);
+      control.dataset.fieldFormat = format;
     } else if (type === 'date') {
       control = document.createElement('input');
       control.type = 'date';
@@ -2521,9 +2597,18 @@
       control.value = formatDateInput(value);
     } else if (type === 'month') {
       control = document.createElement('input');
-      control.type = 'month';
-      control.className = 'manual-editor__input';
-      control.value = formatMonthInput(value);
+      control.type = 'text';
+      control.className = 'manual-editor__input manual-editor__input--month';
+      control.inputMode = 'numeric';
+      control.pattern = '^(0[1-9]|1[0-2])\\/\\d{4}$';
+      control.maxLength = 7;
+      if (!field.placeholder) control.placeholder = 'MM/YYYY';
+      const monthKey = formatMonthInput(value);
+      control.value = monthKey ? toDisplayMonth(monthKey) || '' : '';
+      control.addEventListener('blur', () => {
+        const key = formatMonthInput(control.value);
+        control.value = key ? toDisplayMonth(key) || '' : control.value;
+      });
     } else if (type === 'select') {
       control = document.createElement('select');
       control.className = 'manual-editor__input manual-editor__input--select';
@@ -2719,13 +2804,28 @@
     }
 
     if (type === 'number') {
-      const number = Number(raw);
-      if (!Number.isFinite(number)) {
-        showManualEditorFieldError(fullPath, 'Enter a valid monetary amount.');
-        errors.push({ path: fullPath, message: 'Enter a valid monetary amount.' });
+      const format = input.dataset.fieldFormat || field.format || 'decimal';
+      const normalised = raw.replace(/[\s,]+/g, '');
+      if (format === 'integer') {
+        if (!/^-?\d+$/.test(normalised)) {
+          showManualEditorFieldError(fullPath, 'Enter a whole number.');
+          errors.push({ path: fullPath, message: 'Enter a whole number.' });
+          return undefined;
+        }
+        return Number(normalised);
+      }
+      const pattern = format === 'currency'
+        ? /^-?(?:\d+|\d*\.\d{1,2})$/
+        : /^-?(?:\d+|\d*\.\d{1,4})$/;
+      if (!pattern.test(normalised)) {
+        const message = format === 'currency'
+          ? 'Enter a valid currency amount (e.g. 1234.56).'
+          : 'Enter a valid number.';
+        showManualEditorFieldError(fullPath, message);
+        errors.push({ path: fullPath, message });
         return undefined;
       }
-      return number;
+      return Number(normalised);
     }
 
     if (type === 'date') {
@@ -3243,99 +3343,704 @@
   }
 
   function mapBankStatementPayloadToForm(json) {
-    const metadata = ensureObject(json.metadata);
-    const metrics = ensureObject(json.metrics);
-    const statement = ensureObject(metadata.statement);
-    const period = ensureObject(statement.period);
-    const balances = ensureObject(metadata.balances);
-    const interest = ensureObject(metadata.interestInformation);
-    const additional = ensureObject(metadata.additionalInformation);
+    const payload = ensureObject(json);
+    const metadataSource = pickObjectLoose(
+      payload.metadata,
+      looseGet(payload, 'metadata'),
+      looseGet(payload, 'data.metadata'),
+      payload.data,
+      payload
+    );
+    const metricsSource = pickObjectLoose(
+      payload.metrics,
+      looseGet(payload, 'metrics'),
+      looseGet(payload, 'data.metrics'),
+      looseGet(metadataSource, 'metrics')
+    );
+    const institutionSource = pickObjectLoose(
+      looseGet(metadataSource, 'institution'),
+      looseGet(metadataSource, 'institutionDetails'),
+      looseGet(metadataSource, 'bank')
+    );
+    const contactSource = pickObjectLoose(
+      looseGet(institutionSource, 'contactInfo'),
+      looseGet(institutionSource, 'contactInformation'),
+      looseGet(institutionSource, 'contact')
+    );
+    const accountSource = pickObjectLoose(
+      looseGet(metadataSource, 'account'),
+      looseGet(metadataSource, 'accountDetails')
+    );
+    const holderAddressSource = pickObjectLoose(
+      looseGet(accountSource, 'holderAddress'),
+      looseGet(accountSource, 'address'),
+      looseGet(accountSource, 'ownerAddress'),
+      looseGet(accountSource, 'holderAddressDetails')
+    );
+    const statementSource = pickObjectLoose(
+      looseGet(metadataSource, 'statement'),
+      looseGet(metadataSource, 'statementInfo'),
+      looseGet(metadataSource, 'statementDetails'),
+      metadataSource
+    );
+    const statementPeriodSource = pickObjectLoose(
+      looseGet(statementSource, 'period'),
+      looseGet(metadataSource, 'period'),
+      looseGet(metricsSource, 'period')
+    );
+    const balancesSource = pickObjectLoose(
+      looseGet(metadataSource, 'balances'),
+      looseGet(metricsSource, 'balances')
+    );
+    const averageBalancesSource = pickObjectLoose(
+      looseGet(balancesSource, 'averageBalances'),
+      looseGet(metricsSource, 'averageBalances')
+    );
+    const interestSource = pickObjectLoose(
+      looseGet(metadataSource, 'interestInformation'),
+      looseGet(metadataSource, 'interestInfo'),
+      looseGet(metadataSource, 'interest')
+    );
+    const interestPaidSource = pickObjectLoose(
+      looseGet(interestSource, 'interestPaid'),
+      looseGet(interestSource, 'interestPaidDetails'),
+      looseGet(interestSource, 'paidInterest')
+    );
+    const additionalSource = pickObjectLoose(
+      looseGet(metadataSource, 'additionalInformation'),
+      looseGet(metadataSource, 'additionalInfo'),
+      looseGet(metadataSource, 'supplementaryInformation'),
+      looseGet(metadataSource, 'extras')
+    );
+    const surveySource = pickObjectLoose(
+      looseGet(additionalSource, 'serviceQualitySurvey'),
+      looseGet(additionalSource, 'serviceQuality'),
+      looseGet(additionalSource, 'survey')
+    );
+    const rawTransactions = pickArrayLoose(
+      payload.transactions,
+      looseGet(payload, 'transactions'),
+      looseGet(metadataSource, 'transactions'),
+      looseGet(metricsSource, 'transactions')
+    );
+    const newsSource = pickArrayLoose(
+      looseGet(additionalSource, 'news'),
+      looseGet(additionalSource, 'newsItems'),
+      looseGet(additionalSource, 'notices')
+    );
+
+    const periodStartRaw = firstDefined(
+      looseGet(statementPeriodSource, 'startDate'),
+      looseGet(statementPeriodSource, 'start'),
+      looseGet(statementPeriodSource, 'from'),
+      looseGet(metadataSource, 'period.start'),
+      looseGet(metricsSource, 'period.start')
+    );
+    const periodEndRaw = firstDefined(
+      looseGet(statementPeriodSource, 'endDate'),
+      looseGet(statementPeriodSource, 'end'),
+      looseGet(statementPeriodSource, 'to'),
+      looseGet(metadataSource, 'period.end'),
+      looseGet(metricsSource, 'period.end')
+    );
+    const periodMonthRaw = firstDefined(
+      looseGet(statementPeriodSource, 'Date'),
+      looseGet(statementPeriodSource, 'month'),
+      looseGet(statementPeriodSource, 'statementMonth'),
+      looseGet(statementPeriodSource, 'display'),
+      looseGet(metadataSource, 'displayMonth'),
+      looseGet(metadataSource, 'documentMonth'),
+      looseGet(metricsSource, 'period.month'),
+      looseGet(metricsSource, 'period.display')
+    );
+    const periodMonthKey = formatMonthInput(periodMonthRaw);
+
+    const institution = {
+      name: firstDefined(
+        looseGet(institutionSource, 'name'),
+        looseGet(metadataSource, 'institutionName')
+      ) || '',
+      address: firstDefined(
+        looseGet(institutionSource, 'address'),
+        looseGet(institutionSource, 'branchAddress'),
+        looseGet(metadataSource, 'institutionAddress')
+      ) || '',
+      swiftBic: firstDefined(
+        looseGet(institutionSource, 'swiftBic'),
+        looseGet(institutionSource, 'swift'),
+        looseGet(institutionSource, 'bic')
+      ) || '',
+      contactInfo: {
+        telephone: firstDefined(
+          looseGet(contactSource, 'telephone'),
+          looseGet(contactSource, 'phone'),
+          looseGet(contactSource, 'phoneNumber')
+        ) || '',
+        website: firstDefined(
+          looseGet(contactSource, 'website'),
+          looseGet(contactSource, 'url')
+        ) || '',
+      },
+    };
+
+    const account = {
+      holderName: firstDefined(
+        looseGet(accountSource, 'holderName'),
+        looseGet(accountSource, 'accountHolder'),
+        looseGet(accountSource, 'name')
+      ) || '',
+      holderAddress: {
+        street: firstDefined(
+          looseGet(holderAddressSource, 'street'),
+          looseGet(holderAddressSource, 'line1'),
+          looseGet(holderAddressSource, 'addressLine1')
+        ) || '',
+        city: firstDefined(
+          looseGet(holderAddressSource, 'city'),
+          looseGet(holderAddressSource, 'town')
+        ) || '',
+        postalCode: firstDefined(
+          looseGet(holderAddressSource, 'postalCode'),
+          looseGet(holderAddressSource, 'postcode'),
+          looseGet(holderAddressSource, 'zip')
+        ) || '',
+      },
+      accountNumber: firstDefined(
+        looseGet(accountSource, 'accountNumber'),
+        looseGet(accountSource, 'number')
+      ) || '',
+      sortCode: firstDefined(
+        looseGet(accountSource, 'sortCode'),
+        looseGet(accountSource, 'sortcode'),
+        looseGet(accountSource, 'routingNumber')
+      ) || '',
+      iban: firstDefined(
+        looseGet(accountSource, 'iban'),
+        looseGet(accountSource, 'ibanNumber')
+      ) || '',
+      type: firstDefined(
+        looseGet(accountSource, 'type'),
+        looseGet(accountSource, 'accountType')
+      ) || '',
+      currency: firstDefined(
+        looseGet(accountSource, 'currency'),
+        looseGet(metadataSource, 'currency'),
+        looseGet(metricsSource, 'currency')
+      ) || '',
+    };
+
+    const statement = {
+      statementNumber: firstDefined(
+        looseGet(statementSource, 'statementNumber'),
+        looseGet(statementSource, 'number'),
+        looseGet(statementSource, 'id')
+      ) || '',
+      period: {
+        startDate: formatDateInput(
+          firstDefined(
+            periodStartRaw,
+            looseGet(metadataSource, 'period.start'),
+            looseGet(metricsSource, 'period.start')
+          )
+        ),
+        endDate: formatDateInput(
+          firstDefined(
+            periodEndRaw,
+            looseGet(metadataSource, 'period.end'),
+            looseGet(metricsSource, 'period.end')
+          )
+        ),
+        Date: periodMonthKey ? toDisplayMonth(periodMonthKey) || '' : '',
+      },
+    };
+
+    const balances = {
+      openingBalance: normaliseNumericValue(
+        firstDefined(
+          looseGet(balancesSource, 'openingBalance'),
+          looseGet(metricsSource, 'openingBalance')
+        )
+      ),
+      closingBalance: normaliseNumericValue(
+        firstDefined(
+          looseGet(balancesSource, 'closingBalance'),
+          looseGet(metricsSource, 'closingBalance')
+        )
+      ),
+      totalMoneyIn: normaliseNumericValue(
+        firstDefined(
+          looseGet(balancesSource, 'totalMoneyIn'),
+          looseGet(balancesSource, 'totalIn'),
+          looseGet(metricsSource, 'totalMoneyIn')
+        )
+      ),
+      totalMoneyOut: normaliseNumericValue(
+        firstDefined(
+          looseGet(balancesSource, 'totalMoneyOut'),
+          looseGet(balancesSource, 'totalOut'),
+          looseGet(metricsSource, 'totalMoneyOut')
+        )
+      ),
+      overdraftLimit: normaliseNumericValue(
+        firstDefined(
+          looseGet(balancesSource, 'overdraftLimit'),
+          looseGet(balancesSource, 'limit'),
+          looseGet(metricsSource, 'overdraftLimit')
+        )
+      ),
+      averageBalances: {
+        averageCreditBalance: normaliseNumericValue(
+          firstDefined(
+            looseGet(averageBalancesSource, 'averageCreditBalance'),
+            looseGet(averageBalancesSource, 'credit'),
+            looseGet(metricsSource, 'averageBalances.averageCreditBalance')
+          )
+        ),
+        averageDebitBalance: normaliseNumericValue(
+          firstDefined(
+            looseGet(averageBalancesSource, 'averageDebitBalance'),
+            looseGet(averageBalancesSource, 'debit'),
+            looseGet(metricsSource, 'averageBalances.averageDebitBalance')
+          )
+        ),
+      },
+    };
+
+    const interestInformation = {
+      creditInterestRate: firstDefined(
+        looseGet(interestSource, 'creditInterestRate'),
+        looseGet(interestSource, 'creditRate')
+      ) || '',
+      overdraftInterestRate: firstDefined(
+        looseGet(interestSource, 'overdraftInterestRate'),
+        looseGet(interestSource, 'overdraftRate')
+      ) || '',
+      interestPaid: {
+        date: formatDateInput(
+          firstDefined(
+            looseGet(interestPaidSource, 'date'),
+            looseGet(interestPaidSource, 'paidDate')
+          )
+        ),
+        description: firstDefined(
+          looseGet(interestPaidSource, 'description'),
+          looseGet(interestPaidSource, 'label'),
+          looseGet(interestPaidSource, 'note')
+        ) || '',
+        amount: normaliseNumericValue(
+          firstDefined(
+            looseGet(interestPaidSource, 'amount'),
+            looseGet(interestPaidSource, 'value')
+          )
+        ),
+      },
+    };
+
+    const transactions = rawTransactions.map((tx) => {
+      const entry = ensureObject(tx);
+      const amountValue = normaliseNumericValue(looseGet(entry, 'amount'));
+      let moneyInValue = normaliseNumericValue(
+        firstDefined(
+          looseGet(entry, 'moneyIn'),
+          looseGet(entry, 'credit'),
+          looseGet(entry, 'creditAmount'),
+          looseGet(entry, 'amountIn'),
+          looseGet(entry, 'incoming')
+        )
+      );
+      if (moneyInValue === '' && typeof amountValue === 'number' && amountValue > 0) {
+        moneyInValue = amountValue;
+      }
+      let moneyOutValue = normaliseNumericValue(
+        firstDefined(
+          looseGet(entry, 'moneyOut'),
+          looseGet(entry, 'debit'),
+          looseGet(entry, 'debitAmount'),
+          looseGet(entry, 'amountOut'),
+          looseGet(entry, 'outgoing')
+        )
+      );
+      if (moneyOutValue === '' && typeof amountValue === 'number' && amountValue < 0) {
+        moneyOutValue = Math.abs(amountValue);
+      }
+      const balanceValue = normaliseNumericValue(
+        firstDefined(
+          looseGet(entry, 'balance'),
+          looseGet(entry, 'runningBalance'),
+          looseGet(entry, 'closingBalance')
+        )
+      );
+      return {
+        date: formatDateInput(
+          firstDefined(
+            looseGet(entry, 'date'),
+            looseGet(entry, 'transactionDate'),
+            looseGet(entry, 'postedDate')
+          )
+        ),
+        description: (
+          firstDefined(
+            looseGet(entry, 'description'),
+            looseGet(entry, 'details'),
+            looseGet(entry, 'narrative'),
+            looseGet(entry, 'note')
+          ) || ''
+        ).toString(),
+        moneyIn: moneyInValue,
+        moneyOut: moneyOutValue,
+        balance: balanceValue,
+        transactionType: firstDefined(
+          looseGet(entry, 'transactionType'),
+          looseGet(entry, 'type'),
+          looseGet(entry, 'category')
+        ) || '',
+        paymentMethod: firstDefined(
+          looseGet(entry, 'paymentMethod'),
+          looseGet(entry, 'method')
+        ) || '',
+        counterparty: firstDefined(
+          looseGet(entry, 'counterparty'),
+          looseGet(entry, 'counterParty'),
+          looseGet(entry, 'partner')
+        ) || '',
+        reference: firstDefined(
+          looseGet(entry, 'reference'),
+          looseGet(entry, 'ref'),
+          looseGet(entry, 'id')
+        ) || '',
+      };
+    });
+
+    const additionalInformation = {
+      fscsInformation: firstDefined(
+        looseGet(additionalSource, 'fscsInformation'),
+        looseGet(additionalSource, 'fscs'),
+        looseGet(additionalSource, 'fscsDetails')
+      ) || '',
+      serviceQualitySurvey: {
+        region: firstDefined(
+          looseGet(surveySource, 'region'),
+          looseGet(surveySource, 'area')
+        ) || '',
+        ranking: firstDefined(
+          looseGet(surveySource, 'ranking'),
+          looseGet(surveySource, 'position')
+        ) || '',
+        score: firstDefined(
+          looseGet(surveySource, 'score'),
+          looseGet(surveySource, 'result')
+        ) || '',
+      },
+      news: newsSource
+        .map((item) => {
+          const entry = ensureObject(item);
+          const title = firstDefined(
+            looseGet(entry, 'title'),
+            looseGet(entry, 'headline')
+          ) || '';
+          const content = firstDefined(
+            looseGet(entry, 'content'),
+            looseGet(entry, 'body'),
+            looseGet(entry, 'summary')
+          ) || '';
+          return { title, content };
+        })
+        .filter((item) => item.title || item.content),
+    };
 
     return {
-      institution: ensureObject(metadata.institution),
-      account: ensureObject(metadata.account),
-      statement: {
-        statementNumber: statement.statementNumber || '',
-        period: {
-          startDate: formatDateInput(period.startDate || metadata.period?.start || metrics.period?.start),
-          endDate: formatDateInput(period.endDate || metadata.period?.end || metrics.period?.end),
-          Date: formatMonthInput(period.Date || metadata.displayMonth || metadata.documentMonth || metrics.period?.month),
-        },
-      },
-      balances: {
-        openingBalance: balances.openingBalance ?? metrics.openingBalance ?? '',
-        closingBalance: balances.closingBalance ?? metrics.closingBalance ?? '',
-        totalMoneyIn: balances.totalMoneyIn ?? metrics.totalMoneyIn ?? '',
-        totalMoneyOut: balances.totalMoneyOut ?? metrics.totalMoneyOut ?? '',
-        overdraftLimit: balances.overdraftLimit ?? metrics.overdraftLimit ?? '',
-        averageBalances: ensureObject(balances.averageBalances || metrics.averageBalances),
-      },
-      interestInformation: {
-        creditInterestRate: interest.creditInterestRate || '',
-        overdraftInterestRate: interest.overdraftInterestRate || '',
-        interestPaid: {
-          date: formatDateInput(interest.interestPaid?.date),
-          description: interest.interestPaid?.description || '',
-          amount: interest.interestPaid?.amount ?? '',
-        },
-      },
-      transactions: Array.isArray(json.transactions)
-        ? json.transactions.map((tx) => ({
-            date: formatDateInput(tx.date),
-            description: tx.description || '',
-            moneyIn: tx.moneyIn ?? (tx.amount > 0 ? tx.amount : ''),
-            moneyOut: tx.moneyOut ?? (tx.amount < 0 ? Math.abs(tx.amount) : ''),
-            balance: tx.balance ?? '',
-            transactionType: tx.transactionType || '',
-            paymentMethod: tx.paymentMethod || '',
-            counterparty: tx.counterparty || '',
-            reference: tx.reference || '',
-          }))
-        : [],
-      additionalInformation: {
-        fscsInformation: additional.fscsInformation || '',
-        serviceQualitySurvey: ensureObject(additional.serviceQualitySurvey),
-        news: Array.isArray(additional.news)
-          ? additional.news.map((item) => ({ title: item.title || '', content: item.content || '' }))
-          : [],
-      },
+      institution,
+      account,
+      statement,
+      balances,
+      interestInformation,
+      transactions,
+      additionalInformation,
     };
   }
 
   function mapPayslipPayloadToForm(json) {
-    const metadata = ensureObject(json.metadata);
-    const totals = ensureObject(metadata.totals);
-    const period = ensureObject(metadata.period);
+    const payload = ensureObject(json);
+    const metadataSource = pickObjectLoose(
+      payload.metadata,
+      looseGet(payload, 'metadata'),
+      looseGet(payload, 'data.metadata'),
+      payload.data,
+      payload
+    );
+    const metricsSource = pickObjectLoose(
+      payload.metrics,
+      looseGet(payload, 'metrics'),
+      looseGet(payload, 'data.metrics'),
+      looseGet(metadataSource, 'metrics')
+    );
+    const employeeSource = pickObjectLoose(
+      looseGet(metadataSource, 'employee'),
+      looseGet(metadataSource, 'employeeDetails'),
+      looseGet(metadataSource, 'employeeInfo')
+    );
+    const employeeAddressSource = pickObjectLoose(
+      looseGet(employeeSource, 'address'),
+      looseGet(employeeSource, 'contactAddress'),
+      looseGet(employeeSource, 'homeAddress')
+    );
+    const employerSource = pickObjectLoose(
+      looseGet(metadataSource, 'employer'),
+      looseGet(metadataSource, 'employerDetails'),
+      looseGet(metadataSource, 'company')
+    );
+    const totalsSource = pickObjectLoose(
+      looseGet(metadataSource, 'totals'),
+      looseGet(metricsSource, 'totals')
+    );
+    const periodSource = pickObjectLoose(
+      looseGet(metadataSource, 'period'),
+      looseGet(metricsSource, 'period')
+    );
+    const earningsSource = pickArrayLoose(
+      looseGet(metadataSource, 'earnings'),
+      looseGet(metricsSource, 'earnings'),
+      looseGet(payload, 'earnings')
+    );
+    const deductionsSource = pickArrayLoose(
+      looseGet(metadataSource, 'deductions'),
+      looseGet(metricsSource, 'deductions'),
+      looseGet(payload, 'deductions')
+    );
+    const metaSource = pickObjectLoose(
+      looseGet(metadataSource, 'meta'),
+      looseGet(payload, 'meta')
+    );
+
+    const periodMonthRaw = firstDefined(
+      looseGet(periodSource, 'Date'),
+      looseGet(periodSource, 'month'),
+      looseGet(metricsSource, 'payDate'),
+      looseGet(metadataSource, 'documentMonth'),
+      looseGet(payload, 'documentMonth')
+    );
+    const periodMonthKey = formatMonthInput(periodMonthRaw);
+
+    const periodStartRaw = firstDefined(
+      looseGet(periodSource, 'start'),
+      looseGet(metricsSource, 'period.start'),
+      looseGet(periodSource, 'from')
+    );
+    const periodEndRaw = firstDefined(
+      looseGet(periodSource, 'end'),
+      looseGet(metricsSource, 'period.end'),
+      looseGet(periodSource, 'to')
+    );
+    const payFrequency = firstDefined(
+      looseGet(periodSource, 'payFrequency'),
+      looseGet(metricsSource, 'period.payFrequency')
+    );
+
+    const employee = {
+      fullName: firstDefined(
+        looseGet(employeeSource, 'fullName'),
+        looseGet(employeeSource, 'name')
+      ) || '',
+      employeeId: firstDefined(
+        looseGet(employeeSource, 'employeeId'),
+        looseGet(employeeSource, 'id'),
+        looseGet(employeeSource, 'employeeNumber')
+      ) || '',
+      niNumber: firstDefined(
+        looseGet(employeeSource, 'niNumber'),
+        looseGet(employeeSource, 'nin'),
+        looseGet(employeeSource, 'nationalInsurance')
+      ) || '',
+      taxCode: firstDefined(
+        looseGet(employeeSource, 'taxCode'),
+        looseGet(employeeSource, 'taxcode')
+      ) || '',
+      niCategory: firstDefined(
+        looseGet(employeeSource, 'niCategory'),
+        looseGet(employeeSource, 'nationalInsuranceCategory')
+      ) || '',
+      address: {
+        street: firstDefined(
+          looseGet(employeeAddressSource, 'street'),
+          looseGet(employeeAddressSource, 'line1'),
+          looseGet(employeeAddressSource, 'addressLine1')
+        ) || '',
+        city: firstDefined(
+          looseGet(employeeAddressSource, 'city'),
+          looseGet(employeeAddressSource, 'town')
+        ) || '',
+        county: firstDefined(
+          looseGet(employeeAddressSource, 'county'),
+          looseGet(employeeAddressSource, 'state')
+        ) || '',
+        postcode: firstDefined(
+          looseGet(employeeAddressSource, 'postcode'),
+          looseGet(employeeAddressSource, 'postalCode'),
+          looseGet(employeeAddressSource, 'zip')
+        ) || '',
+      },
+    };
+
+    const employer = {
+      name: firstDefined(
+        looseGet(employerSource, 'name'),
+        looseGet(employerSource, 'employerName'),
+        looseGet(employerSource, 'companyName')
+      ) || '',
+      taxDistrict: firstDefined(
+        looseGet(employerSource, 'taxDistrict'),
+        looseGet(employerSource, 'district')
+      ) || '',
+      taxReference: firstDefined(
+        looseGet(employerSource, 'taxReference'),
+        looseGet(employerSource, 'reference')
+      ) || '',
+      employersNicThisPeriod: normaliseNumericValue(
+        firstDefined(
+          looseGet(employerSource, 'employersNicThisPeriod'),
+          looseGet(employerSource, 'nicThisPeriod')
+        )
+      ),
+      employersNicYtd: normaliseNumericValue(
+        firstDefined(
+          looseGet(employerSource, 'employersNicYtd'),
+          looseGet(employerSource, 'nicYtd')
+        )
+      ),
+      employersPensionThisPeriod: normaliseNumericValue(
+        firstDefined(
+          looseGet(employerSource, 'employersPensionThisPeriod'),
+          looseGet(employerSource, 'pensionThisPeriod')
+        )
+      ),
+      employersPensionYtd: normaliseNumericValue(
+        firstDefined(
+          looseGet(employerSource, 'employersPensionYtd'),
+          looseGet(employerSource, 'pensionYtd')
+        )
+      ),
+    };
+
+    const earnings = earningsSource
+      .map((item) => {
+        const entry = ensureObject(item);
+        return {
+          rawLabel: firstDefined(
+            looseGet(entry, 'rawLabel'),
+            looseGet(entry, 'label'),
+            looseGet(entry, 'name')
+          ) || '',
+          category: firstDefined(
+            looseGet(entry, 'category'),
+            looseGet(entry, 'type')
+          ) || '',
+          amountPeriod: normaliseNumericValue(
+            firstDefined(
+              looseGet(entry, 'amountPeriod'),
+              looseGet(entry, 'periodAmount'),
+              looseGet(entry, 'current')
+            )
+          ),
+          amountYtd: normaliseNumericValue(
+            firstDefined(
+              looseGet(entry, 'amountYtd'),
+              looseGet(entry, 'ytdAmount'),
+              looseGet(entry, 'ytd')
+            )
+          ),
+        };
+      })
+      .filter((entry) => entry.rawLabel || entry.category || entry.amountPeriod !== '' || entry.amountYtd !== '');
+
+    const deductions = deductionsSource
+      .map((item) => {
+        const entry = ensureObject(item);
+        return {
+          rawLabel: firstDefined(
+            looseGet(entry, 'rawLabel'),
+            looseGet(entry, 'label'),
+            looseGet(entry, 'name')
+          ) || '',
+          category: firstDefined(
+            looseGet(entry, 'category'),
+            looseGet(entry, 'type')
+          ) || '',
+          amountPeriod: normaliseNumericValue(
+            firstDefined(
+              looseGet(entry, 'amountPeriod'),
+              looseGet(entry, 'periodAmount'),
+              looseGet(entry, 'current')
+            )
+          ),
+          amountYtd: normaliseNumericValue(
+            firstDefined(
+              looseGet(entry, 'amountYtd'),
+              looseGet(entry, 'ytdAmount'),
+              looseGet(entry, 'ytd')
+            )
+          ),
+        };
+      })
+      .filter((entry) => entry.rawLabel || entry.category || entry.amountPeriod !== '' || entry.amountYtd !== '');
+
+    const totals = {
+      grossPeriod: normaliseNumericValue(
+        firstDefined(
+          looseGet(totalsSource, 'grossPeriod'),
+          looseGet(metricsSource, 'grossPeriod')
+        )
+      ),
+      netPeriod: normaliseNumericValue(
+        firstDefined(
+          looseGet(totalsSource, 'netPeriod'),
+          looseGet(metricsSource, 'netPeriod')
+        )
+      ),
+      grossYtd: normaliseNumericValue(
+        firstDefined(
+          looseGet(totalsSource, 'grossYtd'),
+          looseGet(metricsSource, 'grossYtd')
+        )
+      ),
+      netYtd: normaliseNumericValue(
+        firstDefined(
+          looseGet(totalsSource, 'netYtd'),
+          looseGet(metricsSource, 'netYtd')
+        )
+      ),
+    };
+
+    const meta = {
+      documentId: firstDefined(
+        looseGet(metaSource, 'documentId'),
+        looseGet(payload, 'documentId')
+      ) || '',
+      confidence: normaliseNumericValue(
+        firstDefined(
+          looseGet(metaSource, 'confidence'),
+          looseGet(metricsSource, 'confidence')
+        )
+      ),
+    };
 
     return {
-      employee: ensureObject(metadata.employee),
-      employer: ensureObject(metadata.employer),
+      employee,
+      employer,
       period: {
-        Date: formatMonthInput(period.Date || json.metrics?.payDate || json.metadata?.documentMonth),
-        start: formatDateInput(period.start || json.metrics?.period?.start),
-        end: formatDateInput(period.end || json.metrics?.period?.end),
-        payFrequency: period.payFrequency || json.metrics?.period?.payFrequency || '',
+        Date: periodMonthKey ? toDisplayMonth(periodMonthKey) || '' : '',
+        start: formatDateInput(periodStartRaw),
+        end: formatDateInput(periodEndRaw),
+        payFrequency: payFrequency || '',
       },
-      currency: metadata.currency || json.metrics?.currency || '',
-      earnings: Array.isArray(metadata.earnings) ? metadata.earnings.map((item) => ({
-        rawLabel: item.rawLabel || '',
-        category: item.category || '',
-        amountPeriod: item.amountPeriod ?? '',
-        amountYtd: item.amountYtd ?? '',
-      })) : [],
-      deductions: Array.isArray(metadata.deductions) ? metadata.deductions.map((item) => ({
-        rawLabel: item.rawLabel || '',
-        category: item.category || '',
-        amountPeriod: item.amountPeriod ?? '',
-        amountYtd: item.amountYtd ?? '',
-      })) : [],
-      totals: {
-        grossPeriod: totals.grossPeriod ?? json.metrics?.grossPeriod ?? '',
-        netPeriod: totals.netPeriod ?? json.metrics?.netPeriod ?? '',
-        grossYtd: totals.grossYtd ?? json.metrics?.grossYtd ?? '',
-        netYtd: totals.netYtd ?? json.metrics?.netYtd ?? '',
-      },
-      meta: ensureObject(metadata.meta),
+      currency: firstDefined(
+        looseGet(metadataSource, 'currency'),
+        looseGet(metricsSource, 'currency'),
+        looseGet(payload, 'currency')
+      ) || '',
+      earnings,
+      deductions,
+      totals,
+      meta,
     };
   }
 
@@ -4185,33 +4890,19 @@
       actions.appendChild(processButton);
     }
 
-    const editDataButton = document.createElement('button');
-    editDataButton.type = 'button';
-    editDataButton.textContent = 'Edit data';
+    const previewDataButton = document.createElement('button');
+    previewDataButton.type = 'button';
+    previewDataButton.textContent = 'Preview Data';
     if (!docId) {
-      editDataButton.disabled = true;
-      editDataButton.title = 'Document identifier unavailable for editing.';
+      previewDataButton.disabled = true;
+      previewDataButton.title = 'Document identifier unavailable for data preview.';
     }
-    editDataButton.addEventListener('click', (event) => {
+    previewDataButton.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      openManualJsonEditor(file, editDataButton);
+      openDataPreview(file, previewDataButton);
     });
-    actions.appendChild(editDataButton);
-
-    const processedJsonButton = document.createElement('button');
-    processedJsonButton.type = 'button';
-    processedJsonButton.textContent = 'Processed JSON';
-    if (processing.status !== 'completed' || !docId) {
-      processedJsonButton.disabled = true;
-      processedJsonButton.title = 'Available after processing completes.';
-    }
-    processedJsonButton.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      showProcessedJson(file, processedJsonButton);
-    });
-    actions.appendChild(processedJsonButton);
+    actions.appendChild(previewDataButton);
 
     const downloadButton = document.createElement('button');
     downloadButton.type = 'button';
@@ -4246,18 +4937,6 @@
     });
     actions.appendChild(downloadButton);
 
-    if (jsonTestEnabled && (!docId || processing.status !== 'completed')) {
-      const debugJsonButton = document.createElement('button');
-      debugJsonButton.type = 'button';
-      debugJsonButton.textContent = 'Debug JSON';
-      debugJsonButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        showJsonForFile(file, debugJsonButton);
-      });
-      actions.appendChild(debugJsonButton);
-    }
-
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.textContent = 'Delete';
@@ -4286,7 +4965,7 @@
       const titleLine = document.createElement('strong');
       titleLine.textContent = 'More details needed';
       const bodyLine = document.createElement('span');
-      bodyLine.textContent = 'We could not extract everything from this document. Use “Edit data” to fill in the missing values.';
+      bodyLine.textContent = 'We could not extract everything from this document. Use “Preview Data” to fill in the missing values.';
       alertBox.append(titleLine, bodyLine);
       card.appendChild(alertBox);
     }
