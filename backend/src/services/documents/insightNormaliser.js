@@ -118,33 +118,134 @@ function normalisePayslip(insight) {
   const rawMetrics = insight.metrics || {};
   const rawMetadata = insight.metadata || {};
 
-  const earnings = normaliseLineItems(rawMetrics.earnings, 'Earning');
-  const deductions = normaliseLineItems(rawMetrics.deductions, 'Deduction', { absolute: true });
-  const allowances = normaliseAllowances(rawMetrics.allowances);
+  const rawEarnings = Array.isArray(rawMetrics.earnings) && rawMetrics.earnings.length
+    ? rawMetrics.earnings
+    : rawMetadata.earnings;
+  const rawDeductions = Array.isArray(rawMetrics.deductions) && rawMetrics.deductions.length
+    ? rawMetrics.deductions
+    : rawMetadata.deductions;
+  const rawAllowances = Array.isArray(rawMetrics.allowances) && rawMetrics.allowances.length
+    ? rawMetrics.allowances
+    : rawMetadata.allowances;
 
-  const gross = parseNumber(rawMetrics.gross ?? rawMetrics.grossPeriod ?? rawMetrics.totals?.grossPeriod);
-  const grossYtd = parseNumber(rawMetrics.grossYtd ?? rawMetrics.totals?.grossYtd);
-  const net = parseNumber(rawMetrics.net ?? rawMetrics.netPeriod ?? rawMetrics.totals?.netPeriod);
-  const netYtd = parseNumber(rawMetrics.netYtd ?? rawMetrics.totals?.netYtd);
-  const tax = parseNumber(rawMetrics.tax ?? rawMetrics.incomeTax);
-  const ni = parseNumber(rawMetrics.ni ?? rawMetrics.nationalInsurance);
-  const pension = parseNumber(rawMetrics.pension);
-  const studentLoan = parseNumber(rawMetrics.studentLoan ?? rawMetrics.studentLoanRepayment);
+  const earnings = normaliseLineItems(rawEarnings, 'Earning');
+  const deductions = normaliseLineItems(rawDeductions, 'Deduction', { absolute: true });
+  const allowances = normaliseAllowances(rawAllowances);
+
+  const totals = rawMetrics.totals || rawMetadata.totals || {};
+
+  const gross = parseNumber(
+    rawMetrics.gross ??
+      rawMetrics.grossPeriod ??
+      totals.gross ??
+      totals.grossPeriod ??
+      rawMetadata.gross ??
+      rawMetadata.grossPeriod
+  );
+  const grossYtd = parseNumber(
+    rawMetrics.grossYtd ??
+      totals.grossYtd ??
+      rawMetadata.grossYtd ??
+      rawMetadata.grossYearToDate ??
+      totals.grossYearToDate
+  );
+  const net = parseNumber(
+    rawMetrics.net ??
+      rawMetrics.netPeriod ??
+      totals.net ??
+      totals.netPeriod ??
+      rawMetadata.net ??
+      rawMetadata.netPeriod
+  );
+  const netYtd = parseNumber(
+    rawMetrics.netYtd ??
+      totals.netYtd ??
+      totals.netYearToDate ??
+      rawMetadata.netYtd ??
+      rawMetadata.netYearToDate
+  );
+
+  const deductionLookup = new Map(
+    deductions.map((item) => [String(item.category || item.label || '').toLowerCase(), item.amount])
+  );
+
+  const tax = parseNumber(
+    rawMetrics.tax ??
+      rawMetrics.incomeTax ??
+      totals.tax ??
+      totals.incomeTax ??
+      rawMetadata.tax ??
+      rawMetadata.incomeTax ??
+      deductionLookup.get('income_tax') ??
+      deductionLookup.get('income tax') ??
+      deductionLookup.get('tax')
+  );
+  const ni = parseNumber(
+    rawMetrics.ni ??
+      rawMetrics.nationalInsurance ??
+      totals.ni ??
+      totals.nationalInsurance ??
+      rawMetadata.ni ??
+      rawMetadata.nationalInsurance ??
+      deductionLookup.get('national_insurance') ??
+      deductionLookup.get('national insurance')
+  );
+  const pension = parseNumber(
+    rawMetrics.pension ??
+      totals.pension ??
+      rawMetadata.pension ??
+      rawMetadata.pensionContribution ??
+      deductionLookup.get('pension_employee') ??
+      deductionLookup.get('pension contribution ae') ??
+      deductionLookup.get('pension')
+  );
+  const studentLoan = parseNumber(
+    rawMetrics.studentLoan ??
+      rawMetrics.studentLoanRepayment ??
+      totals.studentLoan ??
+      rawMetadata.studentLoan ??
+      deductionLookup.get('student_loan') ??
+      deductionLookup.get('student loan')
+  );
 
   const deductionsTotal = deductions.reduce((acc, item) => acc + (item.amount || 0), 0);
-  const totalDeductions = parseNumber(rawMetrics.totalDeductions) ?? (deductions.length ? deductionsTotal : null);
+  const totalDeductions =
+    parseNumber(
+      rawMetrics.totalDeductions ??
+        totals.totalDeductions ??
+        rawMetadata.totalDeductions ??
+        totals.deductionsTotal ??
+        rawMetadata.deductionsTotal
+    ) ?? (deductions.length ? deductionsTotal : null);
 
-  const payFrequencyRaw = rawMetrics.payFrequency ?? rawMetadata.payFrequency;
+  const payFrequencyRaw =
+    rawMetrics.payFrequency ??
+    rawMetadata.payFrequency ??
+    rawMetadata.period?.payFrequency ??
+    totals.payFrequency;
   const frequency = normalisePayFrequency(payFrequencyRaw);
-  const annualisedGross = gross != null && frequency?.periods ? gross * frequency.periods : parseNumber(rawMetrics.annualisedGross);
+  const annualisedGross =
+    gross != null && frequency?.periods
+      ? gross * frequency.periods
+      : parseNumber(rawMetrics.annualisedGross ?? totals.annualisedGross ?? rawMetadata.annualisedGross);
 
-  const takeHomePercent = gross ? (net ?? 0) / gross : parseNumber(rawMetrics.takeHomePercent);
-  const effectiveMarginalRate = gross ? (totalDeductions ?? 0) / gross : parseNumber(rawMetrics.effectiveMarginalRate);
+  const takeHomePercent =
+    gross
+      ? (net ?? 0) / gross
+      : parseNumber(rawMetrics.takeHomePercent ?? totals.takeHomePercent ?? rawMetadata.takeHomePercent);
+  const effectiveMarginalRate =
+    gross
+      ? (totalDeductions ?? 0) / gross
+      : parseNumber(
+          rawMetrics.effectiveMarginalRate ??
+            totals.effectiveMarginalRate ??
+            rawMetadata.effectiveMarginalRate
+        );
 
   const { payDate, periodStart, periodEnd, periodMonth, metadata } = derivePeriodMetadata(rawMetadata, {
-    periodStart: rawMetrics.periodStart,
-    periodEnd: rawMetrics.periodEnd,
-    payDate: rawMetrics.payDate,
+    periodStart: rawMetrics.periodStart ?? rawMetadata.period?.start,
+    periodEnd: rawMetrics.periodEnd ?? rawMetadata.period?.end,
+    payDate: rawMetrics.payDate ?? rawMetadata.payDate ?? rawMetadata.documentDate,
   });
 
   const metrics = {
