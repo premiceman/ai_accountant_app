@@ -995,6 +995,25 @@ router.get('/payslips', auth, async (req, res) => {
   }
 });
 
+router.get('/statements', auth, async (req, res) => {
+  try {
+    const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+    const documents = await DocumentInsight.find({ userId: userObjectId, catalogueKey: 'current_account_statement' })
+      .sort({ documentDate: -1, documentMonth: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    const statements = documents.map(normaliseStatementDocument).filter(Boolean);
+    res.json({ statements });
+  } catch (error) {
+    if (error?.name === 'CastError') {
+      console.warn('GET /analytics/statements cast error', error);
+      return res.status(400).json({ error: 'Invalid request' });
+    }
+    console.error('GET /analytics/statements error:', error);
+    return res.status(500).json({ error: 'Unable to load statement insights' });
+  }
+});
+
 // GET /api/analytics/dashboard
 router.get('/dashboard', auth, async (req, res) => {
   if (!featureFlags.enableAnalyticsLegacy) {
@@ -1521,6 +1540,251 @@ function normalisePayslipDocument(doc) {
   entry.totals = totals;
 
   return entry;
+}
+
+function normaliseStatementDocument(doc) {
+  if (!doc) return null;
+  const idSource = doc.fileId || (typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id);
+  const id = idSource ? String(idSource) : null;
+  if (!id) return null;
+
+  const enriched = enrichInsight(doc, id) || {};
+  const preferred = enriched.__preferred || getPreferredInsight(doc) || {};
+  const metadata = enriched.metadata || doc.metadata || {};
+  const metrics = mergeStatementMetrics(enriched.metrics || doc.metrics || {}, preferred.metricsV1 || null);
+
+  const round = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.round(num * 100) / 100 : null;
+  };
+
+  const periodStartRaw = pickFirst(
+    metrics.period?.start,
+    metrics.periodStart,
+    metadata.period?.start,
+    metadata.periodStart,
+    metadata.period?.from,
+    metadata.period?.Start,
+    doc.documentDate,
+    doc.documentDateV1,
+  );
+  const periodEndRaw = pickFirst(
+    metrics.period?.end,
+    metrics.periodEnd,
+    metadata.period?.end,
+    metadata.periodEnd,
+    metadata.period?.to,
+    metadata.period?.End,
+    doc.documentDate,
+    doc.documentDateV1,
+  );
+  const periodMonth = pickFirst(
+    metrics.period?.month,
+    metrics.periodMonth,
+    metadata.period?.month,
+    metadata.periodMonth,
+    doc.documentMonth,
+  );
+
+  const periodLabel = pickFirst(
+    metrics.period?.label,
+    metadata.period?.label,
+    derivePeriodLabel(enriched),
+    formatMonthLabel(periodMonth),
+  );
+
+  const currency = pickFirst(
+    enriched.currency,
+    doc.currency,
+    metrics.currency,
+    metadata.currency,
+    preferred.currency,
+    'GBP',
+  );
+
+  const totalIn = firstNumber(
+    metrics.totalIn,
+    metrics.totalMoneyIn,
+    metrics.sumCredits,
+    metrics.totalCredit,
+    metrics.totalCredits,
+    metrics.income,
+    metrics.totals?.income,
+  );
+  const totalOut = firstNumber(
+    metrics.totalOut,
+    metrics.totalMoneyOut,
+    metrics.sumDebits,
+    metrics.totalDebit,
+    metrics.totalDebits,
+    metrics.debitsTotal,
+    metrics.spend,
+    metrics.totals?.spend,
+  );
+
+  let net = firstNumber(metrics.net, metrics.totals?.net);
+
+  const openingBalance = firstNumber(
+    metrics.openingBalance,
+    metrics.startingBalance,
+    metrics.balances?.openingBalance,
+    metrics.balances?.opening,
+    metrics.totals?.openingBalance,
+    metadata.openingBalance,
+  );
+  const closingBalance = firstNumber(
+    metrics.closingBalance,
+    metrics.endingBalance,
+    metrics.balances?.closingBalance,
+    metrics.balances?.closing,
+    metrics.totals?.closingBalance,
+    metadata.closingBalance,
+  );
+
+  const accountName = pickFirst(
+    metadata.accountName,
+    metadata.account?.name,
+    metadata.account?.displayName,
+    metadata.accountLabel,
+    metadata.accountDisplayName,
+    metadata.accountNickName,
+    metadata.account?.accountName,
+    'Account',
+  );
+  const institutionName = pickFirst(
+    metadata.institutionName,
+    metadata.bankName,
+    metadata.bank?.name,
+    metadata.institution?.name,
+    metadata.financialInstitution,
+  );
+  const accountNumberMasked = pickFirst(
+    metadata.accountNumberMasked,
+    metadata.accountNumber,
+    metadata.account?.numberMasked,
+    metadata.account?.maskedNumber,
+    metadata.account?.accountNumberMasked,
+  );
+  const accountType = pickFirst(
+    metadata.accountType,
+    metadata.account?.type,
+    metadata.type,
+  );
+
+  const uploadedAt = toIsoDate(
+    pickFirst(
+      metadata.uploadedAt,
+      doc.updatedAt,
+      doc.createdAt,
+      doc.extractedAt,
+    ),
+  );
+
+  const txSource = Array.isArray(enriched.transactions) ? enriched.transactions : Array.isArray(doc.transactions) ? doc.transactions : [];
+  const transactions = txSource
+    .map((tx, index) => {
+      if (!tx || typeof tx !== 'object') return null;
+      const amountRaw = firstNumber(
+        tx.amount,
+        tx.total,
+        tx.value,
+        tx.amountMajor,
+        tx.amountMinor != null ? toMajor(tx.amountMinor) : null,
+      );
+      if (amountRaw == null) return null;
+      const directionRaw = String(tx.direction || '').toLowerCase();
+      const signedAmount = directionRaw === 'outflow'
+        ? -Math.abs(amountRaw)
+        : directionRaw === 'inflow'
+          ? Math.abs(amountRaw)
+          : amountRaw;
+      const direction = signedAmount < 0 ? 'outflow' : 'inflow';
+      const description = pickFirst(tx.description, tx.memo, tx.narrative, 'Transaction');
+      const category = pickFirst(tx.category, tx.categoryName, tx.type, 'Other');
+      const date = toDateOnly(tx.date || tx.postedDate || tx.transactionDate || tx.timestamp);
+      const accountLabel = pickFirst(tx.accountName, tx.account, accountName);
+      const txId = pickFirst(tx.id, tx.transactionId, `${id}:${index}`);
+      return {
+        id: txId ? String(txId) : `${id}:${index}`,
+        description,
+        amount: round(signedAmount) ?? 0,
+        category,
+        date: date || null,
+        direction,
+        accountName: accountLabel || accountName,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.date && b.date && a.date !== b.date) {
+        return b.date.localeCompare(a.date);
+      }
+      return Math.abs(b.amount || 0) - Math.abs(a.amount || 0);
+    });
+
+  const fallbackIncome = transactions.reduce((acc, tx) => (tx.amount > 0 ? acc + tx.amount : acc), 0);
+  const fallbackSpend = transactions.reduce((acc, tx) => (tx.amount < 0 ? acc + Math.abs(tx.amount) : acc), 0);
+
+  const moneyIn = totalIn != null ? round(totalIn) : round(fallbackIncome);
+  const moneyOut = totalOut != null ? round(totalOut) : round(fallbackSpend);
+  if (net == null && moneyIn != null && moneyOut != null) {
+    net = moneyIn - moneyOut;
+  }
+
+  const categoryTotals = new Map();
+  transactions.forEach((tx) => {
+    if (tx.direction !== 'outflow') return;
+    const key = tx.category || 'Other';
+    const current = categoryTotals.get(key) || 0;
+    categoryTotals.set(key, current + Math.abs(tx.amount || 0));
+  });
+
+  const categories = Array.from(categoryTotals.entries())
+    .map(([category, amount]) => ({
+      label: category,
+      category,
+      amount: round(amount) ?? 0,
+      share: 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+  const totalCategoryOutflow = categories.reduce((sum, item) => sum + item.amount, 0);
+  categories.forEach((item) => {
+    item.share = totalCategoryOutflow ? item.amount / totalCategoryOutflow : 0;
+  });
+
+  const raw = { ...doc, metrics, transactions: txSource };
+  delete raw.__preferred;
+
+  return {
+    id,
+    fileId: doc.fileId || null,
+    catalogueKey: doc.catalogueKey,
+    accountName,
+    institutionName: institutionName || null,
+    accountNumberMasked: accountNumberMasked || null,
+    accountType: accountType || null,
+    currency,
+    period: {
+      start: periodStartRaw ? toDateOnly(periodStartRaw) : null,
+      end: periodEndRaw ? toDateOnly(periodEndRaw) : null,
+      month: periodMonth || null,
+      label: periodLabel || null,
+    },
+    totals: {
+      moneyIn,
+      moneyOut,
+      net: net != null ? round(net) : null,
+    },
+    balances: {
+      opening: round(openingBalance),
+      closing: round(closingBalance),
+    },
+    transactions,
+    categories,
+    uploadedAt,
+    insightId: typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id || null,
+    raw,
+  };
 }
 
 function normaliseLineItems(list, { absolute = false } = {}) {
