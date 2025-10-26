@@ -1,0 +1,604 @@
+{
+  "payslips": [
+    {
+      "id": "2024-07-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2024-07-30",
+      "period": {
+        "label": "Jul 2024",
+        "start": "2024-07-01",
+        "end": "2024-07-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11620.1,
+        "net": 5987.42,
+        "deductions": 5632.68
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "MBO",
+          "amount": 3650.1
+        },
+        {
+          "label": "Expenses reimbursed",
+          "amount": 770
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 3982.4
+        },
+        {
+          "label": "National Insurance",
+          "amount": 386.22
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 494.16
+        },
+        {
+          "label": "Student Loan",
+          "amount": 769.9
+        }
+      ],
+      "uploadedAt": "2024-07-30T18:42:11.000Z"
+    },
+    {
+      "id": "2024-08-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2024-08-30",
+      "period": {
+        "label": "Aug 2024",
+        "start": "2024-08-01",
+        "end": "2024-08-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11785.44,
+        "net": 6121.58,
+        "deductions": 5663.86
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Quarterly bonus",
+          "amount": 4200.64
+        },
+        {
+          "label": "Wellness stipend",
+          "amount": 384.8
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4050.18
+        },
+        {
+          "label": "National Insurance",
+          "amount": 412.68
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 500.0
+        },
+        {
+          "label": "Student Loan",
+          "amount": 701.0
+        }
+      ],
+      "uploadedAt": "2024-08-29T19:07:45.000Z"
+    },
+    {
+      "id": "2024-09-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2024-09-30",
+      "period": {
+        "label": "Sep 2024",
+        "start": "2024-09-01",
+        "end": "2024-09-30",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11880.1,
+        "net": 6059.14,
+        "deductions": 5820.96
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "MBO",
+          "amount": 5130.06
+        },
+        {
+          "label": "Expenses reimbursed",
+          "amount": 145.2
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Pension Contribution AE",
+          "amount": 594.0
+        },
+        {
+          "label": "Income Tax",
+          "amount": 4176.9
+        },
+        {
+          "label": "National Insurance",
+          "amount": 393.22
+        },
+        {
+          "label": "Student Loan",
+          "amount": 656.84
+        }
+      ],
+      "uploadedAt": "2024-09-30T17:22:02.000Z"
+    },
+    {
+      "id": "2024-10-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2024-10-31",
+      "period": {
+        "label": "Oct 2024",
+        "start": "2024-10-01",
+        "end": "2024-10-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11925.8,
+        "net": 6122.76,
+        "deductions": 5803.04
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Sales commission",
+          "amount": 4550.6
+        },
+        {
+          "label": "Equity top-up",
+          "amount": 175.2
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4220.45
+        },
+        {
+          "label": "National Insurance",
+          "amount": 408.57
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 532.36
+        },
+        {
+          "label": "Student Loan",
+          "amount": 641.66
+        }
+      ],
+      "uploadedAt": "2024-10-31T18:11:51.000Z"
+    },
+    {
+      "id": "2024-11-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2024-11-29",
+      "period": {
+        "label": "Nov 2024",
+        "start": "2024-11-01",
+        "end": "2024-11-30",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 12012.32,
+        "net": 6240.15,
+        "deductions": 5772.17
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "RSU vest",
+          "amount": 3267.12
+        },
+        {
+          "label": "On-call allowance",
+          "amount": 1545.2
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4276.89
+        },
+        {
+          "label": "National Insurance",
+          "amount": 433.88
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 522.64
+        },
+        {
+          "label": "Student Loan",
+          "amount": 538.76
+        }
+      ],
+      "uploadedAt": "2024-11-29T17:48:33.000Z"
+    },
+    {
+      "id": "2024-12-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2024-12-20",
+      "period": {
+        "label": "Dec 2024",
+        "start": "2024-12-01",
+        "end": "2024-12-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 13284.5,
+        "net": 7022.18,
+        "deductions": 6262.32
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Annual bonus",
+          "amount": 5084.5
+        },
+        {
+          "label": "Holiday pay uplift",
+          "amount": 1000
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4618.7
+        },
+        {
+          "label": "National Insurance",
+          "amount": 542.15
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 602.27
+        },
+        {
+          "label": "Student Loan",
+          "amount": 499.2
+        }
+      ],
+      "uploadedAt": "2024-12-20T10:25:44.000Z"
+    },
+    {
+      "id": "2025-01-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2025-01-31",
+      "period": {
+        "label": "Jan 2025",
+        "start": "2025-01-01",
+        "end": "2025-01-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11892.35,
+        "net": 6066.92,
+        "deductions": 5825.43
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Performance bonus",
+          "amount": 4400.8
+        },
+        {
+          "label": "Childcare voucher",
+          "amount": 291.55
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4188.75
+        },
+        {
+          "label": "National Insurance",
+          "amount": 399.61
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 558.43
+        },
+        {
+          "label": "Student Loan",
+          "amount": 678.64
+        }
+      ],
+      "uploadedAt": "2025-01-31T18:05:12.000Z"
+    },
+    {
+      "id": "2025-02-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2025-02-28",
+      "period": {
+        "label": "Feb 2025",
+        "start": "2025-02-01",
+        "end": "2025-02-28",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11762.2,
+        "net": 5944.63,
+        "deductions": 5817.57
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Project bonus",
+          "amount": 4210.4
+        },
+        {
+          "label": "Overtime",
+          "amount": 351.8
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4114.6
+        },
+        {
+          "label": "National Insurance",
+          "amount": 405.62
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 592.53
+        },
+        {
+          "label": "Student Loan",
+          "amount": 704.82
+        }
+      ],
+      "uploadedAt": "2025-02-28T17:41:08.000Z"
+    },
+    {
+      "id": "2025-03-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2025-03-31",
+      "period": {
+        "label": "Mar 2025",
+        "start": "2025-03-01",
+        "end": "2025-03-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11845.0,
+        "net": 6015.72,
+        "deductions": 5829.28
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Equity vest",
+          "amount": 4520.5
+        },
+        {
+          "label": "Wellness stipend",
+          "amount": 124.5
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4180.02
+        },
+        {
+          "label": "National Insurance",
+          "amount": 412.63
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 558.3
+        },
+        {
+          "label": "Student Loan",
+          "amount": 678.33
+        }
+      ],
+      "uploadedAt": "2025-03-31T16:59:24.000Z"
+    },
+    {
+      "id": "2025-04-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2025-04-30",
+      "period": {
+        "label": "Apr 2025",
+        "start": "2025-04-01",
+        "end": "2025-04-30",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11905.6,
+        "net": 6078.9,
+        "deductions": 5826.7
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Quarterly bonus",
+          "amount": 4523.6
+        },
+        {
+          "label": "Travel reimbursement",
+          "amount": 182.0
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4195.21
+        },
+        {
+          "label": "National Insurance",
+          "amount": 415.46
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 540.6
+        },
+        {
+          "label": "Student Loan",
+          "amount": 675.43
+        }
+      ],
+      "uploadedAt": "2025-04-30T18:28:39.000Z"
+    },
+    {
+      "id": "2025-05-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2025-05-30",
+      "period": {
+        "label": "May 2025",
+        "start": "2025-05-01",
+        "end": "2025-05-31",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11812.4,
+        "net": 5991.53,
+        "deductions": 5820.87
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "Performance bonus",
+          "amount": 4306.4
+        },
+        {
+          "label": "Referral bonus",
+          "amount": 306.0
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4172.9
+        },
+        {
+          "label": "National Insurance",
+          "amount": 407.24
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 563.73
+        },
+        {
+          "label": "Student Loan",
+          "amount": 677.0
+        }
+      ],
+      "uploadedAt": "2025-05-30T17:16:57.000Z"
+    },
+    {
+      "id": "2025-06-coralgix",
+      "employer": "Coralogix UK Limited",
+      "payDate": "2025-06-30",
+      "period": {
+        "label": "Jun 2025",
+        "start": "2025-06-01",
+        "end": "2025-06-30",
+        "frequency": "Monthly"
+      },
+      "currency": "GBP",
+      "totals": {
+        "gross": 11894.3,
+        "net": 6032.41,
+        "deductions": 5861.89
+      },
+      "earnings": [
+        {
+          "label": "Base salary",
+          "amount": 7200
+        },
+        {
+          "label": "MBO",
+          "amount": 4462.3
+        },
+        {
+          "label": "Wellness stipend",
+          "amount": 232.0
+        }
+      ],
+      "deductions": [
+        {
+          "label": "Income Tax",
+          "amount": 4194.11
+        },
+        {
+          "label": "National Insurance",
+          "amount": 418.67
+        },
+        {
+          "label": "Pension (employee)",
+          "amount": 573.91
+        },
+        {
+          "label": "Student Loan",
+          "amount": 675.2
+        }
+      ],
+      "uploadedAt": "2025-06-30T18:03:05.000Z"
+    }
+  ]
+}
