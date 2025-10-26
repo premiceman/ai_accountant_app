@@ -479,7 +479,9 @@ function preferV1(insight) {
           period: {
             start: ensureIsoDate(periodMeta.start) ?? payDate,
             end: ensureIsoDate(periodMeta.end) ?? payDate,
-            month: ensureIsoMonth(periodMeta.month ?? documentMonth) ?? payDate.slice(0, 7),
+            month:
+              ensureIsoMonth(periodMeta.month ?? periodMeta.Date ?? documentMonth) ??
+              payDate.slice(0, 7),
           },
           employer: employerName ? { name: employerName } : null,
           grossMinor: toMinorUnits(legacyMetrics.gross),
@@ -575,7 +577,9 @@ function preferV1(insight) {
           period: {
             start: ensureIsoDate(periodMeta.start) ?? fallbackDate,
             end: ensureIsoDate(periodMeta.end) ?? fallbackDate,
-            month: ensureIsoMonth(periodMeta.month ?? documentMonth) ?? fallbackDate.slice(0, 7),
+            month:
+              ensureIsoMonth(periodMeta.month ?? periodMeta.Date ?? documentMonth) ??
+              fallbackDate.slice(0, 7),
           },
           inflowsMinor,
           outflowsMinor,
