@@ -43,16 +43,16 @@
 
   async function loadPayslipDataset() {
     try {
-      const response = await fetch('/data/payslips.json', { cache: 'no-store' });
+      const response = await Auth.fetch('/api/analytics/payslips', { cache: 'no-store' });
       if (!response.ok) {
         const text = await safeRead(response);
         throw new Error(text || `Request failed (${response.status})`);
       }
       const payload = await response.json();
-      const list = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.payslips)
-          ? payload.payslips
+      const list = Array.isArray(payload?.payslips)
+        ? payload.payslips
+        : Array.isArray(payload)
+          ? payload
           : [];
       return { list, error: null };
     } catch (error) {

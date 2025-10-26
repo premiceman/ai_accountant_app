@@ -980,6 +980,21 @@ router.get('/doc-insights', auth, async (req, res) => {
   return res.json(summary);
 });
 
+router.get('/payslips', auth, async (req, res) => {
+  try {
+    const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+    const documents = await DocumentInsight.find({ userId: userObjectId, catalogueKey: 'payslip' })
+      .sort({ documentDate: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    const payslips = documents.map(normalisePayslipDocument).filter(Boolean);
+    res.json({ payslips });
+  } catch (error) {
+    console.error('GET /analytics/payslips error:', error);
+    res.status(500).json({ error: 'Unable to load payslip insights' });
+  }
+});
+
 // GET /api/analytics/dashboard
 router.get('/dashboard', auth, async (req, res) => {
   if (!featureFlags.enableAnalyticsLegacy) {
@@ -1362,3 +1377,233 @@ router.post('/reprocess', auth, async (req, res) => {
 router.__test = { normaliseSourcesWithPreferred, buildDocInsightsSummary };
 
 module.exports = router;
+
+function normalisePayslipDocument(doc) {
+  if (!doc) return null;
+  const preferred = getPreferredInsight(doc) || {};
+  const metadata = preferred.metadata || doc.metadata || {};
+  const mergedMetrics = mergePayslipMetrics(preferred.legacyMetrics || doc.metrics || {}, preferred.metricsV1 || null);
+
+  const idSource = doc.fileId || (typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id);
+  const id = typeof idSource === 'string' ? idSource : String(idSource || '');
+  if (!id) return null;
+
+  const payDate = toDateOnly(
+    mergedMetrics.payDate
+      || preferred.metricsV1?.payDate
+      || metadata.payDate
+      || doc.documentDate
+      || metadata.documentDate
+  );
+
+  const periodStart = toDateOnly(
+    mergedMetrics.period?.start
+      || mergedMetrics.periodStart
+      || preferred.metricsV1?.period?.start
+      || metadata.period?.start
+  );
+
+  const periodEnd = toDateOnly(
+    mergedMetrics.period?.end
+      || mergedMetrics.periodEnd
+      || preferred.metricsV1?.period?.end
+      || metadata.period?.end
+  );
+
+  const month = pickFirst(
+    mergedMetrics.period?.month,
+    mergedMetrics.periodMonth,
+    preferred.metricsV1?.period?.month,
+    metadata.period?.month,
+    doc.documentMonth,
+    payDate ? payDate.slice(0, 7) : null,
+  );
+
+  const periodLabel = pickFirst(
+    mergedMetrics.period?.label,
+    metadata.period?.label,
+    formatMonthLabel(month),
+  );
+
+  const payFrequency = pickFirst(
+    mergedMetrics.payFrequency,
+    metadata.period?.payFrequency,
+    metadata.payFrequency,
+  );
+
+  const earnings = normaliseLineItems(mergedMetrics.earnings || metadata.earnings || []);
+  const deductions = normaliseLineItems(mergedMetrics.deductions || metadata.deductions || [], { absolute: true });
+
+  const gross = firstNumber(
+    mergedMetrics.gross,
+    mergedMetrics.grossPeriod,
+    mergedMetrics.totals?.gross,
+    mergedMetrics.totals?.grossPeriod,
+    toMajor(preferred.metricsV1?.grossMinor),
+  );
+
+  const net = firstNumber(
+    mergedMetrics.net,
+    mergedMetrics.netPeriod,
+    mergedMetrics.totals?.net,
+    mergedMetrics.totals?.netPeriod,
+    toMajor(preferred.metricsV1?.netMinor),
+  );
+
+  const deductionsFromMinor = sumDefined([
+    toMajor(preferred.metricsV1?.taxMinor),
+    toMajor(preferred.metricsV1?.nationalInsuranceMinor),
+    toMajor(preferred.metricsV1?.pensionMinor),
+    toMajor(preferred.metricsV1?.studentLoanMinor),
+  ]);
+
+  const deductionsTotal = firstNumber(
+    mergedMetrics.totalDeductions,
+    mergedMetrics.deductionsTotal,
+    mergedMetrics.totals?.deductions,
+    mergedMetrics.totals?.totalDeductions,
+    deductionsFromMinor,
+    deductions.reduce((acc, item) => acc + (item.amount || 0), 0),
+  );
+
+  const currency = pickFirst(
+    doc.currency,
+    mergedMetrics.currency,
+    metadata.currency,
+    preferred.currency,
+    'GBP',
+  );
+
+  const uploadedAt = toIsoDate(
+    metadata.uploadedAt
+      || doc.updatedAt
+      || doc.createdAt
+      || preferred.metricsV1?.payDate
+  );
+
+  const employer = pickFirst(
+    mergedMetrics.employerName,
+    mergedMetrics.employer?.name,
+    metadata.employerName,
+    metadata.employer?.name,
+    preferred.metricsV1?.employer?.name,
+  );
+
+  const period = {
+    start: periodStart || null,
+    end: periodEnd || null,
+    month: month || null,
+    frequency: payFrequency || null,
+  };
+  if (periodLabel) period.label = periodLabel;
+
+  const totals = {
+    gross: gross ?? null,
+    net: net ?? null,
+    deductions: deductionsTotal ?? null,
+  };
+
+  const entry = {
+    id,
+    fileId: doc.fileId || null,
+    catalogueKey: doc.catalogueKey,
+    employer: employer || null,
+    payDate: payDate || null,
+    currency,
+    earnings,
+    deductions,
+    uploadedAt,
+    insightId: typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id || null,
+    documentMonth: doc.documentMonth || month || null,
+  };
+
+  entry.period = period;
+  entry.totals = totals;
+
+  return entry;
+}
+
+function normaliseLineItems(list, { absolute = false } = {}) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => {
+      if (!item) return null;
+      const label = pickFirst(item.label, item.name, item.category);
+      const amountRaw = firstNumber(
+        item.amount,
+        item.total,
+        item.value,
+        item.amountPeriod,
+        item.amountCurrent,
+        item.amountMinor != null ? toMajor(item.amountMinor) : null,
+      );
+      if (label == null || amountRaw == null) return null;
+      const amount = absolute ? Math.abs(amountRaw) : amountRaw;
+      return { label, amount };
+    })
+    .filter(Boolean);
+}
+
+function pickFirst(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (trimmed) return trimmed;
+      continue;
+    }
+    if (candidate instanceof Date) {
+      if (!Number.isNaN(candidate.getTime())) return candidate;
+      continue;
+    }
+    if (typeof candidate === 'object') {
+      if (Array.isArray(candidate)) {
+        if (candidate.length) return candidate;
+        continue;
+      }
+      if (Object.keys(candidate).length) return candidate;
+      continue;
+    }
+    if (candidate !== '') return candidate;
+  }
+  return null;
+}
+
+function firstNumber(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate == null || candidate === '') continue;
+    const num = Number(candidate);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+function sumDefined(values = []) {
+  const numbers = values.filter((value) => Number.isFinite(value));
+  if (!numbers.length) return null;
+  return numbers.reduce((acc, value) => acc + value, 0);
+}
+
+function toIsoDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function toDateOnly(value) {
+  const iso = toIsoDate(value);
+  return iso ? iso.slice(0, 10) : null;
+}
+
+function formatMonthLabel(month) {
+  if (!month || typeof month !== 'string') return null;
+  const trimmed = month.trim();
+  if (!/^[0-9]{4}-[0-9]{2}$/.test(trimmed)) return null;
+  const candidate = dayjs(`${trimmed}-01`);
+  if (!candidate.isValid()) return null;
+  return candidate.format('MMM YYYY');
+}
