@@ -20,11 +20,14 @@
 
     body{ background: var(--bg-body); color: var(--fg); overflow-x: hidden }
 
-    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter: saturate(1.2) blur(8px)}
+    .landing-nav{ position:sticky; top:0; z-index:1020; backdrop-filter:saturate(1.35) blur(18px); background:linear-gradient(140deg, color-mix(in srgb, var(--bg-surface) 90%, transparent), color-mix(in srgb, var(--bg-surface-2) 84%, transparent)); border-bottom:1px solid color-mix(in srgb, var(--bd-hairline) 75%, transparent); box-shadow:0 20px 44px rgba(4,24,24,0.15); }
     .landing-nav .btn{ padding:.55rem 1rem }
     .brand-mark{ text-decoration:none; color:var(--fg) }
     .landing-nav .brand-mark{ gap:.75rem; font-size:1.05rem; }
     .landing-nav .brand-mark .brand-dot{ --brand-dot-size:14px; }
+    .landing-nav-rail{ margin-left:auto; display:flex; align-items:center; gap:.75rem; }
+    .landing-nav-actions{ display:flex; align-items:center; gap:.6rem; }
+    .landing-menu__actions{ display:flex; align-items:center; gap:.5rem; }
 
     .hero{ min-height: var(--hero-h); position: relative; display:grid; place-items:center; overflow:hidden }
     .hero-inner{ position:relative; z-index:2; max-width:1100px; padding:6rem 1.25rem 4rem }
@@ -96,7 +99,6 @@
     .site-footer .small{ color:var(--fg-3) }
 
     .landing-nav-inner{ display:flex; align-items:center; gap:1rem; }
-    .landing-nav-actions{ margin-left:auto; display:flex; align-items:center; gap:.6rem; }
     .landing-bento{ display:none; width:44px; height:44px; border-radius:14px; border:1px solid color-mix(in oklab, var(--bd-hairline) 60%, transparent); background:linear-gradient(160deg, color-mix(in oklab, var(--bg-surface) 96%, transparent), color-mix(in oklab, var(--bg-surface-2) 82%, transparent)); box-shadow:0 10px 24px rgba(12,21,32,0.08); align-items:center; justify-content:center; color:var(--fg-2); padding:0; }
     .landing-bento:focus-visible{ outline:3px solid var(--focus); outline-offset:3px; }
     .landing-bento:hover{ color:var(--fg); transform:translateY(-1px); }
@@ -127,6 +129,7 @@
     html.landing-menu-open, body.landing-menu-open{ overflow:hidden; height:100%; }
 
     @media (max-width: 991.98px){
+      .landing-nav-rail{ gap:.5rem; }
       .landing-nav-actions{ display:none; }
       .landing-bento{ display:inline-flex; }
       .hero-inner{ padding: clamp(4.5rem, 14vw, 6rem) clamp(1.25rem, 6vw, 2rem) clamp(3rem, 12vw, 4rem); text-align:left; }
@@ -153,6 +156,7 @@
       .hero-inner{ padding-top: clamp(4rem, 16vw, 5rem); }
       .landing-menu__tiles{ grid-template-columns: 1fr; }
       .landing-menu__header{ flex-direction:column; align-items:flex-start; }
+      .landing-menu__actions{ width:100%; justify-content:space-between; align-items:center; align-self:stretch; }
       .landing-menu__close{ align-self:flex-end; }
     }
 
@@ -185,12 +189,36 @@
         <span class="brand-dot" aria-hidden="true"></span>
         <span>Phloat - The AI Accountant</span>
       </a>
-      <div class="landing-nav-actions">
-        <a class="btn btn-outline" href="#features">Features</a>
-        <a class="btn btn-outline" href="#advisor">AI Advisor</a>
-        <a class="btn btn-outline" href="#security">Security</a>
-        <a class="btn btn-outline" href="#faq">FAQ</a>
-        <a class="btn btn-primary" href="/api/auth/workos/login" id="loginBtn"><i class="bi bi-box-arrow-in-right me-1"></i> Login</a>
+      <div class="landing-nav-rail ms-auto">
+        <button class="theme-toggle theme-toggle--compact d-inline-flex d-lg-none" type="button" data-theme-toggle aria-pressed="false">
+          <span class="visually-hidden">Toggle colour theme</span>
+          <span class="theme-toggle__track" aria-hidden="true">
+            <i class="bi bi-brightness-high-fill theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true"></i>
+            <i class="bi bi-moon-stars-fill theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true"></i>
+            <span class="theme-toggle__thumb" aria-hidden="true"></span>
+          </span>
+          <span class="theme-toggle__label">
+            <span class="theme-toggle__label-text" data-theme-toggle-label>Light</span>
+          </span>
+        </button>
+        <button class="theme-toggle d-none d-lg-inline-flex" type="button" data-theme-toggle aria-pressed="false">
+          <span class="visually-hidden">Toggle colour theme</span>
+          <span class="theme-toggle__track" aria-hidden="true">
+            <i class="bi bi-brightness-high-fill theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true"></i>
+            <i class="bi bi-moon-stars-fill theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true"></i>
+            <span class="theme-toggle__thumb" aria-hidden="true"></span>
+          </span>
+          <span class="theme-toggle__label">
+            <span class="theme-toggle__label-text" data-theme-toggle-label>Light</span>
+          </span>
+        </button>
+        <div class="landing-nav-actions">
+          <a class="btn btn-outline" href="#features">Features</a>
+          <a class="btn btn-outline" href="#advisor">AI Advisor</a>
+          <a class="btn btn-outline" href="#security">Security</a>
+          <a class="btn btn-outline" href="#faq">FAQ</a>
+          <a class="btn btn-primary" href="/api/auth/workos/login" id="loginBtn"><i class="bi bi-box-arrow-in-right me-1"></i> Login</a>
+        </div>
       </div>
     </div>
   </nav>
@@ -202,9 +230,22 @@
         <h2 class="landing-menu__title mb-0">Explore AI Accountant</h2>
         <p class="landing-menu__subtitle mb-0">Jump straight to the tools you need or learn what’s inside.</p>
       </div>
-      <button class="landing-menu__close" type="button" id="landingMenuClose" aria-label="Close menu">
-        <i class="bi bi-x-lg"></i>
-      </button>
+      <div class="landing-menu__actions d-flex align-items-center gap-2">
+        <button class="theme-toggle theme-toggle--compact" type="button" data-theme-toggle aria-pressed="false">
+          <span class="visually-hidden">Toggle colour theme</span>
+          <span class="theme-toggle__track" aria-hidden="true">
+            <i class="bi bi-brightness-high-fill theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true"></i>
+            <i class="bi bi-moon-stars-fill theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true"></i>
+            <span class="theme-toggle__thumb" aria-hidden="true"></span>
+          </span>
+          <span class="theme-toggle__label">
+            <span class="theme-toggle__label-text" data-theme-toggle-label>Light</span>
+          </span>
+        </button>
+        <button class="landing-menu__close" type="button" id="landingMenuClose" aria-label="Close menu">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
     </div>
     <div class="landing-menu__tiles">
       <a class="landing-menu__tile" href="#features" data-close-menu>

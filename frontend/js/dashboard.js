@@ -1,1290 +1,1118 @@
-// NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // frontend/js/dashboard.js
 (function () {
-  const RANGE_KEY = 'dashboardRangeV2';
-  const DELTA_KEY = 'dashboardDeltaModeV1';
-  const RANGE_PRESETS = ['now', 'last-month', 'last-quarter', 'last-year'];
-  const tierOrder = { free: 0, starter: 1, growth: 2, premium: 3 };
+  const state = {
+    payslips: [],
+    selectedId: null,
+    chart: null,
+    statements: [],
+    statementSelectedId: null,
+    statementChart: null,
+  };
 
-  init().catch((err) => {
-    console.error('Dashboard failed to initialise', err);
-    softError('Unable to load dashboard. Please refresh.');
+  init().catch((error) => {
+    console.error('Dashboard failed to initialise', error);
+    softError('Unable to load dashboard right now. Please refresh.');
   });
 
   async function init() {
     const { me } = await Auth.requireAuth();
     Auth.setBannerTitle('Intelligence Dashboard');
-    applyTierLocks(me);
-    wireRangePicker();
-    wireDeltaButtons(me);
-    wireRefreshButton();
-    await reloadDashboard();
+
+    const [insights, payslipDataset, statementDataset] = await Promise.all([
+      loadInsights().catch((error) => {
+        console.warn('Proceeding without document insights', error);
+        return {};
+      }),
+      loadPayslipDataset(),
+      loadStatementDataset(),
+    ]);
+
+    renderDashboard({ me, insights, payslipDataset, statementDataset });
   }
 
-  function applyTierLocks(me) {
-    const tierLevel = tierOrder[me?.licenseTier] ?? 0;
-    document.querySelectorAll('[data-required-tier]').forEach((section) => {
-      const required = tierOrder[section.dataset.requiredTier] ?? Infinity;
-      const overlay = section.querySelector('[data-tier-lock]');
-      const cards = section.querySelectorAll('.card');
-      if (tierLevel < required) {
-        overlay?.classList.remove('d-none');
-        cards.forEach((c) => c.classList.add('locked'));
-      } else {
-        overlay?.classList.add('d-none');
-        cards.forEach((c) => c.classList.remove('locked'));
-      }
-    });
-  }
-
-  function defaultRange() {
-    return 'now';
-  }
-  function loadRange() {
-    const value = localStorage.getItem(RANGE_KEY);
-    if (value && RANGE_PRESETS.includes(value)) return value;
-    return defaultRange();
-  }
-  function saveRange(value) {
-    try { localStorage.setItem(RANGE_KEY, value); } catch {}
-  }
-
-  function loadDeltaMode() {
-    return localStorage.getItem(DELTA_KEY) || 'absolute';
-  }
-  function saveDeltaMode(mode) {
-    localStorage.setItem(DELTA_KEY, mode);
-  }
-
-  function wireDeltaButtons(me) {
-    const mode = (me?.preferences?.deltaMode || loadDeltaMode());
-    const btnAbs = byId('delta-absolute');
-    const btnPct = byId('delta-percent');
-    setDeltaActive(mode);
-
-    [btnAbs, btnPct].forEach((btn) => {
-      if (!btn) return;
-      btn.addEventListener('click', async () => {
-        const newMode = btn.id === 'delta-percent' ? 'percent' : 'absolute';
-        setDeltaActive(newMode);
-        saveDeltaMode(newMode);
-        try {
-          await Auth.fetch('/api/user/preferences', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ deltaMode: newMode })
-          });
-        } catch (err) {
-          console.warn('Failed to persist delta mode', err);
-        }
-        await reloadDashboard();
-      });
-    });
-  }
-
-  function setDeltaActive(mode) {
-    document.querySelectorAll('#delta-absolute,#delta-percent').forEach((btn) => {
-      if (!btn) return;
-      const active = (mode === 'percent' ? btn.id === 'delta-percent' : btn.id === 'delta-absolute');
-      btn.classList.toggle('active', active);
-      btn.classList.toggle('btn-primary', active);
-      btn.classList.toggle('btn-outline-primary', !active);
-    });
-  }
-
-  function wireRangePicker() {
-    const buttons = document.querySelectorAll('[data-range-option]');
-    const setActive = (value) => {
-      buttons.forEach((btn) => {
-        const active = btn.dataset.rangeOption === value;
-        btn.classList.toggle('active', active);
-        btn.classList.toggle('btn-primary', active);
-        btn.classList.toggle('btn-outline-primary', !active);
-      });
-    };
-
-    let current = loadRange();
-    setActive(current);
-    buttons.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const value = btn.dataset.rangeOption;
-        if (!value) return;
-        current = value;
-        saveRange(value);
-        setActive(value);
-        reloadDashboard();
-      });
-    });
-  }
-
-  async function getAnalyticsFlags() {
+  async function loadInsights() {
     try {
-      return await AnalyticsClient.getFlags();
-    } catch (err) {
-      console.warn('Failed to load feature flags, using defaults', err);
-      return { ENABLE_STAGED_LOADER_ANALYTICS: true };
-    }
-  }
-
-  async function reloadDashboard(options = {}) {
-    // TODO(analytics-cache): Once worker-backed cache is live, detect stale payloads and
-    // surface a "refreshing" indicator while background recompute runs.
-    setText('dash-year', `Tax year ${safeTaxYearLabel(new Date())}`);
-    const preset = loadRange();
-    const params = {
-      preset: preset || defaultRange(),
-      t: Date.now(),
-      granularity: 'month',
-    };
-
-    const overlay = options.overlay ?? byId('accounting-loading');
-    const showLoader = options.showLoader !== false;
-    const flags = options.flags || (showLoader ? await getAnalyticsFlags() : null);
-
-    const execute = async (stage) => {
-      const data = await AnalyticsClient.loadDashboard(params);
-      if (stage && typeof stage.finalising === 'function') stage.finalising();
-      renderDashboardPayload(data);
-    };
-
-    try {
-      if (showLoader) {
-        await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, execute);
-      } else {
-        await execute();
+      const response = await Auth.fetch('/api/user/me', { cache: 'no-store' });
+      if (!response.ok) {
+        const text = await safeRead(response);
+        throw new Error(text || `Request failed (${response.status})`);
       }
-    } catch (err) {
-      console.error('Analytics load error', err);
-      softError('Unable to load analytics data.');
-    }
-  }
-
-  function wireRefreshButton() {
-    const btn = byId('dashboard-refresh');
-    if (!btn) return;
-    const overlay = byId('accounting-loading');
-    const spinner = btn.querySelector('[data-refresh-spinner]');
-    const label = btn.querySelector('[data-refresh-label]');
-
-    btn.addEventListener('click', async () => {
-      if (btn.disabled) return;
-      btn.disabled = true;
-      spinner?.classList.remove('d-none');
-      label?.classList.add('d-none');
-      try {
-        const flags = await getAnalyticsFlags();
-        await StagedLoader.track(overlay, { enabled: Boolean(flags?.ENABLE_STAGED_LOADER_ANALYTICS) }, async (stage) => {
-          await triggerReprocess();
-          stage.finalising();
-          await reloadDashboard({ overlay, showLoader: false, flags });
-        });
-      } catch (error) {
-        console.error('Dashboard refresh failed', error);
-        softError(error?.reason || error?.message || 'Failed to refresh analytics. Please try again.');
-      } finally {
-        spinner?.classList.add('d-none');
-        label?.classList.remove('d-none');
-        btn.disabled = false;
-      }
-    });
-  }
-
-  async function triggerReprocess() {
-    const response = await Auth.fetch('/api/analytics/reprocess', { method: 'POST' });
-    if (!response.ok) {
-      let payload = null;
-      try {
-        payload = await response.json();
-      } catch (err) {
-        payload = null;
-      }
-      const error = new Error(payload?.error || 'Failed to refresh analytics');
-      error.reason = payload?.error;
+      const payload = await response.json();
+      return payload?.documentInsights || {};
+    } catch (error) {
+      console.error('Failed to load document insights', error);
       throw error;
     }
+  }
+
+  async function loadPayslipDataset() {
     try {
-      return await response.json();
-    } catch (err) {
-      return {};
+      const response = await Auth.fetch('/api/analytics/payslips', { cache: 'no-store' });
+      if (!response.ok) {
+        const text = await safeRead(response);
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const list = Array.isArray(payload?.payslips)
+        ? payload.payslips
+        : Array.isArray(payload)
+          ? payload
+          : [];
+      return { list, error: null };
+    } catch (error) {
+      console.error('Failed to load payslip dataset', error);
+      return { list: [], error };
     }
   }
 
-  function renderDashboardPayload(data) {
-    if (!data) return;
-    toggleDashboardEmpty(data.hasData);
-    updateRangeLabel(data.range);
-    renderSuggestions(data);
-    renderAccounting(data);
-    renderFinancialPosture(data);
+  async function loadStatementDataset() {
+    try {
+      const response = await Auth.fetch('/api/analytics/statements', { cache: 'no-store' });
+      if (response.status === 404) {
+        return { list: [], error: null };
+      }
+      if (!response.ok) {
+        const text = await safeRead(response);
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const list = Array.isArray(payload?.statements)
+        ? payload.statements
+        : Array.isArray(payload)
+          ? payload
+          : [];
+      return { list, error: null };
+    } catch (error) {
+      console.error('Failed to load statement dataset', error);
+      return { list: [], error };
+    }
   }
 
-  function updateRangeLabel(range) {
-    const label = range?.label || '—';
-    setText('range-current', label);
+  async function safeRead(response) {
+    try {
+      const type = response.headers.get('content-type') || '';
+      if (type.includes('application/json')) {
+        const data = await response.json();
+        if (data && typeof data === 'object') {
+          return data.error || data.message || JSON.stringify(data);
+        }
+        return JSON.stringify(data);
+      }
+      return await response.text();
+    } catch (error) {
+      console.warn('Failed to parse error response', error);
+      return '';
+    }
   }
 
-  function renderSuggestions(data) {
-    const wrap = byId('ai-suggestions');
-    const empty = byId('ai-suggestions-empty');
-    if (!wrap) return;
-    wrap.innerHTML = '';
-    const insights = Array.isArray(data.aiInsights) ? data.aiInsights : [];
-    if (!insights.length) {
-      empty?.classList.remove('d-none');
+  function renderDashboard({ insights = {}, payslipDataset = { list: [] }, statementDataset = { list: [] }, me = null } = {}) {
+    if (me?.firstName) {
+      const greeting = byId('greeting-name');
+      if (greeting) greeting.textContent = me.firstName;
+    }
+
+    const { list: rawPayslips = [], error: payslipError = null } = payslipDataset || {};
+    const payslips = normalisePayslipList(rawPayslips);
+
+    const { list: rawStatements = [], error: statementError = null } = statementDataset || {};
+    const statements = normaliseStatementList(rawStatements);
+
+    if (!payslips.length && !statements.length) {
+      if (payslipError && statementError) {
+        softError('Unable to load document analytics right now. Please refresh.');
+      } else if (payslipError) {
+        softError('Unable to load payslip data right now. Please refresh.');
+      } else if (statementError) {
+        softError('Unable to load statement data right now. Please refresh.');
+      }
+    }
+
+    toggleDashboardEmpty(!(payslips.length || statements.length));
+
+    state.payslips = payslips;
+    state.selectedId = pickDefaultSelection(payslips, state.selectedId);
+
+    renderPayslipSelector(payslips, state.selectedId);
+    const selectedPayslip = getSelectedPayslip();
+    renderPayslipSummary(selectedPayslip);
+    renderHistogram(selectedPayslip);
+    renderPayslipJson(selectedPayslip);
+
+    state.statements = statements;
+    state.statementSelectedId = pickDefaultSelection(statements, state.statementSelectedId);
+
+    renderStatementSelector(statements, state.statementSelectedId);
+    const selectedStatement = getSelectedStatement();
+    renderStatementSummary(selectedStatement);
+    renderStatementChart(selectedStatement);
+    renderStatementCategories(selectedStatement);
+    renderStatementJson(selectedStatement);
+  }
+
+  function renderPayslipSelector(payslips, selectedId) {
+    const select = byId('payslip-selector');
+    if (!select) return;
+
+    select.innerHTML = '';
+
+    if (!Array.isArray(payslips) || payslips.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No payslips available';
+      select.appendChild(option);
+      select.disabled = true;
       return;
     }
-    empty?.classList.add('d-none');
-    for (const insight of insights) {
-      const col = document.createElement('div');
-      col.className = 'col-12 col-md-6 col-xl-4';
-      col.innerHTML = `
-        <div class="border rounded h-100 p-3 bg-light">
-          <div class="d-flex align-items-center gap-2 mb-2">
-            <i class="bi bi-stars text-primary"></i>
-            <span class="fw-semibold">${escapeHtml(insight.title || 'Insight')}</span>
-          </div>
-          <p class="small mb-2">${escapeHtml(insight.body || 'Connect your accounts to unlock personalised commentary.')}</p>
-          ${insight.action ? `<button class="btn btn-sm btn-outline-primary">${escapeHtml(insight.action)}</button>` : ''}
-        </div>`;
-      wrap.appendChild(col);
-    }
-  }
 
-  function renderAccounting(data) {
-    setAccountingLoading(data.accounting?.processing);
-    const metrics = data.accounting?.metrics || [];
-    applyMetric('kpi-savings', metrics.find((m) => m.key === 'savingsCapacity'), { subId: 'kpi-savings-sub', deltaId: 'kpi-savings-delta' });
-    applyMetric('kpi-hmrc', metrics.find((m) => m.key === 'hmrcBalance'), { subId: 'kpi-hmrc-sub' });
-    applyMetric('kpi-income', metrics.find((m) => m.key === 'income'), { deltaId: 'kpi-income-delta' });
-    applyMetric('kpi-spend', metrics.find((m) => m.key === 'spend'), { deltaId: 'kpi-spend-delta' });
-    const comparatives = data.accounting?.comparatives || {};
-    setText('comparison-label', comparatives.label || 'Comparing to previous period');
+    payslips.forEach((payslip) => {
+      const option = document.createElement('option');
+      option.value = payslip.id;
+      option.textContent = payslip.optionLabel;
+      select.appendChild(option);
+    });
 
-    renderPayslipAnalytics(data.accounting?.payslipAnalytics || null, data.accounting?.rangeStatus || {});
-    renderPayslipCharts(data.accounting?.payslipAnalytics || null);
-    renderTaxPosture(data.accounting?.payslipAnalytics || null);
-    renderStatementHighlights(data.accounting?.statementHighlights || null, data.accounting?.rangeStatus || {});
-    renderSpendCategory(
-      data.accounting?.spendingCanteorgies || data.accounting?.spendByCategory || [],
-      data.accounting?.rangeStatus || {}
-    );
-    renderInflationTrend(data.accounting?.inflationTrend || []);
-    renderLargestExpenses(data.accounting?.largestExpenses || [], data.accounting?.rangeStatus || {});
-    renderDuplicates(data.accounting?.duplicates || []);
-    renderGauges('gauges', data.accounting?.allowances || []);
-    renderObligations(data.accounting?.obligations || [], data.accounting?.hmrcBalance);
-    renderAlerts(data.accounting?.alerts || []);
-  }
+    select.disabled = false;
+    select.value = selectedId || payslips[0]?.id || '';
 
-  function renderSpendCategory(categories, rangeStatus = {}) {
-    const total = categories.reduce((acc, item) => acc + Number(item.amount || 0), 0);
-    setText('spend-category-total', categories.length ? money(total) : '£—');
-    renderDonut('chart-spend-category', categories.map((c) => Math.round(Number(c.amount || 0))), categories.map((c) => c.label || c.category));
-    const tbody = byId('spend-category-table');
-    const empty = byId('spend-category-empty');
-    if (tbody) {
-      tbody.innerHTML = '';
-      categories.forEach((cat) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${escapeHtml(cat.label || cat.category || 'Category')}</td>
-          <td class="text-end">${money(cat.amount)}</td>
-          <td class="text-end">${((cat.share || 0) * 100).toFixed(1)}%</td>`;
-        tbody.appendChild(tr);
+    if (!select.dataset.bound) {
+      select.addEventListener('change', (event) => {
+        const id = event.target.value || null;
+        state.selectedId = id;
+        const selected = getSelectedPayslip();
+        renderPayslipSummary(selected);
+        renderHistogram(selected);
+        renderPayslipJson(selected);
       });
-    }
-    if (!categories.length) {
-      empty?.classList.remove('d-none');
-      if (empty) empty.textContent = rangeStatus.statements || 'No spending captured for this range.';
-    } else {
-      empty?.classList.add('d-none');
+      select.dataset.bound = 'true';
     }
   }
 
-  function renderInflationTrend(points) {
-    const labels = points.map((p) => p.label);
-    const nominal = points.map((p) => p.nominal);
-    const real = points.map((p) => p.real);
-    renderLineMulti('chart-inflation-trend', labels, [
-      { label: 'Nominal', data: nominal },
-      { label: 'Real', data: real }
-    ]);
+  function getSelectedPayslip() {
+    if (!state.selectedId) return null;
+    return state.payslips.find((item) => item.id === state.selectedId) || null;
   }
 
-  function renderPayslipAnalytics(analytics, rangeStatus = {}) {
+  function renderPayslipSummary(payslip) {
     const empty = byId('payslip-empty');
-    const grossEl = byId('payslip-gross');
-    const grossYtdEl = byId('payslip-gross-ytd');
-    const netEl = byId('payslip-net');
-    const netYtdEl = byId('payslip-net-ytd');
-    const dedEl = byId('payslip-deductions');
-    const taxCodeEl = byId('payslip-tax-code');
-    const emtrEl = byId('payslip-emtr');
-    const emtrCompareEl = byId('payslip-emtr-compare');
-    const notesEl = byId('payslip-notes');
-    const freqEl = byId('payslip-frequency');
-    const earningsTable = byId('payslip-earnings-table')?.querySelector('tbody');
-    const deductionsTable = byId('payslip-deductions-table')?.querySelector('tbody');
+    const content = byId('payslip-content');
 
-    if (!analytics || Object.keys(analytics).length === 0) {
-      if (grossEl) grossEl.textContent = '£—';
-      if (grossYtdEl) grossYtdEl.textContent = '';
-      if (netEl) netEl.textContent = '£—';
-      if (netYtdEl) netYtdEl.textContent = '';
-      if (dedEl) dedEl.textContent = '£—';
-      if (taxCodeEl) taxCodeEl.textContent = '';
-      if (emtrEl) emtrEl.textContent = '—%';
-      if (emtrCompareEl) emtrCompareEl.textContent = '';
-      if (freqEl) freqEl.textContent = '—';
-      if (earningsTable) earningsTable.innerHTML = '';
-      if (deductionsTable) deductionsTable.innerHTML = '';
-      if (notesEl) notesEl.textContent = '';
+    if (!payslip) {
+      if (content) content.classList.add('d-none');
       if (empty) {
-        empty.textContent = rangeStatus.payslip || 'Upload a current payslip to unlock granular analytics.';
+        empty.textContent = 'Upload a payslip or choose one from the selector to explore your earnings and deductions.';
         empty.classList.remove('d-none');
       }
+      setText('payslip-tax-code', '—');
+      setText('payslip-earnings-ytd', '£—');
+      setText('payslip-deductions-ytd', '£—');
+      setText('payslip-gross', '£—');
+      setText('payslip-net', '£—');
+      setText('payslip-deductions', '£—');
+      setText('payslip-period', '—');
+      setText('payslip-frequency', '—');
+      setText('payslip-paydate', '—');
+      setText('payslip-uploaded', '—');
+      setText('payslip-employer', '—');
+      clearTable(byId('payslip-earnings-body'));
+      clearTable(byId('payslip-deductions-body'));
       return;
     }
 
     empty?.classList.add('d-none');
-    if (grossEl) grossEl.textContent = analytics.gross != null ? money(analytics.gross) : '£—';
-    if (grossYtdEl) grossYtdEl.textContent = analytics.grossYtd != null ? `YTD ${money(analytics.grossYtd)}` : '';
-    if (netEl) netEl.textContent = analytics.net != null ? money(analytics.net) : '£—';
-    if (netYtdEl) netYtdEl.textContent = analytics.netYtd != null ? `YTD ${money(analytics.netYtd)}` : '';
-    if (dedEl) dedEl.textContent = analytics.totalDeductions != null ? money(analytics.totalDeductions) : '£—';
-    if (taxCodeEl) taxCodeEl.textContent = analytics.taxCode ? `Tax code ${analytics.taxCode}` : '';
-    const emtr = typeof analytics.effectiveMarginalRate === 'number' ? analytics.effectiveMarginalRate : null;
-    if (emtrEl) emtrEl.textContent = emtr != null ? `${(emtr * 100).toFixed(1)}%` : '—%';
-    if (emtrCompareEl) {
-      emtrCompareEl.classList.remove('text-danger', 'text-success', 'text-muted');
-      emtrCompareEl.classList.add('small');
-      const expected = typeof analytics.expectedMarginalRate === 'number' ? analytics.expectedMarginalRate : null;
-      if (expected != null && emtr != null) {
-        const delta = analytics.marginalRateDelta != null ? analytics.marginalRateDelta : emtr - expected;
-        const arrow = delta > 0.02 ? '▲' : delta < -0.02 ? '▼' : '•';
-        emtrCompareEl.textContent = `${arrow} expected ${(expected * 100).toFixed(1)}%`;
-        emtrCompareEl.classList.add(Math.abs(delta) <= 0.02 ? 'text-muted' : delta > 0.02 ? 'text-danger' : 'text-success');
-      } else {
-        emtrCompareEl.textContent = '';
-        emtrCompareEl.classList.add('text-muted');
-      }
-    }
-    if (freqEl) freqEl.textContent = analytics.payFrequency || '—';
+    content?.classList.remove('d-none');
 
-    const renderRows = (tbody, rows) => {
-      if (!tbody) return;
-      tbody.innerHTML = '';
-      if (!Array.isArray(rows) || !rows.length) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td colspan="2" class="text-muted small">No data</td>';
-        tbody.appendChild(tr);
-        return;
-      }
-      rows.slice(0, 6).forEach((row) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${escapeHtml(row.label || row.category || 'Item')}</td>
-          <td class="text-end">${money(row.amount)}</td>`;
-        tbody.appendChild(tr);
-      });
-    };
+    setText('payslip-period', payslip.periodLabel || '—');
+    setText('payslip-frequency', payslip.payFrequency || '—');
+    setText('payslip-tax-code', payslip.taxCode || '—');
+    setText(
+      'payslip-earnings-ytd',
+      formatMoney(Number.isFinite(payslip.earningsYtdTotal) ? payslip.earningsYtdTotal : undefined),
+    );
+    setText(
+      'payslip-deductions-ytd',
+      formatMoney(Number.isFinite(payslip.deductionsYtdTotal) ? payslip.deductionsYtdTotal : undefined),
+    );
+    setText('payslip-gross', formatMoney(Number.isFinite(payslip.gross) ? payslip.gross : undefined));
+    setText('payslip-net', formatMoney(Number.isFinite(payslip.net) ? payslip.net : undefined));
+    setText(
+      'payslip-deductions',
+      formatMoney(Number.isFinite(payslip.deductionsTotal) ? payslip.deductionsTotal : undefined),
+    );
+    setText('payslip-paydate', payslip.payDateLabel || '—');
+    setText('payslip-uploaded', payslip.uploadedLabel || '—');
+    setText('payslip-employer', payslip.employer || '—');
 
-    renderRows(earningsTable, analytics.earnings || []);
-    renderRows(deductionsTable, analytics.deductions || []);
-
-    const notes = [];
-    if (Array.isArray(analytics.notes) && analytics.notes.length) {
-      notes.push(...analytics.notes);
-    }
-    if (Array.isArray(analytics.allowances) && analytics.allowances.length) {
-      notes.push(`Allowances: ${analytics.allowances.map((a) => `${a.label || 'Allowance'} ${money(a.amount)}`).join(', ')}`);
-    }
-    if (Array.isArray(analytics.earnings) && analytics.earnings.length && analytics.takeHomePercent != null) {
-      notes.push(`Take-home ${(analytics.takeHomePercent * 100).toFixed(1)}% of gross.`);
-    }
-    if (notesEl) notesEl.textContent = notes.join(' ');
+    renderLineItems(byId('payslip-earnings-body'), payslip.earnings);
+    renderLineItems(byId('payslip-deductions-body'), payslip.deductions);
   }
 
-  function renderPayslipCharts(analytics) {
-    const earnings = Array.isArray(analytics?.earnings) ? analytics.earnings : [];
-    const deductions = Array.isArray(analytics?.deductions) ? analytics.deductions : [];
-    const note = byId('payslip-breakdown-note');
-    const hasData = earnings.length || deductions.length;
-    if (note) {
-      note.textContent = hasData
-        ? 'Aggregated from payslip documents in range.'
-        : 'Upload payslips covering this range to visualise earnings and deductions mix.';
-    }
-    const earningLabels = earnings.map((row) => row.label || row.category || 'Earning');
-    const earningValues = earnings.map((row) => Math.max(0, Number(row.amount || 0)));
-    const deductionLabels = deductions.map((row) => row.label || row.category || 'Deduction');
-    const deductionValues = deductions.map((row) => Math.max(0, Number(row.amount || 0)));
-    renderBar('chart-payslip-earnings', earningLabels, earningValues, { horizontal: true, currency: true });
-    renderBar('chart-payslip-deductions', deductionLabels, deductionValues, { horizontal: true, currency: true });
-  }
+  function renderHistogram(payslip) {
+    const empty = byId('payslip-chart-empty');
+    const wrapper = byId('payslip-chart-wrapper');
+    const canvas = byId('payslip-chart');
+    if (!empty || !wrapper || !canvas) return;
 
-  function renderTaxPosture(analytics) {
-    setMoneyOrDash('payslip-tax-total', analytics?.tax);
-    setMoneyOrDash('payslip-ni-total', analytics?.ni);
-    setMoneyOrDash('payslip-pension-total', analytics?.pension);
-    setMoneyOrDash('payslip-student-total', analytics?.studentLoan);
-    const badge = byId('tax-curve-income');
-    const note = byId('tax-curve-note');
-    const annualised = typeof analytics?.annualisedGross === 'number' ? Math.round(analytics.annualisedGross) : null;
-    if (badge) {
-      badge.textContent = annualised != null ? `Annualised £${annualised.toLocaleString()}` : 'Annualised income unavailable';
+    const defaultMessage = 'Select a payslip to generate the earnings vs deductions histogram.';
+    if (empty.textContent !== defaultMessage) {
+      empty.textContent = defaultMessage;
     }
-    if (note) {
-      if (analytics && (analytics.tax || analytics.ni || analytics.pension || analytics.studentLoan)) {
-        note.textContent = 'Based on the latest payslip deductions and annualised earnings.';
-      } else {
-        note.textContent = 'Provide a payslip in this range to unlock tax insights.';
-      }
-    }
-    const curve = buildEmtrCurve(analytics?.annualisedGross);
-    const overlays = [];
-    const maxIncome = curve.length ? curve[curve.length - 1].income : Math.max(annualised || 0, 0);
-    const effective = typeof analytics?.effectiveMarginalRate === 'number' ? analytics.effectiveMarginalRate : null;
-    const expected = typeof analytics?.expectedMarginalRate === 'number' ? analytics.expectedMarginalRate : null;
-    const observedIncome = annualised || maxIncome || 0;
-    if (effective != null && observedIncome > 0) {
-      overlays.push({ label: 'Effective marginal rate', rate: effective, income: observedIncome });
-    }
-    if (expected != null && observedIncome > 0 && Math.abs(expected - effective) > 0.001) {
-      overlays.push({ label: 'Expected marginal rate', rate: expected, income: observedIncome, dashed: true });
-    }
-    renderEMTR('chart-tax-emtr', curve, overlays);
-  }
 
-  function renderStatementHighlights(highlights, rangeStatus = {}) {
-    setMoneyOrDash('statement-income', highlights?.totalIncome);
-    setMoneyOrDash('statement-spend', highlights?.totalSpend);
-    const topList = byId('statement-top-categories');
-    const topEmpty = byId('statement-top-empty');
-    const expenseList = byId('statement-largest-expenses');
-    const expenseEmpty = byId('statement-expense-empty');
-    const accountsList = byId('statement-account-summary');
-    const accountsEmpty = byId('statement-account-empty');
-    const transferNote = byId('statement-transfer-note');
-    if (topList) {
-      topList.innerHTML = '';
-      const items = Array.isArray(highlights?.topCategories) ? highlights.topCategories : [];
-      if (!items.length) {
-        if (topEmpty) {
-          topEmpty.textContent = rangeStatus.statements || 'No spending categories identified.';
-          topEmpty.classList.remove('d-none');
-        }
-      } else {
-        topEmpty?.classList.add('d-none');
-        items.slice(0, 5).forEach((item) => {
-          const li = document.createElement('li');
-          li.className = 'd-flex justify-content-between align-items-center mb-2';
-          li.innerHTML = `
-            <span>${escapeHtml(item.category || 'Category')}</span>
-            <span class="fw-semibold">${money(item.outflow ?? item.amount)}</span>`;
-          topList.appendChild(li);
-        });
-      }
-    }
-    if (expenseList) {
-      expenseList.innerHTML = '';
-      const items = Array.isArray(highlights?.largestExpenses) ? highlights.largestExpenses : [];
-      if (!items.length) {
-        if (expenseEmpty) {
-          expenseEmpty.textContent = rangeStatus.statements || 'No major outgoings detected.';
-          expenseEmpty.classList.remove('d-none');
-        }
-      } else {
-        expenseEmpty?.classList.add('d-none');
-        items.slice(0, 5).forEach((item) => {
-          const li = document.createElement('li');
-          li.className = 'd-flex justify-content-between align-items-center mb-2';
-          const dateLabel = item.date ? new Date(item.date).toLocaleDateString() : '—';
-          li.innerHTML = `
-            <div>
-              <div class="fw-semibold">${escapeHtml(item.description || 'Transaction')}</div>
-              <div class="text-muted small">${escapeHtml(item.category || '—')} · ${dateLabel}</div>
-            </div>
-            <span class="fw-semibold">${money(item.amount)}</span>`;
-          expenseList.appendChild(li);
-        });
-      }
-    }
-    if (accountsList) {
-      accountsList.innerHTML = '';
-      const accounts = Array.isArray(highlights?.accounts) ? highlights.accounts : [];
-      if (!accounts.length) {
-        if (accountsEmpty) {
-          accountsEmpty.textContent = rangeStatus.statements || 'No accounts captured in this range.';
-          accountsEmpty.classList.remove('d-none');
-        }
-      } else {
-        accountsEmpty?.classList.add('d-none');
-        accounts.slice(0, 6).forEach((account) => {
-          const li = document.createElement('li');
-          li.className = 'd-flex justify-content-between align-items-center mb-1';
-          const label = [account.bankName, account.accountName].filter(Boolean).join(' · ') || account.accountName || 'Account';
-          const masked = account.accountNumberMasked ? ` · ${escapeHtml(account.accountNumberMasked)}` : '';
-          li.innerHTML = `
-            <div>
-              <div class="fw-semibold">${escapeHtml(label)}${masked}</div>
-              <div class="text-muted small">Income ${money(account.totals?.income || 0)} · Spend ${money(account.totals?.spend || 0)}</div>
-            </div>`;
-          accountsList.appendChild(li);
-        });
-      }
-    }
-    if (transferNote) {
-      const count = Number(highlights?.transferCount || 0);
-      if (count > 0) {
-        transferNote.textContent = `${count} potential transfers omitted from spending totals.`;
-        transferNote.classList.remove('d-none');
-      } else {
-        transferNote.classList.add('d-none');
-      }
-    }
-  }
-
-  function renderLargestExpenses(expenses, rangeStatus = {}) {
-    const table = byId('largest-expense-table');
-    const tbody = table?.querySelector('tbody');
-    const empty = byId('largest-expense-empty');
-    if (tbody) tbody.innerHTML = '';
-    if (!Array.isArray(expenses) || !expenses.length) {
-      if (empty) {
-        empty.textContent = rangeStatus.statements || 'No significant spending detected.';
-        empty.classList.remove('d-none');
-      }
+    if (!payslip || (!payslip.earnings.length && !payslip.deductions.length)) {
+      destroyChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
       return;
     }
-    empty?.classList.add('d-none');
-    expenses.slice(0, 8).forEach((expense) => {
-      const tr = document.createElement('tr');
-      const date = expense.date ? new Date(expense.date).toLocaleDateString() : '—';
-      tr.innerHTML = `
-        <td>${escapeHtml(expense.description || 'Transaction')}</td>
-        <td>${date}</td>
-        <td class="text-end">${money(expense.amount)}</td>
-        <td class="text-end">${escapeHtml(expense.category || '—')}</td>`;
-      tbody?.appendChild(tr);
-    });
-  }
 
-  function setAccountingLoading(processing) {
-    const section = byId('accounting-section');
-    const overlay = byId('accounting-loading');
-    if (!section || !overlay) return;
-    const active = Boolean(processing?.active);
-    const stageState = overlay.dataset.stagedLoader;
-    if (stageState === 'active') {
-      overlay.dataset.pendingProcessing = JSON.stringify({
-        active,
-        message: processing?.message || 'Updating…',
-      });
+    if (typeof window.Chart === 'undefined') {
+      console.warn('Chart.js is not available.');
+      destroyChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      empty.textContent = 'Chart library unavailable. Install Chart.js to view the histogram.';
       return;
     }
-    if (stageState === 'error') return;
-    section.classList.toggle('is-loading', active);
-    overlay.classList.toggle('d-none', !active);
-    const msgEl = overlay.querySelector('[data-loading-message]');
-    if (msgEl) msgEl.textContent = processing?.message || 'Updating…';
-    const reasonEl = overlay.querySelector('[data-loading-reason]');
-    if (!active && reasonEl) {
-      reasonEl.textContent = '';
-      reasonEl.classList.add('d-none');
-    }
-  }
 
-  function renderDuplicates(duplicates) {
-    const table = byId('duplicates-table');
-    const empty = byId('duplicates-empty');
-    const tbody = table?.querySelector('tbody');
-    if (tbody) tbody.innerHTML = '';
-    if (!Array.isArray(duplicates) || !duplicates.length) {
-      empty?.classList.remove('d-none');
-      return;
-    }
-    empty?.classList.add('d-none');
-    duplicates.slice(0, 8).forEach((dup) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${escapeHtml(dup.date || '')}</td>
-        <td>${escapeHtml(dup.description || 'Transaction')}</td>
-        <td class="text-end">${money(dup.amount)}</td>
-        <td class="text-end">${dup.count || 0}</td>`;
-      tbody?.appendChild(tr);
-    });
-  }
+    const labels = [...new Set([
+      ...payslip.earnings.map((item) => item.label),
+      ...payslip.deductions.map((item) => item.label),
+    ])];
+    const earningsMap = new Map(payslip.earnings.map((item) => [item.label, Number(item.amount || 0)]));
+    const deductionsMap = new Map(payslip.deductions.map((item) => [item.label, Number(item.amount || 0)]));
+    const earningsData = labels.map((label) => earningsMap.get(label) || 0);
+    const deductionsData = labels.map((label) => -(deductionsMap.get(label) || 0));
 
-  function renderObligations(obligations, hmrcBalance) {
-    const badge = byId('hmrc-balance');
-    if (badge) badge.textContent = hmrcBalance ? money(hmrcBalance.value) : '£—';
-    const tbody = byId('obligations-table')?.querySelector('tbody');
-    const empty = byId('obligations-empty');
-    if (tbody) tbody.innerHTML = '';
-    if (!Array.isArray(obligations) || !obligations.length) {
-      empty?.classList.remove('d-none');
-      return;
-    }
-    empty?.classList.add('d-none');
-    obligations.forEach((item) => {
-      const tr = document.createElement('tr');
-      const due = item.dueDate ? new Date(item.dueDate).toLocaleDateString() : '—';
-      tr.innerHTML = `
-        <td>${due}</td>
-        <td>${escapeHtml(item.title || 'Obligation')}</td>
-        <td class="text-end">${money(item.amountDue)}</td>`;
-      tbody?.appendChild(tr);
-    });
-  }
+    destroyChart();
 
-  function renderAlerts(alerts) {
-    const wrap = byId('alert-queue');
-    const empty = byId('alerts-empty');
-    if (!wrap) return;
-    wrap.innerHTML = '';
-    if (!Array.isArray(alerts) || !alerts.length) {
-      empty?.classList.remove('d-none');
-      return;
-    }
-    empty?.classList.add('d-none');
-    const severityClass = (sev) => ({ danger: 'alert-danger', warning: 'alert-warning', info: 'alert-info', success: 'alert-success' }[sev] || 'alert-secondary');
-    alerts.forEach((alert) => {
-      const div = document.createElement('div');
-      div.className = `alert ${severityClass(alert.severity)} mb-0`;
-      div.innerHTML = `
-        <div class="fw-semibold">${escapeHtml(alert.title || 'Alert')}</div>
-        <div class="small mb-0">${escapeHtml(alert.body || '')}</div>`;
-      wrap.appendChild(div);
-    });
-  }
+    const ctx = canvas.getContext('2d');
+    const computedStyle = getComputedStyle(document.documentElement);
+    const success = computedStyle.getPropertyValue('--bs-success-rgb') || '25,135,84';
+    const danger = computedStyle.getPropertyValue('--bs-danger-rgb') || '220,53,69';
+    const textMuted = computedStyle.getPropertyValue('--bs-secondary-color') || '#6c757d';
 
-  function applyMetric(id, metric, opts = {}) {
-    const el = byId(id);
-    if (!el) return;
-    if (!metric) {
-      el.textContent = '—';
-      if (opts.subId) setText(opts.subId, 'No data — upload documents in the vault to get started.');
-      if (opts.deltaId) setText(opts.deltaId, '');
-      return;
-    }
-    if (metric.format === 'currency') el.textContent = money(metric.value);
-    else el.textContent = metric.value ?? '—';
-
-    if (opts.subId) setText(opts.subId, metric.subLabel || '');
-    if (opts.deltaId) setText(opts.deltaId, formatDelta(metric.delta, metric.deltaMode));
-    if (opts.noteId) setText(opts.noteId, metric.note || '');
-    if (opts.subtleId) setText(opts.subtleId, metric.subtle || '');
-
-    const card = el.closest('[data-metric-card]');
-    if (card) {
-      if (metric.sourceNote) {
-        card.setAttribute('title', metric.sourceNote);
-      } else {
-        card.removeAttribute('title');
-      }
-    }
-  }
-
-  function formatDelta(delta, mode) {
-    if (delta == null) return '';
-    const positive = delta > 0;
-    const symbol = positive ? '▲' : delta < 0 ? '▼' : '•';
-    if (mode === 'percent') {
-      return `${symbol} ${Math.abs(delta).toFixed(1)}%`;
-    }
-    return `${symbol} £${Math.abs(delta).toLocaleString()}`;
-  }
-
-  function renderFinancialPosture(data) {
-    const fp = data.financialPosture || {};
-    const netWorth = fp.netWorth || {};
-    setText('fp-networth-date', netWorth.asOf || '—');
-    setText('fp-networth-total', money(netWorth.total));
-    const breakdown = Array.isArray(fp.breakdown) ? fp.breakdown : [];
-    const list = byId('fp-networth-breakdown');
-    if (list) {
-      list.innerHTML = '';
-      breakdown.forEach((row) => {
-        const li = document.createElement('li');
-        li.innerHTML = `<span>${escapeHtml(row.label || '')}</span><span class="float-end fw-semibold">${money(row.value)}</span>`;
-        list.appendChild(li);
-      });
-    }
-    const history = buildNetWorthHistory(fp, data.accounting?.timeseriesV1 || null);
-    if (history.values.length) {
-      renderLine('networth-trend-chart', history.labels, history.values);
-    } else {
-      renderLine('networth-trend-chart', [], []);
-    }
-    const deltaEl = byId('fp-networth-delta');
-    if (deltaEl) {
-      deltaEl.classList.remove('text-success', 'text-danger', 'text-muted');
-      if (history.values.length >= 2) {
-        const first = history.values[0];
-        const last = history.values[history.values.length - 1];
-        const delta = last - first;
-        const pct = first !== 0 ? (delta / Math.abs(first)) * 100 : null;
-        const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '•';
-        const pctLabel = pct != null ? ` (${delta >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%)` : '';
-        deltaEl.textContent = `${arrow} ${money(Math.abs(delta))}${pctLabel}`;
-        deltaEl.classList.add(delta > 0 ? 'text-success' : delta < 0 ? 'text-danger' : 'text-muted');
-      } else {
-        deltaEl.textContent = '—';
-        deltaEl.classList.add('text-muted');
-      }
-    }
-    toggleEmpty('fp-networth-empty', !breakdown.length && !history.values.length);
-    renderDonut('fp-networth-chart', breakdown.map((b) => b.value), breakdown.map((b) => b.label));
-    renderAssetDistribution(fp);
-    renderDonut('fp-allocation-chart', (fp.assetMix || []).map((a) => a.value), (fp.assetMix || []).map((a) => a.label));
-    setText('liquidity-note', fp.liquidity?.label || '—');
-
-    renderNetCashflow(data.accounting?.timeseriesV1 || null);
-
-    setMoneyOrDash('savings-monthly', fp.savings?.monthlyCapacity);
-    const note = byId('savings-note');
-    if (note) note.textContent = fp.savings?.note || 'Connect accounts to track affordability.';
-    setMoneyOrDash('savings-essentials', fp.savings?.essentials);
-    setMoneyOrDash('savings-discretionary', fp.savings?.discretionary);
-    setMoneyOrDash('savings-contributions', fp.savings?.contributions);
-    const rateEl = byId('savings-rate');
-    if (rateEl) rateEl.textContent = fp.savings?.savingsRate != null ? `${(fp.savings.savingsRate * 100).toFixed(1)}%` : '—%';
-    const hasSavingsData = fp.savings && (fp.savings.monthlyCapacity != null || fp.savings.essentials != null || fp.savings.discretionary != null);
-    toggleEmpty('savings-empty', !hasSavingsData);
-
-    const topCostsBody = byId('fp-top-costs-body');
-    if (topCostsBody) {
-      topCostsBody.innerHTML = '';
-      (fp.topCosts || []).forEach((item) => {
-        const ch = Number(item.change || 0);
-        const cls = ch > 0 ? 'text-danger' : ch < 0 ? 'text-success' : 'text-muted';
-        const arrow = ch > 0 ? '▲' : ch < 0 ? '▼' : '•';
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${escapeHtml(item.label || '')}</td>
-          <td class="text-end">${money(item.value)}</td>
-          <td class="text-end ${cls}"><span class="fw-semibold">${arrow} ${Math.abs(ch)}%</span></td>`;
-        topCostsBody.appendChild(tr);
-      });
-    }
-  }
-
-  function renderNetCashflow(timeseries) {
-    const chartId = 'chart-net-cashflow';
-    const summary = byId('net-cashflow-summary');
-    if (!timeseries || !Array.isArray(timeseries.series) || !timeseries.series.length) {
-      renderLine(chartId, [], []);
-      if (summary) {
-        summary.textContent = 'No transactions captured in this range yet.';
-        summary.classList.add('text-muted');
-        summary.classList.remove('text-success', 'text-danger');
-      }
-      return;
-    }
-    const granularity = timeseries.granularity || 'month';
-    const labels = timeseries.series.map((point) => formatTimeseriesLabel(point.ts, granularity));
-    const values = timeseries.series.map((point) => AnalyticsClient.minorToMajor(point.valueMinor || 0));
-    renderLine(chartId, labels, values);
-    if (summary) {
-      const first = values[0];
-      const last = values[values.length - 1];
-      const delta = last - first;
-      const pct = first !== 0 ? (delta / Math.abs(first)) * 100 : null;
-      if (delta === 0) {
-        summary.textContent = 'No change in net cashflow across the selected range.';
-        summary.classList.add('text-muted');
-        summary.classList.remove('text-success', 'text-danger');
-      } else {
-        const arrow = delta > 0 ? '▲' : '▼';
-        const pctLabel = pct != null ? ` (${delta >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%)` : '';
-        summary.textContent = `${arrow} ${money(Math.abs(delta))}${pctLabel} change across the selected range.`;
-        summary.classList.toggle('text-success', delta > 0);
-        summary.classList.toggle('text-danger', delta < 0);
-        summary.classList.remove('text-muted');
-      }
-    }
-  }
-
-  function renderAssetDistribution(fp) {
-    const data = computeAssetDistribution(fp);
-    const note = byId('asset-distribution-note');
-    const empty = byId('asset-distribution-empty');
-    if (!data.length) {
-      renderDonut('asset-distribution-chart', [], []);
-      if (note) note.classList.add('d-none');
-      if (empty) empty.classList.remove('d-none');
-      return;
-    }
-    note?.classList.remove('d-none');
-    empty?.classList.add('d-none');
-    renderDonut('asset-distribution-chart', data.map(([, value]) => value), data.map(([label]) => label));
-  }
-
-  function computeAssetDistribution(fp) {
-    const buckets = new Map([
-      ['Current accounts', 0],
-      ['Savings accounts', 0],
-      ['Investments', 0],
-    ]);
-    const push = (key, value) => {
-      if (value == null) return;
-      const num = Number(value);
-      if (!Number.isFinite(num) || num === 0) return;
-      buckets.set(key, (buckets.get(key) || 0) + num);
-    };
-    const net = fp.netWorth || {};
-    push('Current accounts', net.cash);
-    push('Current accounts', net.currentAccounts);
-    push('Savings accounts', net.savings);
-    push('Savings accounts', net.deposits);
-    push('Investments', net.investments);
-    if (Array.isArray(fp.assetMix)) {
-      fp.assetMix.forEach((item) => {
-        const label = String(item.label || '').toLowerCase();
-        const value = Number(item.value || 0);
-        if (!Number.isFinite(value) || value === 0) return;
-        if (label.includes('current') || label.includes('cash') || label.includes('checking')) {
-          push('Current accounts', value);
-        } else if (label.includes('savings') || label.includes('deposit')) {
-          push('Savings accounts', value);
-        } else if (label.includes('investment') || label.includes('isa') || label.includes('pension') || label.includes('equity')) {
-          push('Investments', value);
-        }
-      });
-    }
-    return Array.from(buckets.entries()).filter(([, value]) => Math.abs(value) > 1);
-  }
-
-  function buildNetWorthHistory(fp, timeseries) {
-    const candidates = [];
-    if (Array.isArray(fp.netWorthHistory)) {
-      candidates.push(mapHistoryPoints(fp.netWorthHistory));
-    }
-    if (Array.isArray(fp.trends)) {
-      candidates.push(mapHistoryPoints(fp.trends, { valueKeys: ['netWorth', 'value', 'amount'] }));
-    }
-    if (Array.isArray(fp.investments?.history)) {
-      candidates.push(mapHistoryPoints(fp.investments.history, { valueKeys: ['value', 'real'] }));
-    }
-    const direct = candidates.find((arr) => arr.length);
-    if (direct) {
-      return { labels: direct.map((p) => p.label), values: direct.map((p) => p.value) };
-    }
-    const netTotal = typeof fp.netWorth?.total === 'number' ? Number(fp.netWorth.total) : null;
-    const series = Array.isArray(timeseries?.series) ? timeseries.series : [];
-    if (netTotal != null && series.length) {
-      const granularity = timeseries.granularity || 'month';
-      const labels = series.map((point) => formatTimeseriesLabel(point.ts, granularity));
-      const values = new Array(series.length);
-      let running = netTotal;
-      for (let i = series.length - 1; i >= 0; i--) {
-        values[i] = running;
-        running -= AnalyticsClient.minorToMajor(series[i].valueMinor || 0);
-      }
-      return { labels, values };
-    }
-    return { labels: [], values: [] };
-  }
-
-  function mapHistoryPoints(points, opts = {}) {
-    const valueKeys = Array.isArray(opts.valueKeys) ? opts.valueKeys : ['value', 'netWorth', 'amount', 'total'];
-    const labelKeys = Array.isArray(opts.labelKeys) ? opts.labelKeys : ['label', 'period', 'date', 'ts', 'month', 'year'];
-    return points
-      .map((point) => {
-        let value = null;
-        for (const key of valueKeys) {
-          const candidate = point?.[key];
-          if (candidate == null) continue;
-          const num = Number(candidate);
-          if (Number.isFinite(num)) {
-            value = num;
-            break;
-          }
-        }
-        if (value == null) return null;
-        let label = null;
-        for (const key of labelKeys) {
-          if (point?.[key]) {
-            label = point[key];
-            break;
-          }
-        }
-        if (!label && point?.period?.start) label = point.period.start;
-        if (!label && point?.period?.label) label = point.period.label;
-        if (!label) label = '';
-        return { label: formatTimeseriesLabel(label, 'month'), value };
-      })
-      .filter(Boolean);
-  }
-
-  function toggleDashboardEmpty(hasData) {
-    const el = byId('dashboard-empty-state');
-    if (!el) return;
-    if (hasData) el.classList.add('d-none');
-    else el.classList.remove('d-none');
-  }
-
-  // ----- Charts -----
-  function renderWaterfall(canvasId, steps) {
-    const el = byId(canvasId);
-    if (!el || !window.Chart) return;
-    if (el._chart) el._chart.destroy();
-    if (!Array.isArray(steps) || !steps.length) {
-      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
-      return;
-    }
-    const labels = steps.map((s) => s.label);
-    const values = steps.map((s) => Math.max(0, Number(s.amount || 0)));
-    el._chart = new Chart(el, {
+    state.chart = new window.Chart(ctx, {
       type: 'bar',
-      data: { labels, datasets: [{ data: values, backgroundColor: themeColors(values.length), borderWidth: 0 }] },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
-        scales: {
-          x: { stacked: false },
-          y: { beginAtZero: true, ticks: { callback: (v) => money(v) } }
-        }
-      }
-    });
-  }
-
-  function buildEmtrCurve(annualisedGross) {
-    const base = Number(annualisedGross || 0);
-    const maxIncome = Math.max(60000, Math.ceil((base || 60000) * 1.3 / 1000) * 1000);
-    const step = Math.max(1000, Math.round(maxIncome / 40 / 500) * 500 || 1000);
-    const curve = [];
-    for (let income = 0; income <= maxIncome; income += step) {
-      curve.push({ income, rate: marginalRateAt(income) });
-    }
-    if (!curve.length || curve[curve.length - 1].income !== maxIncome) {
-      curve.push({ income: maxIncome, rate: marginalRateAt(maxIncome) });
-    }
-    return curve;
-  }
-
-  function marginalRateAt(income) {
-    const PA = 12570;
-    const BASIC_END = 50270;
-    const ADDL_START = 125140;
-    if (income > 100000 && income <= ADDL_START) return 0.60;
-    if (income > ADDL_START) return 0.45;
-    if (income > BASIC_END) return 0.40;
-    if (income > PA) return 0.20;
-    return 0;
-  }
-
-  function renderEMTR(canvasId, points, overlays = []) {
-    const el = byId(canvasId);
-    if (!el || !window.Chart) return;
-    if (el._chart) el._chart.destroy();
-    if (!Array.isArray(points) || !points.length) {
-      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
-      return;
-    }
-    const baseColor = themeColors(Math.max(2, overlays.length + 1));
-    const datasets = [
-      {
-        label: 'EMTR curve',
-        data: points.map((p) => ({ x: Number(p.income || 0), y: Number(p.rate || 0) * 100 })),
-        borderColor: baseColor[0],
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        tension: 0.25,
-        pointRadius: 0,
-        fill: false,
-      },
-    ];
-    overlays.forEach((overlay, idx) => {
-      if (typeof overlay?.rate !== 'number') return;
-      const income = Number(overlay.income || points[points.length - 1].income || 0);
-      if (!(income > 0)) return;
-      const color = overlay.color || baseColor[(idx + 1) % baseColor.length];
-      const ratePct = overlay.rate * 100;
-      datasets.push({
-        label: overlay.label || 'Observed rate',
-        data: [
-          { x: 0, y: ratePct },
-          { x: income, y: ratePct },
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Earnings',
+            data: earningsData,
+            backgroundColor: `rgba(${success.trim()},0.85)`,
+            borderRadius: 6,
+            maxBarThickness: 36,
+          },
+          {
+            label: 'Deductions',
+            data: deductionsData,
+            backgroundColor: `rgba(${danger.trim()},0.85)`,
+            borderRadius: 6,
+            maxBarThickness: 36,
+          },
         ],
-        borderColor: color,
-        backgroundColor: color,
-        borderWidth: 2,
-        borderDash: overlay.dashed ? [6, 4] : undefined,
-        pointRadius: 0,
-        tension: 0,
-        fill: false,
-      });
-    });
-    el._chart = new Chart(el, {
-      type: 'line',
-      data: { datasets },
+      },
       options: {
         responsive: true,
-        parsing: false,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: {
+          mode: 'index',
+          intersect: false,
+        },
         plugins: {
-          legend: { display: true, position: 'bottom' },
+          legend: {
+            labels: {
+              color: textMuted || '#6c757d',
+            },
+          },
           tooltip: {
             callbacks: {
-              label: (ctx) => {
-                const income = ctx.parsed.x ?? 0;
-                const rate = ctx.parsed.y ?? 0;
-                return `${ctx.dataset.label}: ${rate.toFixed(1)}% at ${money(income)}`;
+              label(context) {
+                const label = context.dataset?.label || '';
+                const value = Math.abs(Number(context.parsed?.y ?? 0));
+                return `${label}: ${formatMoney(value)}`;
               },
             },
           },
         },
         scales: {
-          x: { type: 'linear', title: { display: true, text: 'Annualised income (£)' }, ticks: { callback: (v) => money(v) } },
-          y: { title: { display: true, text: 'Rate (%)' }, min: 0, max: 75 },
+          x: {
+            ticks: {
+              color: textMuted || '#6c757d',
+              callback(value, idx) {
+                const label = labels[idx];
+                return typeof label === 'string' ? label : value;
+              },
+            },
+            grid: {
+              display: false,
+            },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              color: textMuted || '#6c757d',
+              callback(value) {
+                return formatMoney(Math.abs(value));
+              },
+            },
+            grid: {
+              color: 'rgba(108,117,125,0.15)',
+            },
+          },
         },
       },
     });
+
+    wrapper.classList.remove('d-none');
+    empty.classList.add('d-none');
   }
 
-  function renderGauges(containerId, gauges) {
-    const container = byId(containerId);
-    if (!container) return;
-    container.innerHTML = '';
-    const entries = Array.isArray(gauges) ? gauges : [];
-    if (!entries.length) {
-      container.innerHTML = '<div class="col-12 text-muted small">No data — upload documents in the vault to get started.</div>';
+  function destroyChart() {
+    if (state.chart && typeof state.chart.destroy === 'function') {
+      state.chart.destroy();
+    }
+    state.chart = null;
+  }
+
+  function renderPayslipJson(payslip) {
+    const pre = byId('payslip-json');
+    if (!pre) return;
+
+    if (!payslip) {
+      pre.textContent = 'No payslip selected.';
       return;
     }
-    entries.forEach((g) => {
-      const pct = Math.min(100, Math.round((Number(g.used || 0) / Math.max(1, Number(g.total || 1))) * 100));
-      const pretty = (n) => money(n).replace('£-', '-£');
-      const tile = document.createElement('div');
-      tile.className = 'col-12 col-md-6';
-      tile.innerHTML = `
-        <div class="border rounded p-3 h-100">
-          <div class="d-flex justify-content-between align-items-center mb-1">
-            <div class="fw-semibold">${escapeHtml(g.label || 'Allowance')}</div>
-            <div class="text-muted small">${pretty(g.used)} / ${pretty(g.total)}</div>
-          </div>
-          <div class="progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
-            <div class="progress-bar" style="width:${pct}%"></div>
-          </div>
-        </div>`;
-      container.appendChild(tile);
+
+    try {
+      pre.textContent = JSON.stringify(payslip.raw, null, 2);
+    } catch (error) {
+      console.warn('Failed to stringify payslip JSON', error);
+      pre.textContent = 'Unable to render JSON payload.';
+    }
+  }
+
+  function renderStatementSelector(statements, selectedId) {
+    const select = byId('statement-selector');
+    if (!select) return;
+
+    select.innerHTML = '';
+
+    if (!Array.isArray(statements) || statements.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No statements available';
+      select.appendChild(option);
+      select.disabled = true;
+      return;
+    }
+
+    statements.forEach((statement) => {
+      const option = document.createElement('option');
+      option.value = statement.id;
+      option.textContent = statement.optionLabel;
+      select.appendChild(option);
     });
+
+    select.disabled = false;
+    select.value = selectedId || statements[0]?.id || '';
+
+    if (!select.dataset.bound) {
+      select.addEventListener('change', (event) => {
+        const id = event.target.value || null;
+        state.statementSelectedId = id;
+        const selected = getSelectedStatement();
+        renderStatementSummary(selected);
+        renderStatementChart(selected);
+        renderStatementCategories(selected);
+        renderStatementJson(selected);
+      });
+      select.dataset.bound = 'true';
+    }
   }
 
-  function renderDonut(id, data, labels) {
-    const el = byId(id);
-    if (!el || !window.Chart) return;
-    if (el._chart) el._chart.destroy();
-    if (!Array.isArray(data) || !data.length) {
-      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
+  function getSelectedStatement() {
+    if (!state.statementSelectedId) return null;
+    return state.statements.find((item) => item.id === state.statementSelectedId) || null;
+  }
+
+  function renderStatementSummary(statement) {
+    const empty = byId('statement-empty');
+    const content = byId('statement-content');
+
+    if (!statement) {
+      content?.classList.add('d-none');
+      if (empty) {
+        empty.textContent = 'Upload a bank statement or choose one from the selector to review incomings, outgoings and balances.';
+        empty.classList.remove('d-none');
+      }
+      setText('statement-institution', '—');
+      setText('statement-account', '—');
+      setText('statement-period', '—');
+      setText('statement-money-in', '£—');
+      setText('statement-money-out', '£—');
+      setText('statement-net', '£—');
+      setText('statement-opening-balance', '£—');
+      setText('statement-closing-balance', '£—');
+      setText('statement-uploaded', '—');
+      renderTransactionsTable(byId('statement-transactions-body'), []);
       return;
     }
-    el._chart = new Chart(el, {
+
+    empty?.classList.add('d-none');
+    content?.classList.remove('d-none');
+
+    const institutionLabel = statement.institutionName || '—';
+    const accountParts = [];
+    if (statement.accountName) accountParts.push(statement.accountName);
+    if (statement.accountNumberMasked) accountParts.push(statement.accountNumberMasked);
+
+    setText('statement-institution', institutionLabel);
+    setText('statement-account', accountParts.length ? accountParts.join(' • ') : '—');
+    setText('statement-period', statement.periodLabel || '—');
+    setText('statement-money-in', formatMoney(statement.moneyIn));
+    setText('statement-money-out', formatMoney(statement.moneyOut));
+    setText('statement-net', formatMoney(statement.net, { sign: true }));
+    setText('statement-opening-balance', formatMoney(statement.openingBalance));
+    setText('statement-closing-balance', formatMoney(statement.closingBalance));
+    setText('statement-uploaded', statement.uploadedLabel || '—');
+
+    const tbody = byId('statement-transactions-body');
+    const topTransactions = statement.transactions
+      .slice()
+      .sort((a, b) => Math.abs(b.amount || 0) - Math.abs(a.amount || 0))
+      .slice(0, 10);
+    renderTransactionsTable(tbody, topTransactions);
+  }
+
+  function renderStatementChart(statement) {
+    const empty = byId('statement-chart-empty');
+    const wrapper = byId('statement-chart-wrapper');
+    const canvas = byId('statement-chart');
+    if (!empty || !wrapper || !canvas) return;
+
+    const defaultMessage = 'Select a statement to view spending by category.';
+
+    if (!statement) {
+      destroyStatementChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      if (!empty.textContent) empty.textContent = defaultMessage;
+      else empty.textContent = defaultMessage;
+      return;
+    }
+
+    const categories = Array.isArray(statement.spendCategories)
+      ? statement.spendCategories.filter((item) => Number(item.amount) > 0)
+      : [];
+
+    if (!categories.length) {
+      destroyStatementChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      empty.textContent = 'No spending categories available for this statement.';
+      return;
+    }
+
+    if (typeof window.Chart === 'undefined') {
+      console.warn('Chart.js is not available.');
+      destroyStatementChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      empty.textContent = 'Chart library unavailable. Install Chart.js to view the pie chart.';
+      return;
+    }
+
+    destroyStatementChart();
+
+    const labels = categories.map((item) => item.label);
+    const data = categories.map((item) => Math.abs(item.amount || 0));
+    const ctx = canvas.getContext('2d');
+    const computedStyle = getComputedStyle(document.documentElement);
+    const muted = computedStyle.getPropertyValue('--bs-secondary-color') || '#6c757d';
+    const borderColor = computedStyle.getPropertyValue('--bs-border-color-translucent') || 'rgba(108,117,125,0.2)';
+    const colors = buildChartPalette(labels.length);
+
+    state.statementChart = new window.Chart(ctx, {
       type: 'doughnut',
-      data: { labels, datasets: [{ data, backgroundColor: themeColors(data.length) }] },
-      options: { plugins: { legend: { display: true, position: 'bottom' } }, cutout: '60%' }
-    });
-  }
-
-  function renderBar(id, labels, values, opts = {}) {
-    const el = byId(id);
-    if (!el || !window.Chart) return;
-    if (el._chart) el._chart.destroy();
-    if (!values.length) {
-      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
-      return;
-    }
-    const horizontal = Boolean(opts.horizontal);
-    const useCurrency = Boolean(opts.currency);
-    el._chart = new Chart(el, {
-      type: 'bar',
-      data: { labels, datasets: [{ data: values, backgroundColor: themeColors(values.length) }] },
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Spending by category',
+            data,
+            backgroundColor: colors,
+            borderColor,
+            borderWidth: 1,
+          },
+        ],
+      },
       options: {
-        indexAxis: horizontal ? 'y' : 'x',
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '55%',
         plugins: {
-          legend: { display: false },
+          legend: {
+            labels: {
+              color: muted || '#6c757d',
+            },
+          },
           tooltip: {
             callbacks: {
-              label: (ctx) => {
-                const value = horizontal ? ctx.parsed.x : ctx.parsed.y;
-                return useCurrency ? money(value) : value;
+              label(context) {
+                const label = context.label || '';
+                const value = Number(context.parsed);
+                const category = categories[context.dataIndex];
+                const share = category?.share;
+                const shareLabel = Number.isFinite(share) ? ` (${formatPercent(share)})` : '';
+                return `${label}: ${formatMoney(value)}${shareLabel}`;
               },
             },
           },
         },
-        scales: horizontal
-          ? {
-              x: { beginAtZero: true, ticks: { callback: (v) => (useCurrency ? money(v) : v) } },
-              y: { ticks: { autoSkip: false } },
-            }
-          : {
-              y: { beginAtZero: true, ticks: { callback: (v) => (useCurrency ? money(v) : v) } },
-            },
-      }
+      },
     });
+
+    wrapper.classList.remove('d-none');
+    empty.classList.add('d-none');
   }
 
-  function renderLineMulti(id, labels, datasets) {
-    const el = byId(id);
-    if (!el || !window.Chart) return;
-    if (el._chart) el._chart.destroy();
-    if (!Array.isArray(datasets) || !datasets.length || !labels.length) {
-      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
-      return;
+  function destroyStatementChart() {
+    if (state.statementChart && typeof state.statementChart.destroy === 'function') {
+      state.statementChart.destroy();
     }
-    const palette = themeColors(datasets.length);
-    const ds = datasets.map((series, idx) => ({
-      label: series.label || `Series ${idx + 1}`,
-      data: Array.isArray(series.data) ? series.data : [],
-      borderColor: series.borderColor || palette[idx % palette.length],
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      tension: 0.2,
-      fill: false,
-    }));
-    el._chart = new Chart(el, {
-      type: 'line',
-      data: { labels, datasets: ds },
-      options: {
-        responsive: true,
-        plugins: { legend: { display: true, position: 'bottom' } },
-        scales: { y: { ticks: { callback: (v) => money(v) } } }
-      }
-    });
+    state.statementChart = null;
   }
 
-  function renderLine(id, labels, values) {
-    const el = byId(id);
-    if (!el || !window.Chart) return;
-    if (el._chart) el._chart.destroy();
-    if (!values.length) {
-      el.getContext('2d')?.clearRect(0, 0, el.width, el.height);
-      return;
+  function buildChartPalette(count) {
+    const basePalette = [
+      'rgba(103,89,255,0.85)',
+      'rgba(16,185,129,0.85)',
+      'rgba(245,158,11,0.85)',
+      'rgba(239,68,68,0.85)',
+      'rgba(59,130,246,0.85)',
+      'rgba(236,72,153,0.85)',
+      'rgba(20,184,166,0.85)',
+      'rgba(249,115,22,0.85)',
+      'rgba(37,99,235,0.85)',
+      'rgba(147,51,234,0.85)',
+    ];
+    if (!count || count <= basePalette.length) {
+      return basePalette.slice(0, Math.max(0, count));
     }
-    el._chart = new Chart(el, {
-      type: 'line',
-      data: { labels, datasets: [{ data: values, borderWidth: 2, fill: false, tension: 0.2 }] },
-      options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: (v) => money(v) } } } }
-    });
+    const colors = [];
+    for (let index = 0; index < count; index += 1) {
+      colors.push(basePalette[index % basePalette.length]);
+    }
+    return colors;
   }
 
-  // ----- Events -----
-  const USER_EVENTS_KEY = 'userEvents';
-  function loadUserEvents() {
-    try { return JSON.parse(localStorage.getItem(USER_EVENTS_KEY) || '[]'); }
-    catch { return []; }
-  }
-  function renderEventsTable(defaults, userEvents, hasData) {
-    const tbody = byId('events-tbody');
-    const empty = byId('events-empty');
+  function renderStatementCategories(statement) {
+    const tbody = byId('statement-categories-body');
     if (!tbody) return;
-    tbody.innerHTML = '';
-    const combined = [...defaults.map((d) => ({ ...d, kind: 'default' })), ...userEvents.map((u) => ({ ...u, kind: 'user' }))]
-      .filter((ev) => !ev.date || new Date(ev.date) >= new Date())
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    if (!combined.length) {
-      empty?.classList.remove('d-none');
-      empty.textContent = hasData ? 'No upcoming events yet.' : 'No data — upload documents in the vault to get started.';
+    clearTable(tbody);
+
+    const categories = Array.isArray(statement?.spendCategories)
+      ? statement.spendCategories.filter((item) => Number(item.amount) > 0)
+      : [];
+
+    if (!categories.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="3" class="text-muted small">No spending categories available.</td>';
+      tbody.appendChild(tr);
       return;
     }
-    empty?.classList.add('d-none');
 
-    combined.forEach((ev) => {
+    categories.forEach((item) => {
       const tr = document.createElement('tr');
-      const date = ev.date ? new Date(ev.date) : null;
-      tr.className = ev.kind === 'user' ? 'event-user' : 'event-default';
+      const label = escapeHtml(item.label || 'Category');
       tr.innerHTML = `
-        <td class="text-nowrap">${date ? date.toLocaleDateString() : '—'}</td>
-        <td><span class="event-title" title="${escapeHtml(ev.description || '')}">${escapeHtml(ev.title || 'Event')}</span></td>
-        <td class="text-end">${ev.kind === 'user' ? '<button class="btn btn-sm btn-link text-danger p-0" title="Delete"><i class="bi bi-x-circle"></i></button>' : ''}</td>`;
-      if (ev.kind === 'user') {
-        tr.querySelector('button')?.addEventListener('click', () => {
-          const next = loadUserEvents().filter((x) => x.id !== ev.id);
-          localStorage.setItem(USER_EVENTS_KEY, JSON.stringify(next));
-          renderEventsTable(defaults, next, hasData);
-        });
-      }
+        <td>${label}</td>
+        <td class="text-end">${formatMoney(item.amount)}</td>
+        <td class="text-end">${formatPercent(item.share)}</td>
+      `;
       tbody.appendChild(tr);
     });
   }
 
-  function defaultUkEvents2025_26() {
-    return [
-      { title: 'Second payment on account due', date: '2025-07-31', description: 'HMRC self assessment payment on account.' },
-      { title: 'Register for self assessment', date: '2025-10-05', description: 'Deadline to register if you need to file a return.' },
-      { title: 'Paper tax return deadline', date: '2025-10-31', description: 'Submit paper tax return for 2024/25.' },
-      { title: 'PAYE coding deadline', date: '2025-12-30', description: 'Have tax collected via PAYE through your return.' },
-      { title: 'Online SA & payment deadline', date: '2026-01-31', description: 'Online filing and balancing payment deadline.' },
-      { title: 'Tax year ends', date: '2026-04-05', description: 'Last day to use ISA, pension allowances, CGT AE.' },
-      { title: 'New tax year begins', date: '2026-04-06', description: 'Reset allowances and begin planning.' }
-    ];
+  function renderStatementJson(statement) {
+    const pre = byId('statement-json');
+    if (!pre) return;
+
+    if (!statement) {
+      pre.textContent = 'No statement selected.';
+      return;
+    }
+
+    try {
+      pre.textContent = JSON.stringify(statement.raw, null, 2);
+    } catch (error) {
+      console.warn('Failed to stringify statement JSON', error);
+      pre.textContent = 'Unable to render JSON payload.';
+    }
   }
 
-  // ----- Utilities -----
-  function byId(id) { return document.getElementById(id); }
-  function setText(id, value) { const el = byId(id); if (el) el.textContent = value ?? '—'; }
-  function setMoneyOrDash(id, value) {
-    const el = byId(id);
-    if (!el) return;
-    el.textContent = value == null ? '£—' : money(value);
-  }
-  function formatTimeseriesLabel(value, granularity) {
-    if (value == null) return '—';
-    const str = String(value);
-    if (granularity === 'month' && /^\d{4}-\d{2}/.test(str)) {
-      const [year, month] = str.split('-');
-      const date = new Date(Number(year), Number(month) - 1, 1);
-      return Number.isNaN(date.getTime())
-        ? str
-        : date.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  function renderLineItems(tbody, rows) {
+    if (!tbody) return;
+    clearTable(tbody);
+    if (!rows.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="2" class="text-muted small">No data available</td>';
+      tbody.appendChild(tr);
+      return;
     }
-    const parsed = new Date(str);
-    if (!Number.isNaN(parsed.getTime())) {
-      if (granularity === 'day') {
-        return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      }
-      if (granularity === 'week') {
-        return parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      }
-      return parsed.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
-    }
-    return str;
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      const label = escapeHtml(row.label || 'Item');
+      tr.innerHTML = `
+        <td>${label}</td>
+        <td class="text-end">${formatMoney(row.amount)}</td>`;
+      tbody.appendChild(tr);
+    });
   }
-  function toggleEmpty(id, show) {
-    const el = byId(id);
+
+  function renderTransactionsTable(tbody, transactions) {
+    if (!tbody) return;
+    clearTable(tbody);
+    if (!Array.isArray(transactions) || !transactions.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="3" class="text-muted small">No transactions available.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    transactions.forEach((tx) => {
+      const tr = document.createElement('tr');
+      const description = escapeHtml(tx.description || 'Transaction');
+      const dateLabel = tx.date ? formatDateLabel(tx.date) : '—';
+      tr.innerHTML = `
+        <td>${description}</td>
+        <td>${dateLabel || '—'}</td>
+        <td class="text-end">${formatMoney(tx.amount, { sign: true })}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function normaliseLineItems(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item) => ({
+        label: item?.label || item?.name || item?.category || 'Item',
+        amount: (() => {
+          const direct = Number(item?.amount);
+          if (Number.isFinite(direct)) return direct;
+          return pickNumber(item, ['value', 'total', 'gross', 'net']);
+        })() || 0,
+        amountYtd: (() => {
+          const ytd = pickNumber(item, [
+            'amountYtd',
+            'amountYearToDate',
+            'ytd',
+            'valueYtd',
+            'totalYtd',
+            'yearToDate',
+          ]);
+          return Number.isFinite(ytd) ? Number(ytd) : null;
+        })(),
+      }))
+      .filter((item) => item.label);
+  }
+
+  function normalisePayslipList(entries = []) {
+    if (!Array.isArray(entries)) return [];
+    const normalised = entries
+      .map((entry, index) => normalisePayslipEntry(entry, index))
+      .filter((entry) => entry != null);
+    normalised.sort((a, b) => (b.payDate?.getTime() || 0) - (a.payDate?.getTime() || 0));
+    normalised.forEach((entry, idx) => {
+      const baseLabel = entry.periodLabel || entry.payDateLabel || `Payslip ${idx + 1}`;
+      const employerLabel = entry.employer ? ` • ${entry.employer}` : '';
+      entry.optionLabel = `${baseLabel}${employerLabel}`;
+    });
+    return normalised;
+  }
+
+  function normalisePayslipEntry(entry, fallbackIndex = 0) {
+    if (!entry || typeof entry !== 'object') return null;
+    const totals = entry.totals || {};
+    const payDate = parseDate(entry.payDate) || parseDate(entry.period?.end) || parseDate(entry.period?.payDate);
+    const period = entry.period || {};
+    const periodLabel = period.label || formatPeriodLabel({ start: period.start, end: period.end, month: period.month });
+    const payFrequency = period.frequency || entry.payFrequency || entry.frequency || null;
+    const gross = pickNumber(totals, ['gross', 'grossPay', 'grossPeriod']) ?? pickNumber(entry, ['gross', 'grossPay']);
+    const net = pickNumber(totals, ['net', 'netPay', 'netPeriod']) ?? pickNumber(entry, ['net', 'netPay']);
+    const deductionsTotal = pickNumber(totals, ['deductions', 'totalDeductions'])
+      ?? pickNumber(entry, ['totalDeductions', 'tax', 'totalWithholding']);
+    const uploadedAt = parseDate(entry.uploadedAt)
+      || parseDate(entry.createdAt)
+      || parseDate(entry.metadata?.uploadedAt);
+    const employer = entry.employer?.name
+      || entry.employer
+      || entry.metadata?.employer?.name
+      || entry.metadata?.employerName
+      || null;
+
+    const earnings = normaliseLineItems(entry.earnings || totals.earnings || []);
+    const deductions = normaliseLineItems(entry.deductions || totals.deductions || []);
+
+    const earningsYtdSum = sumYtdValues(earnings);
+    const deductionsYtdSum = sumYtdValues(deductions);
+    const earningsYtdTotal =
+      earningsYtdSum
+      ?? pickNumber(totals, ['grossYtd', 'earningsYtd', 'totalEarningsYtd', 'grossYearToDate'])
+      ?? pickNumber(entry, ['grossYtd', 'earningsYtd', 'totalEarningsYtd', 'grossYearToDate']);
+    const deductionsYtdTotal =
+      deductionsYtdSum
+      ?? pickNumber(totals, ['deductionsYtd', 'totalDeductionsYtd', 'withholdingYtd', 'deductionsYearToDate'])
+      ?? pickNumber(entry, ['deductionsYtd', 'totalDeductionsYtd', 'withholdingYtd', 'deductionsYearToDate']);
+
+    const metadata = entry.metadata || entry.meta || {};
+    const employee = entry.employee || metadata.employee || {};
+    const taxCode = [
+      entry.taxCode,
+      totals.taxCode,
+      employee.taxCode,
+      employee.taxCodeCurrent,
+      metadata.taxCode,
+      metadata.taxCodeCurrent,
+      metadata.employee?.taxCode,
+      metadata.employee?.taxCodeCurrent,
+    ].find((value) => typeof value === 'string' && value.trim().length > 0) || null;
+
+    const id = String(entry.id || entry._id || entry.entryId || `payslip-${fallbackIndex}`);
+
+    const resolvedGross = Number.isFinite(gross) ? Number(gross) : null;
+    const resolvedNet = Number.isFinite(net) ? Number(net) : null;
+    const resolvedDeductions = Number.isFinite(deductionsTotal)
+      ? Number(deductionsTotal)
+      : resolvedGross != null && resolvedNet != null
+        ? Number(resolvedGross - resolvedNet)
+        : null;
+
+    return {
+      id,
+      employer,
+      payDate,
+      payDateLabel: formatDateLabel(payDate) || (periodLabel && periodLabel !== '—' ? periodLabel : '—'),
+      periodLabel,
+      payFrequency: payFrequency ? String(payFrequency) : '—',
+      gross: resolvedGross,
+      net: resolvedNet,
+      deductionsTotal: resolvedDeductions,
+      earnings,
+      deductions,
+      earningsYtdTotal: Number.isFinite(earningsYtdTotal) ? Number(earningsYtdTotal) : null,
+      deductionsYtdTotal: Number.isFinite(deductionsYtdTotal) ? Math.abs(Number(deductionsYtdTotal)) : null,
+      taxCode,
+      uploadedAt,
+      uploadedLabel: formatDateTime(uploadedAt),
+      raw: entry,
+      optionLabel: '',
+    };
+  }
+
+  function normaliseStatementList(entries = []) {
+    if (!Array.isArray(entries)) return [];
+    const normalised = entries
+      .map((entry, index) => normaliseStatementEntry(entry, index))
+      .filter((entry) => entry != null);
+    normalised.sort((a, b) => {
+      const aDate = a.periodEnd || a.periodStart || null;
+      const bDate = b.periodEnd || b.periodStart || null;
+      return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+    });
+    normalised.forEach((entry, idx) => {
+      const baseLabel = entry.periodLabel && entry.periodLabel !== '—'
+        ? entry.periodLabel
+        : `Statement ${idx + 1}`;
+      const accountParts = [entry.accountName, entry.institutionName].filter(Boolean);
+      entry.optionLabel = accountParts.length ? `${baseLabel} • ${accountParts.join(' • ')}` : baseLabel;
+    });
+    return normalised;
+  }
+
+  function normaliseStatementEntry(entry, fallbackIndex = 0) {
+    if (!entry || typeof entry !== 'object') return null;
+    const id = String(entry.id || entry.fileId || entry.insightId || `statement-${fallbackIndex}`);
+    const totals = entry.totals || {};
+    const balances = entry.balances || {};
+    const period = entry.period || {};
+
+    const moneyIn = pickNumber(totals, ['moneyIn', 'totalIn', 'income']);
+    const moneyOut = pickNumber(totals, ['moneyOut', 'totalOut', 'spend']);
+    let net = pickNumber(totals, ['net']);
+    if (net == null && Number.isFinite(moneyIn) && Number.isFinite(moneyOut)) {
+      net = Number(moneyIn) - Number(moneyOut);
+    }
+
+    const openingBalance = pickNumber(balances, ['opening', 'openingBalance']);
+    const closingBalance = pickNumber(balances, ['closing', 'closingBalance']);
+
+    const periodStart = parseDate(period.start);
+    const periodEnd = parseDate(period.end);
+    const periodLabel = period.label || formatPeriodLabel({ start: period.start, end: period.end, month: period.month });
+    const uploadedAt = parseDate(entry.uploadedAt);
+
+    const transactions = normaliseStatementTransactions(entry.transactions);
+    const spendCategories = normaliseStatementCategories(entry.categories);
+
+    return {
+      id,
+      accountName: entry.accountName || 'Account',
+      institutionName: entry.institutionName || null,
+      accountNumberMasked: entry.accountNumberMasked || null,
+      accountType: entry.accountType || null,
+      moneyIn: Number.isFinite(moneyIn) ? Number(moneyIn) : null,
+      moneyOut: Number.isFinite(moneyOut) ? Number(moneyOut) : null,
+      net: Number.isFinite(net) ? Number(net) : null,
+      openingBalance: Number.isFinite(openingBalance) ? Number(openingBalance) : null,
+      closingBalance: Number.isFinite(closingBalance) ? Number(closingBalance) : null,
+      periodStart,
+      periodEnd,
+      periodLabel: periodLabel || '—',
+      uploadedAt,
+      uploadedLabel: formatDateTime(uploadedAt),
+      transactions,
+      spendCategories,
+      raw: entry.raw || entry,
+      currency: entry.currency || 'GBP',
+      optionLabel: '',
+    };
+  }
+
+  function normaliseStatementTransactions(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return null;
+        const amountRaw = Number(item.amount);
+        if (!Number.isFinite(amountRaw)) return null;
+        const directionRaw = String(item.direction || '').toLowerCase();
+        const direction = directionRaw === 'outflow'
+          ? 'outflow'
+          : directionRaw === 'inflow'
+            ? 'inflow'
+            : amountRaw < 0
+              ? 'outflow'
+              : 'inflow';
+        const signedAmount = direction === 'outflow' ? -Math.abs(amountRaw) : Math.abs(amountRaw);
+        const date = parseDate(item.date);
+        return {
+          id: String(item.id || item.transactionId || `statement-tx-${index}`),
+          description: item.description || item.label || item.memo || 'Transaction',
+          category: item.category || 'Other',
+          amount: signedAmount,
+          direction,
+          date,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0));
+  }
+
+  function normaliseStatementCategories(list) {
+    if (!Array.isArray(list)) return [];
+    const mapped = list
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const amountRaw = pickNumber(item, ['amount', 'outflow']);
+        if (!Number.isFinite(amountRaw)) return null;
+        const label = item.label || item.category || 'Category';
+        const shareRaw = pickNumber(item, ['share']);
+        return {
+          label,
+          category: item.category || label,
+          amount: Math.abs(Number(amountRaw)),
+          share: Number.isFinite(shareRaw) ? Number(shareRaw) : null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.amount - a.amount);
+
+    const total = mapped.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+    return mapped.map((item) => ({
+      ...item,
+      share: Number.isFinite(item.share) ? item.share : total ? item.amount / total : null,
+    }));
+  }
+
+  function pickDefaultSelection(list, currentId) {
+    if (!Array.isArray(list) || list.length === 0) return null;
+    if (currentId && list.some((item) => item.id === currentId)) {
+      return currentId;
+    }
+    return list[0].id;
+  }
+
+  function toggleDashboardEmpty(show) {
+    const el = byId('dashboard-empty-state');
     if (!el) return;
     el.classList.toggle('d-none', !show);
-  }
-  function softError(message) {
-    const container = document.querySelector('.page-title');
-    if (container) {
-      const alert = document.createElement('div');
-      alert.className = 'alert alert-danger mt-3';
-      alert.textContent = message;
-      container.insertAdjacentElement('afterend', alert);
+    if (!show) {
+      el.classList.remove('alert-danger');
+      if (!el.classList.contains('alert-warning')) {
+        el.classList.add('alert-warning');
+      }
+      const msg = el.querySelector('[data-error-message]');
+      if (msg) {
+        msg.textContent = 'Add payslips or bank statements in the document vault to see your analytics populate instantly.';
+      }
     }
   }
-  function safeTaxYearLabel(date) {
-    const y = date.getFullYear();
-    const start = new Date(y, 3, 6);
-    return date >= start ? `${y}/${String((y + 1) % 100).padStart(2, '0')}` : `${y - 1}/${String(y % 100).padStart(2, '0')}`;
+
+  function setText(id, value) {
+    const el = typeof id === 'string' ? byId(id) : id;
+    if (!el) return;
+    el.textContent = value == null ? '' : String(value);
   }
-  function money(value) {
-    const num = Number(value || 0);
-    const prefix = num < 0 ? '-£' : '£';
-    return `${prefix}${Math.abs(num).toLocaleString()}`;
+
+  function clearTable(tbody) {
+    if (!tbody) return;
+    while (tbody.firstChild) {
+      tbody.removeChild(tbody.firstChild);
+    }
   }
-  function escapeHtml(str) {
-    return String(str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function sumYtdValues(items) {
+    if (!Array.isArray(items) || !items.length) return null;
+    let total = 0;
+    let hasValue = false;
+    items.forEach((item) => {
+      const value = Number(item?.amountYtd);
+      if (Number.isFinite(value)) {
+        total += Math.abs(value);
+        hasValue = true;
+      }
+    });
+    return hasValue ? total : null;
   }
-  function themeColors(n) {
-    const root = getComputedStyle(document.documentElement);
-    const palette = ['--chart-1','--chart-2','--chart-3','--chart-4','--chart-5','--chart-6','--chart-7','--chart-8']
-      .map((v) => root.getPropertyValue(v).trim())
-      .filter(Boolean);
-    const fallback = ['#4a78ff','#60c8ff','#7dd3a8','#f5a524','#ef4d72','#8b5cf6','#f59e0b','#10b981'];
-    const base = palette.length ? palette : fallback;
-    return Array.from({ length: n }, (_, i) => base[i % base.length]);
+
+  function formatMoney(value, { sign = false } = {}) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '£—';
+    const abs = Math.abs(num);
+    const formatted = abs.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (!sign) {
+      return `£${formatted}`;
+    }
+    if (num > 0) return `+£${formatted}`;
+    if (num < 0) return `−£${formatted}`;
+    return `£${formatted}`;
+  }
+
+  function formatPercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '—';
+    const pct = num * 100;
+    const decimals = Math.abs(pct) >= 10 ? 1 : 2;
+    return `${pct.toFixed(decimals)}%`;
+  }
+
+  function pickNumber(obj, keys) {
+    if (!obj) return null;
+    for (const key of keys) {
+      if (obj[key] == null) continue;
+      const num = Number(obj[key]);
+      if (Number.isFinite(num)) return num;
+    }
+    return null;
+  }
+
+  function parseDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value;
+    }
+    const str = String(value);
+    if (/^\d{4}-\d{2}$/.test(str)) {
+      const d = new Date(`${str}-01T00:00:00Z`);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    const date = new Date(str);
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
+  }
+
+  function formatRange(start, end) {
+    const startDate = parseDate(start);
+    const endDate = parseDate(end);
+    if (!startDate && !endDate) return '—';
+    if (startDate && endDate) {
+      const sameMonth = startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear();
+      const optionsStart = sameMonth
+        ? { day: 'numeric' }
+        : { day: 'numeric', month: 'short' };
+      const startLabel = startDate.toLocaleDateString('en-GB', optionsStart);
+      const endLabel = endDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      return `${startLabel} – ${endLabel}`;
+    }
+    const single = endDate || startDate;
+    return single ? single.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+  }
+
+  function formatMonth(month) {
+    if (!month) return '—';
+    const [year, monthStr] = String(month).split('-');
+    if (!year || !monthStr) return '—';
+    const index = Number(monthStr) - 1;
+    if (!Number.isInteger(index)) return '—';
+    const date = new Date(Date.UTC(Number(year), index, 1));
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }
+
+  function formatDateLabel(value) {
+    const date = parseDate(value);
+    if (!date) return '';
+    return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function formatPeriodLabel({ start = null, end = null, month = null } = {}) {
+    if (start && end) return formatRange(start, end);
+    if (month) return formatMonth(month);
+    if (end) return formatDateLabel(end);
+    if (start) return formatDateLabel(start);
+    return '—';
+  }
+
+  function formatDateTime(value) {
+    const date = parseDate(value);
+    if (!date) return '—';
+    return date.toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  function softError(message) {
+    const el = byId('dashboard-empty-state');
+    if (!el) return;
+    el.classList.remove('d-none');
+    el.classList.remove('alert-warning');
+    el.classList.add('alert-danger');
+    const text = el.querySelector('[data-error-message]');
+    if (text) {
+      text.textContent = message;
+    } else {
+      el.textContent = message;
+    }
+  }
+
+  function escapeHtml(value) {
+    if (value == null) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function byId(id) {
+    return document.getElementById(id);
   }
 })();

@@ -40,6 +40,7 @@ import {
   type UserDocumentJob,
 } from './models/index.js';
 import { rebuildMonthlyAnalytics } from './services/analytics.js';
+import { buildPayslipMetricsV1, buildStatementV1 } from '../../../shared/lib/insights/normalizeV1.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 const TRIAGE_AREA = 'statement-triage';
@@ -549,52 +550,37 @@ export function enrichPayloadWithV1(
   );
 
   payload.version = 'v1';
-  payload.currency = v1.normaliseCurrency((metadata.currency as string | undefined) ?? 'GBP');
+  const currencySource =
+    (typeof payload.currency === 'string' ? payload.currency : null) ??
+    (metadata.currency as string | undefined) ??
+    'GBP';
+  payload.currency = v1.normaliseCurrency(currencySource);
   payload.documentDateV1 = fallbackIso ?? payload.documentDateV1 ?? null;
   if (inferredMonth) {
     payload.documentMonth = inferredMonth;
   }
 
-  const metrics = (payload.metrics ?? {}) as Record<string, unknown>;
   const triageJobId = options?.jobId ?? null;
   const shouldLogTriage = featureFlags.enableTriageLogs && isStatementClassification(classification.type);
 
   if (classification.type === 'payslip') {
-    const employerName = typeof metadata.employerName === 'string' ? metadata.employerName : null;
-    const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
-    const periodMetric = (metrics.period ?? {}) as Record<string, unknown>;
-    const periodStart = v1.ensureIsoDate(periodMetric.start ?? periodMeta.start) ?? null;
-    const periodEnd = v1.ensureIsoDate(periodMetric.end ?? periodMeta.end) ?? null;
-    const periodMonth =
-      v1.ensureIsoMonth(periodMetric.month ?? periodMeta.month ?? inferredMonth) ??
-      (fallbackIso ? fallbackIso.slice(0, 7) : null);
-    const payDate = v1.ensureIsoDate(metrics.payDate ?? metadata.payDate ?? fallbackIso) ?? null;
-
-    if (payDate && periodStart && periodEnd && periodMonth) {
-      const normalizedMetrics = {
-        payDate,
-        period: { start: periodStart, end: periodEnd, month: periodMonth },
-        employer: employerName,
-        grossMinor: v1.toMinorUnits(metrics.gross),
-        netMinor: v1.toMinorUnits(metrics.net),
-        taxMinor: v1.toMinorUnits(metrics.tax),
-        nationalInsuranceMinor: v1.toMinorUnits(metrics.ni ?? metrics.nationalInsurance),
-        pensionMinor: v1.toMinorUnits(metrics.pension),
-        studentLoanMinor: v1.toMinorUnits(metrics.studentLoan),
-        taxCode:
-          typeof metrics.taxCode === 'string'
-            ? metrics.taxCode
-            : typeof metadata.taxCode === 'string'
-            ? metadata.taxCode
-            : null,
-      } satisfies v1.PayslipMetricsV1;
-
-      if (!v1.validatePayslipMetricsV1(normalizedMetrics)) {
+    const metricsV1 = buildPayslipMetricsV1({
+      ...payload,
+      insightType: 'payslip',
+      metadata: payload.metadata ?? {},
+      metrics: payload.metrics ?? {},
+    });
+    if (!metricsV1) {
+      logger.warn(
+        { fileId: payload.fileId, type: classification.type },
+        'Payslip v1 metrics not generated'
+      );
+    } else {
+      payload.metricsV1 = metricsV1;
+      if (!v1.validatePayslipMetricsV1(metricsV1)) {
         const errors = v1.validatePayslipMetricsV1.errors as ValidationError[] | null | undefined;
-        if (featureFlags.enableAjvStrict) {
-          throw buildSchemaError('shared/schemas/payslipMetricsV1.json', errors);
-        }
-        logger.warn(
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
           {
             fileId: payload.fileId,
             type: classification.type,
@@ -602,22 +588,7 @@ export function enrichPayloadWithV1(
           },
           'Payslip v1 metrics failed validation'
         );
-      } else {
-        payload.metricsV1 = normalizedMetrics;
       }
-    } else if (featureFlags.enableTriageLogs) {
-      logger.warn(
-        {
-          fileId: payload.fileId,
-          type: classification.type,
-          reason: 'missing_period_fields',
-          payDate,
-          periodStart,
-          periodEnd,
-          periodMonth,
-        },
-        'Payslip v1 metrics skipped'
-      );
     }
   }
 
@@ -750,32 +721,23 @@ export function enrichPayloadWithV1(
     classification.type === 'investment_statement' ||
     classification.type === 'pension_statement'
   ) {
-    const periodMeta = (metadata.period ?? {}) as Record<string, unknown>;
-    const periodStart = v1.ensureIsoDate(periodMeta.start ?? fallbackIso) ?? null;
-    const periodEnd = v1.ensureIsoDate(periodMeta.end ?? fallbackIso) ?? null;
-    const periodMonth =
-      v1.ensureIsoMonth(periodMeta.month ?? inferredMonth) ??
-      (fallbackIso ? fallbackIso.slice(0, 7) : null);
-    if (periodStart && periodEnd && periodMonth) {
-      const inflowsMinor = normalizedTransactions
-        .filter((tx) => tx.direction === 'inflow')
-        .reduce((acc, tx) => acc + tx.amountMinor, 0);
-      const outflowsMinor = normalizedTransactions
-        .filter((tx) => tx.direction === 'outflow')
-        .reduce((acc, tx) => acc + Math.abs(tx.amountMinor), 0);
-      const metricsV1 = {
-        period: { start: periodStart, end: periodEnd, month: periodMonth },
-        inflowsMinor,
-        outflowsMinor,
-        netMinor: inflowsMinor - outflowsMinor,
-      } satisfies v1.StatementMetricsV1;
-
+    const metricsV1 = buildStatementV1({
+      ...payload,
+      insightType: classification.type,
+      metadata: payload.metadata ?? {},
+      transactionsV1: normalizedTransactions,
+    });
+    if (!metricsV1) {
+      logger.warn(
+        { fileId: payload.fileId, type: classification.type },
+        'Statement v1 metrics not generated'
+      );
+    } else {
+      payload.metricsV1 = metricsV1;
       if (!v1.validateStatementMetricsV1(metricsV1)) {
         const errors = v1.validateStatementMetricsV1.errors as ValidationError[] | null | undefined;
-        if (featureFlags.enableAjvStrict) {
-          throw buildSchemaError('shared/schemas/statementMetricsV1.json', errors);
-        }
-        logger.warn(
+        const level = featureFlags.strictMetricsV1 ? 'error' : 'warn';
+        logger[level](
           {
             fileId: payload.fileId,
             type: classification.type,
@@ -783,21 +745,7 @@ export function enrichPayloadWithV1(
           },
           'Statement v1 metrics failed validation'
         );
-      } else {
-        payload.metricsV1 = metricsV1;
       }
-    } else if (featureFlags.enableTriageLogs) {
-      logger.warn(
-        {
-          fileId: payload.fileId,
-          type: classification.type,
-          reason: 'missing_statement_period',
-          periodStart,
-          periodEnd,
-          periodMonth,
-        },
-        'Statement v1 metrics skipped'
-      );
     }
   }
 

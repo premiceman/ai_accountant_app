@@ -64,12 +64,33 @@ function toMajor(minor) {
 }
 
 function mergePayslipMetrics(legacyMetrics = {}, preferredMetrics = null) {
-  if (!preferredMetrics) return { ...(legacyMetrics || {}) };
   const merged = { ...(legacyMetrics || {}) };
+  if (!preferredMetrics) {
+    if (merged.totalDeductions == null && Array.isArray(merged.deductions)) {
+      merged.totalDeductions = merged.deductions.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+    }
+    if (merged.takeHomePercent == null && merged.gross) {
+      const netValue = Number(merged.net ?? 0);
+      merged.takeHomePercent = merged.gross ? netValue / Number(merged.gross || 1) : null;
+    }
+    if (merged.effectiveMarginalRate == null && merged.gross) {
+      const deductionsValue = Number(merged.totalDeductions ?? 0);
+      merged.effectiveMarginalRate = merged.gross ? deductionsValue / Number(merged.gross || 1) : null;
+    }
+    return merged;
+  }
   if (preferredMetrics.payDate) merged.payDate = preferredMetrics.payDate;
   if (preferredMetrics.period?.start) merged.periodStart = preferredMetrics.period.start;
   if (preferredMetrics.period?.end) merged.periodEnd = preferredMetrics.period.end;
   if (preferredMetrics.period?.month) merged.periodMonth = preferredMetrics.period.month;
+  if (preferredMetrics.period) {
+    merged.period = {
+      ...(merged.period || {}),
+      start: preferredMetrics.period.start || merged.period?.start || null,
+      end: preferredMetrics.period.end || merged.period?.end || null,
+      month: preferredMetrics.period.month || merged.period?.month || null,
+    };
+  }
   if (preferredMetrics.employer && !merged.employer) merged.employer = preferredMetrics.employer;
   if (preferredMetrics.taxCode) merged.taxCode = preferredMetrics.taxCode;
   const gross = toMajor(preferredMetrics.grossMinor);
@@ -87,15 +108,47 @@ function mergePayslipMetrics(legacyMetrics = {}, preferredMetrics = null) {
   if (pension != null) merged.pension = pension;
   const studentLoan = toMajor(preferredMetrics.studentLoanMinor);
   if (studentLoan != null) merged.studentLoan = studentLoan;
+  if (merged.totalDeductions == null && Array.isArray(merged.deductions)) {
+    merged.totalDeductions = merged.deductions.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+  }
+  if (merged.takeHomePercent == null && merged.gross) {
+    const netValue = Number(merged.net ?? 0);
+    merged.takeHomePercent = merged.gross ? netValue / Number(merged.gross || 1) : null;
+  }
+  if (merged.effectiveMarginalRate == null && merged.gross) {
+    const deductionsValue = Number(merged.totalDeductions ?? 0);
+    merged.effectiveMarginalRate = merged.gross ? deductionsValue / Number(merged.gross || 1) : null;
+  }
   return merged;
 }
 
 function mergeStatementMetrics(legacyMetrics = {}, preferredMetrics = null) {
-  if (!preferredMetrics) return legacyMetrics ? { ...legacyMetrics } : {};
   const merged = { ...(legacyMetrics || {}) };
+  if (!preferredMetrics) {
+    if (merged.totals?.income == null && merged.income != null) {
+      merged.totals = merged.totals || {};
+      merged.totals.income = merged.income;
+    }
+    if (merged.totals?.spend == null && merged.spend != null) {
+      merged.totals = merged.totals || {};
+      merged.totals.spend = merged.spend;
+    }
+    if (merged.totals?.net == null && merged.totals?.income != null && merged.totals?.spend != null) {
+      merged.totals.net = Number(merged.totals.income || 0) - Number(merged.totals.spend || 0);
+    }
+    return merged;
+  }
   if (preferredMetrics.period?.start) merged.periodStart = preferredMetrics.period.start;
   if (preferredMetrics.period?.end) merged.periodEnd = preferredMetrics.period.end;
   if (preferredMetrics.period?.month) merged.periodMonth = preferredMetrics.period.month;
+  if (preferredMetrics.period) {
+    merged.period = {
+      ...(merged.period || {}),
+      start: preferredMetrics.period.start || merged.period?.start || null,
+      end: preferredMetrics.period.end || merged.period?.end || null,
+      month: preferredMetrics.period.month || merged.period?.month || null,
+    };
+  }
   const inflows = toMajor(preferredMetrics.inflowsMinor);
   const outflows = toMajor(preferredMetrics.outflowsMinor);
   const net = toMajor(preferredMetrics.netMinor);
@@ -109,6 +162,9 @@ function mergeStatementMetrics(legacyMetrics = {}, preferredMetrics = null) {
     merged.totals.spend = outflows;
   }
   if (net != null) merged.net = net;
+  if (merged.totals?.net == null && merged.totals?.income != null && merged.totals?.spend != null) {
+    merged.totals.net = Number(merged.totals.income || 0) - Number(merged.totals.spend || 0);
+  }
   return merged;
 }
 
@@ -148,15 +204,18 @@ function enrichInsight(entry, key) {
     clone.metadata.documentMonth = preferred.documentMonth;
   }
   if (preferred?.currency) clone.currency = preferred.currency;
+  const legacyMetrics = preferred?.legacyMetrics || entry.metrics || {};
   if (entry.catalogueKey === 'payslip') {
-    clone.metrics = mergePayslipMetrics(entry.metrics, preferred?.metricsV1);
+    clone.metrics = mergePayslipMetrics(legacyMetrics, preferred?.metricsV1);
   } else if (preferred?.metricsV1 && preferred.transactionsV1?.length) {
-    clone.metrics = mergeStatementMetrics(entry.metrics, preferred.metricsV1);
-  } else if (entry.metrics) {
-    clone.metrics = { ...entry.metrics };
+    clone.metrics = mergeStatementMetrics(legacyMetrics, preferred.metricsV1);
+  } else if (legacyMetrics) {
+    clone.metrics = { ...legacyMetrics };
   }
   if (preferred?.transactionsV1?.length) {
     clone.transactions = convertPreferredTransactions(preferred.transactionsV1, key || entry.key || entry.baseKey || 'entry');
+  } else if (Array.isArray(preferred?.legacyTransactions)) {
+    clone.transactions = preferred.legacyTransactions.map((tx) => ({ ...tx }));
   } else if (Array.isArray(entry.transactions)) {
     clone.transactions = entry.transactions.map((tx) => ({ ...tx }));
   }
@@ -170,6 +229,215 @@ function normaliseSourcesWithPreferred(sources = {}) {
     result[key] = enrichInsight(value, key);
   }
   return result;
+}
+
+function normaliseMonthToken(token) {
+  if (!token) return null;
+  const raw = String(token).trim();
+  if (!raw) return null;
+  if (/^\d{2}\/\d{4}$/.test(raw)) {
+    return raw;
+  }
+  const isoMonthMatch = raw.match(/^(\d{4})-(\d{2})$/);
+  if (isoMonthMatch) {
+    return `${isoMonthMatch[2]}/${isoMonthMatch[1]}`;
+  }
+  const slashMonthMatch = raw.match(/^(\d{4})\/(\d{2})$/);
+  if (slashMonthMatch) {
+    return `${slashMonthMatch[2]}/${slashMonthMatch[1]}`;
+  }
+  const parsed = dayjs(raw);
+  if (parsed.isValid()) {
+    return parsed.format('MM/YYYY');
+  }
+  return null;
+}
+
+function coercePeriodDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{2}\/\d{4}$/.test(raw)) {
+    const [month, year] = raw.split('/');
+    return toDate(`${year}-${month}-01`);
+  }
+  if (/^\d{4}\/\d{2}$/.test(raw)) {
+    const [year, month] = raw.split('/');
+    return toDate(`${year}-${month}-01`);
+  }
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return toDate(`${raw}-01`);
+  }
+  return toDate(raw);
+}
+
+function derivePeriodLabel(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const containers = [
+    entry.metadata?.period,
+    entry.period,
+    entry.metrics?.period,
+    entry.__preferred?.period,
+    entry.__preferred?.metricsV1?.period,
+  ];
+  for (const container of containers) {
+    if (!container) continue;
+    if (typeof container === 'string') {
+      const label = normaliseMonthToken(container);
+      if (label) return label;
+      continue;
+    }
+    if (typeof container === 'object') {
+      const candidates = [
+        container.month,
+        container.Month,
+        container.Date,
+        container.date,
+        container.label,
+      ];
+      for (const candidate of candidates) {
+        const label = normaliseMonthToken(candidate);
+        if (label) return label;
+      }
+    }
+  }
+  const extras = [
+    entry.metadata?.documentMonth,
+    entry.metadata?.periodMonth,
+    entry.metrics?.periodMonth,
+  ];
+  for (const extra of extras) {
+    const label = normaliseMonthToken(extra);
+    if (label) return label;
+  }
+  const dateCandidates = [
+    entry.metrics?.payDate,
+    entry.metadata?.payDate,
+    entry.metrics?.periodEnd,
+    entry.metadata?.period?.end,
+    entry.metrics?.period?.end,
+    entry.period?.end,
+    entry.metadata?.period?.start,
+    entry.metrics?.period?.start,
+    entry.period?.start,
+    entry.metadata?.documentDate,
+    entry.period?.Date,
+    entry.metadata?.period?.Date,
+    entry.__preferred?.metricsV1?.period?.end,
+    entry.__preferred?.metricsV1?.period?.start,
+    entry.__preferred?.documentDate,
+  ];
+  for (const candidate of dateCandidates) {
+    const date = coercePeriodDate(candidate);
+    if (date) {
+      return dayjs(date).format('MM/YYYY');
+    }
+  }
+  return null;
+}
+
+function entrySortTimestamp(entry) {
+  if (!entry || typeof entry !== 'object') return 0;
+  const candidates = [
+    entry.metrics?.payDate,
+    entry.metadata?.payDate,
+    entry.metrics?.period?.end,
+    entry.metadata?.period?.end,
+    entry.period?.end,
+    entry.metrics?.period?.start,
+    entry.metadata?.period?.start,
+    entry.period?.start,
+    entry.period?.Date,
+    entry.metadata?.period?.Date,
+    entry.metadata?.documentMonth,
+    entry.metadata?.documentDate,
+    entry.metrics?.period?.month,
+    entry.period?.month,
+    entry.__preferred?.metricsV1?.period?.end,
+    entry.__preferred?.metricsV1?.period?.start,
+    entry.__preferred?.documentDate,
+  ];
+  for (const value of candidates) {
+    const date = coercePeriodDate(value);
+    if (date) return date.getTime();
+  }
+  if (Array.isArray(entry.files)) {
+    for (const file of entry.files) {
+      const date = coercePeriodDate(file?.uploadedAt);
+      if (date) return date.getTime();
+    }
+  }
+  return 0;
+}
+
+function latestEntry(entries = []) {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  return entries
+    .slice()
+    .sort((a, b) => entrySortTimestamp(b) - entrySortTimestamp(a))[0] || null;
+}
+
+function cloneLineItems(items = []) {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => ({
+    label: item?.label || null,
+    amount: item?.amount != null && Number.isFinite(Number(item.amount))
+      ? Number(item.amount)
+      : item?.amount ?? null,
+    code: item?.code || null,
+    type: item?.type || null,
+  }));
+}
+
+function buildDocInsightsSummary(docSources = {}) {
+  const grouped = groupSourcesByBase(docSources);
+
+  const payslipEntries = Array.isArray(grouped.payslip) ? grouped.payslip : [];
+  const payslipLatest = latestEntry(payslipEntries);
+  const payslipMetrics = payslipLatest?.metrics || {};
+  const payslipTotals = {};
+  const totalKeys = ['gross', 'net', 'tax', 'nationalInsurance', 'ni', 'pension', 'studentLoan', 'totalDeductions'];
+  totalKeys.forEach((key) => {
+    if (payslipMetrics[key] == null) return;
+    const value = Number(payslipMetrics[key]);
+    payslipTotals[key] = Number.isFinite(value) ? value : payslipMetrics[key];
+  });
+
+  const statementEntries = Array.isArray(grouped.current_account_statement)
+    ? grouped.current_account_statement
+    : [];
+  const statementRange = {
+    start: new Date('1900-01-01T00:00:00Z'),
+    end: new Date('2100-12-31T23:59:59Z'),
+  };
+  const statementSummary = summariseStatementRange(statementEntries, statementRange);
+  const income = Number(statementSummary?.totals?.income || 0);
+  const spend = Number(statementSummary?.totals?.spend || 0);
+  const netRaw = statementSummary?.totals?.net;
+  const net = netRaw != null && Number.isFinite(Number(netRaw)) ? Number(netRaw) : income - spend;
+  const bankTotals = {
+    income,
+    spend,
+    net,
+  };
+
+  return {
+    payslip: {
+      periodLabel: derivePeriodLabel(payslipLatest),
+      totals: payslipTotals,
+      earnings: cloneLineItems(payslipMetrics.earnings),
+      deductions: cloneLineItems(payslipMetrics.deductions),
+    },
+    bankStatement: {
+      periodLabel: derivePeriodLabel(latestEntry(statementEntries)),
+      totals: bankTotals,
+      moneyIn: income,
+      moneyOut: spend,
+      transactions: Array.isArray(statementSummary?.transactions)
+        ? statementSummary.transactions.map((tx) => ({ ...tx }))
+        : [],
+    },
+  };
 }
 
 function latestDocumentMonthKey(docSources = {}) {
@@ -701,6 +969,51 @@ function buildRangeView(docSources = {}, range) {
   };
 }
 
+router.get('/doc-insights', auth, async (req, res) => {
+  const user = await User.findById(req.user.id).lean();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const docInsights = user.documentInsights || {};
+  const docSources = normaliseSourcesWithPreferred(docInsights.sources || {});
+  const summary = buildDocInsightsSummary(docSources);
+
+  return res.json(summary);
+});
+
+router.get('/payslips', auth, async (req, res) => {
+  try {
+    const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+    const documents = await DocumentInsight.find({ userId: userObjectId, catalogueKey: 'payslip' })
+      .sort({ documentDate: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    const payslips = documents.map(normalisePayslipDocument).filter(Boolean);
+    res.json({ payslips });
+  } catch (error) {
+    console.error('GET /analytics/payslips error:', error);
+    res.status(500).json({ error: 'Unable to load payslip insights' });
+  }
+});
+
+router.get('/statements', auth, async (req, res) => {
+  try {
+    const userObjectId = new mongoose.Types.ObjectId(req.user.id);
+    const documents = await DocumentInsight.find({ userId: userObjectId, catalogueKey: 'current_account_statement' })
+      .sort({ documentDate: -1, documentMonth: -1, updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    const statements = documents.map(normaliseStatementDocument).filter(Boolean);
+    res.json({ statements });
+  } catch (error) {
+    if (error?.name === 'CastError') {
+      console.warn('GET /analytics/statements cast error', error);
+      return res.status(400).json({ error: 'Invalid request' });
+    }
+    console.error('GET /analytics/statements error:', error);
+    return res.status(500).json({ error: 'Unable to load statement insights' });
+  }
+});
+
 // GET /api/analytics/dashboard
 router.get('/dashboard', auth, async (req, res) => {
   if (!featureFlags.enableAnalyticsLegacy) {
@@ -1080,6 +1393,496 @@ router.post('/reprocess', auth, async (req, res) => {
   }
 });
 
-router.__test = { normaliseSourcesWithPreferred };
+router.__test = { normaliseSourcesWithPreferred, buildDocInsightsSummary };
 
 module.exports = router;
+
+function normalisePayslipDocument(doc) {
+  if (!doc) return null;
+  const preferred = getPreferredInsight(doc) || {};
+  const metadata = preferred.metadata || doc.metadata || {};
+  const mergedMetrics = mergePayslipMetrics(preferred.legacyMetrics || doc.metrics || {}, preferred.metricsV1 || null);
+
+  const idSource = doc.fileId || (typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id);
+  const id = typeof idSource === 'string' ? idSource : String(idSource || '');
+  if (!id) return null;
+
+  const payDate = toDateOnly(
+    mergedMetrics.payDate
+      || preferred.metricsV1?.payDate
+      || metadata.payDate
+      || doc.documentDate
+      || metadata.documentDate
+  );
+
+  const periodStart = toDateOnly(
+    mergedMetrics.period?.start
+      || mergedMetrics.periodStart
+      || preferred.metricsV1?.period?.start
+      || metadata.period?.start
+  );
+
+  const periodEnd = toDateOnly(
+    mergedMetrics.period?.end
+      || mergedMetrics.periodEnd
+      || preferred.metricsV1?.period?.end
+      || metadata.period?.end
+  );
+
+  const month = pickFirst(
+    mergedMetrics.period?.month,
+    mergedMetrics.periodMonth,
+    preferred.metricsV1?.period?.month,
+    metadata.period?.month,
+    doc.documentMonth,
+    payDate ? payDate.slice(0, 7) : null,
+  );
+
+  const periodLabel = pickFirst(
+    mergedMetrics.period?.label,
+    metadata.period?.label,
+    formatMonthLabel(month),
+  );
+
+  const payFrequency = pickFirst(
+    mergedMetrics.payFrequency,
+    metadata.period?.payFrequency,
+    metadata.payFrequency,
+  );
+
+  const earnings = normaliseLineItems(mergedMetrics.earnings || metadata.earnings || []);
+  const deductions = normaliseLineItems(mergedMetrics.deductions || metadata.deductions || [], { absolute: true });
+
+  const gross = firstNumber(
+    mergedMetrics.gross,
+    mergedMetrics.grossPeriod,
+    mergedMetrics.totals?.gross,
+    mergedMetrics.totals?.grossPeriod,
+    toMajor(preferred.metricsV1?.grossMinor),
+  );
+
+  const net = firstNumber(
+    mergedMetrics.net,
+    mergedMetrics.netPeriod,
+    mergedMetrics.totals?.net,
+    mergedMetrics.totals?.netPeriod,
+    toMajor(preferred.metricsV1?.netMinor),
+  );
+
+  const deductionsFromMinor = sumDefined([
+    toMajor(preferred.metricsV1?.taxMinor),
+    toMajor(preferred.metricsV1?.nationalInsuranceMinor),
+    toMajor(preferred.metricsV1?.pensionMinor),
+    toMajor(preferred.metricsV1?.studentLoanMinor),
+  ]);
+
+  const deductionsTotal = firstNumber(
+    mergedMetrics.totalDeductions,
+    mergedMetrics.deductionsTotal,
+    mergedMetrics.totals?.deductions,
+    mergedMetrics.totals?.totalDeductions,
+    deductionsFromMinor,
+    deductions.reduce((acc, item) => acc + (item.amount || 0), 0),
+  );
+
+  const currency = pickFirst(
+    doc.currency,
+    mergedMetrics.currency,
+    metadata.currency,
+    preferred.currency,
+    'GBP',
+  );
+
+  const uploadedAt = toIsoDate(
+    metadata.uploadedAt
+      || doc.updatedAt
+      || doc.createdAt
+      || preferred.metricsV1?.payDate
+  );
+
+  const employer = pickFirst(
+    mergedMetrics.employerName,
+    mergedMetrics.employer?.name,
+    metadata.employerName,
+    metadata.employer?.name,
+    preferred.metricsV1?.employer?.name,
+  );
+
+  const period = {
+    start: periodStart || null,
+    end: periodEnd || null,
+    month: month || null,
+    frequency: payFrequency || null,
+  };
+  if (periodLabel) period.label = periodLabel;
+
+  const totals = {
+    gross: gross ?? null,
+    net: net ?? null,
+    deductions: deductionsTotal ?? null,
+  };
+
+  const entry = {
+    id,
+    fileId: doc.fileId || null,
+    catalogueKey: doc.catalogueKey,
+    employer: employer || null,
+    payDate: payDate || null,
+    currency,
+    earnings,
+    deductions,
+    uploadedAt,
+    insightId: typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id || null,
+    documentMonth: doc.documentMonth || month || null,
+  };
+
+  entry.period = period;
+  entry.totals = totals;
+
+  return entry;
+}
+
+function normaliseStatementDocument(doc) {
+  if (!doc) return null;
+  const idSource = doc.fileId || (typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id);
+  const id = idSource ? String(idSource) : null;
+  if (!id) return null;
+
+  const enriched = enrichInsight(doc, id) || {};
+  const preferred = enriched.__preferred || getPreferredInsight(doc) || {};
+  const metadata = enriched.metadata || doc.metadata || {};
+  const metrics = mergeStatementMetrics(enriched.metrics || doc.metrics || {}, preferred.metricsV1 || null);
+
+  const round = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? Math.round(num * 100) / 100 : null;
+  };
+
+  const periodStartRaw = pickFirst(
+    metrics.period?.start,
+    metrics.periodStart,
+    metadata.period?.start,
+    metadata.periodStart,
+    metadata.period?.from,
+    metadata.period?.Start,
+    doc.documentDate,
+    doc.documentDateV1,
+  );
+  const periodEndRaw = pickFirst(
+    metrics.period?.end,
+    metrics.periodEnd,
+    metadata.period?.end,
+    metadata.periodEnd,
+    metadata.period?.to,
+    metadata.period?.End,
+    doc.documentDate,
+    doc.documentDateV1,
+  );
+  const periodMonth = pickFirst(
+    metrics.period?.month,
+    metrics.periodMonth,
+    metadata.period?.month,
+    metadata.periodMonth,
+    doc.documentMonth,
+  );
+
+  const periodLabel = pickFirst(
+    metrics.period?.label,
+    metadata.period?.label,
+    derivePeriodLabel(enriched),
+    formatMonthLabel(periodMonth),
+  );
+
+  const currency = pickFirst(
+    enriched.currency,
+    doc.currency,
+    metrics.currency,
+    metadata.currency,
+    preferred.currency,
+    'GBP',
+  );
+
+  const totalIn = firstNumber(
+    metrics.totalIn,
+    metrics.totalMoneyIn,
+    metrics.sumCredits,
+    metrics.totalCredit,
+    metrics.totalCredits,
+    metrics.income,
+    metrics.totals?.income,
+  );
+  const totalOut = firstNumber(
+    metrics.totalOut,
+    metrics.totalMoneyOut,
+    metrics.sumDebits,
+    metrics.totalDebit,
+    metrics.totalDebits,
+    metrics.debitsTotal,
+    metrics.spend,
+    metrics.totals?.spend,
+  );
+
+  let net = firstNumber(metrics.net, metrics.totals?.net);
+
+  const openingBalance = firstNumber(
+    metrics.openingBalance,
+    metrics.startingBalance,
+    metrics.balances?.openingBalance,
+    metrics.balances?.opening,
+    metrics.totals?.openingBalance,
+    metadata.openingBalance,
+  );
+  const closingBalance = firstNumber(
+    metrics.closingBalance,
+    metrics.endingBalance,
+    metrics.balances?.closingBalance,
+    metrics.balances?.closing,
+    metrics.totals?.closingBalance,
+    metadata.closingBalance,
+  );
+
+  const accountName = pickFirst(
+    metadata.accountName,
+    metadata.account?.name,
+    metadata.account?.displayName,
+    metadata.accountLabel,
+    metadata.accountDisplayName,
+    metadata.accountNickName,
+    metadata.account?.accountName,
+    'Account',
+  );
+  const institutionName = pickFirst(
+    metadata.institutionName,
+    metadata.bankName,
+    metadata.bank?.name,
+    metadata.institution?.name,
+    metadata.financialInstitution,
+  );
+  const accountNumberMasked = pickFirst(
+    metadata.accountNumberMasked,
+    metadata.accountNumber,
+    metadata.account?.numberMasked,
+    metadata.account?.maskedNumber,
+    metadata.account?.accountNumberMasked,
+  );
+  const accountType = pickFirst(
+    metadata.accountType,
+    metadata.account?.type,
+    metadata.type,
+  );
+
+  const uploadedAt = toIsoDate(
+    pickFirst(
+      metadata.uploadedAt,
+      doc.updatedAt,
+      doc.createdAt,
+      doc.extractedAt,
+    ),
+  );
+
+  const txSource = Array.isArray(enriched.transactions) ? enriched.transactions : Array.isArray(doc.transactions) ? doc.transactions : [];
+  const transactions = txSource
+    .map((tx, index) => {
+      if (!tx || typeof tx !== 'object') return null;
+      const amountRaw = firstNumber(
+        tx.amount,
+        tx.total,
+        tx.value,
+        tx.amountMajor,
+        tx.amountMinor != null ? toMajor(tx.amountMinor) : null,
+      );
+      if (amountRaw == null) return null;
+      const directionRaw = String(tx.direction || '').toLowerCase();
+      const signedAmount = directionRaw === 'outflow'
+        ? -Math.abs(amountRaw)
+        : directionRaw === 'inflow'
+          ? Math.abs(amountRaw)
+          : amountRaw;
+      const direction = signedAmount < 0 ? 'outflow' : 'inflow';
+      const description = pickFirst(tx.description, tx.memo, tx.narrative, 'Transaction');
+      const category = pickFirst(tx.category, tx.categoryName, tx.type, 'Other');
+      const date = toDateOnly(tx.date || tx.postedDate || tx.transactionDate || tx.timestamp);
+      const accountLabel = pickFirst(tx.accountName, tx.account, accountName);
+      const txId = pickFirst(tx.id, tx.transactionId, `${id}:${index}`);
+      return {
+        id: txId ? String(txId) : `${id}:${index}`,
+        description,
+        amount: round(signedAmount) ?? 0,
+        category,
+        date: date || null,
+        direction,
+        accountName: accountLabel || accountName,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.date && b.date && a.date !== b.date) {
+        return b.date.localeCompare(a.date);
+      }
+      return Math.abs(b.amount || 0) - Math.abs(a.amount || 0);
+    });
+
+  const fallbackIncome = transactions.reduce((acc, tx) => (tx.amount > 0 ? acc + tx.amount : acc), 0);
+  const fallbackSpend = transactions.reduce((acc, tx) => (tx.amount < 0 ? acc + Math.abs(tx.amount) : acc), 0);
+
+  const moneyIn = totalIn != null ? round(totalIn) : round(fallbackIncome);
+  const moneyOut = totalOut != null ? round(totalOut) : round(fallbackSpend);
+  if (net == null && moneyIn != null && moneyOut != null) {
+    net = moneyIn - moneyOut;
+  }
+
+  const categoryTotals = new Map();
+  transactions.forEach((tx) => {
+    if (tx.direction !== 'outflow') return;
+    const key = tx.category || 'Other';
+    const current = categoryTotals.get(key) || 0;
+    categoryTotals.set(key, current + Math.abs(tx.amount || 0));
+  });
+
+  const categories = Array.from(categoryTotals.entries())
+    .map(([category, amount]) => ({
+      label: category,
+      category,
+      amount: round(amount) ?? 0,
+      share: 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+  const totalCategoryOutflow = categories.reduce((sum, item) => sum + item.amount, 0);
+  categories.forEach((item) => {
+    item.share = totalCategoryOutflow ? item.amount / totalCategoryOutflow : 0;
+  });
+
+  const raw = { ...doc, metrics, transactions: txSource };
+  delete raw.__preferred;
+
+  return {
+    id,
+    fileId: doc.fileId || null,
+    catalogueKey: doc.catalogueKey,
+    accountName,
+    institutionName: institutionName || null,
+    accountNumberMasked: accountNumberMasked || null,
+    accountType: accountType || null,
+    currency,
+    period: {
+      start: periodStartRaw ? toDateOnly(periodStartRaw) : null,
+      end: periodEndRaw ? toDateOnly(periodEndRaw) : null,
+      month: periodMonth || null,
+      label: periodLabel || null,
+    },
+    totals: {
+      moneyIn,
+      moneyOut,
+      net: net != null ? round(net) : null,
+    },
+    balances: {
+      opening: round(openingBalance),
+      closing: round(closingBalance),
+    },
+    transactions,
+    categories,
+    uploadedAt,
+    insightId: typeof doc._id?.toString === 'function' ? doc._id.toString() : doc._id || null,
+    raw,
+  };
+}
+
+function normaliseLineItems(list, { absolute = false } = {}) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((item) => {
+      if (!item) return null;
+      const label = pickFirst(item.label, item.name, item.rawLabel, item.category);
+      const amountRaw = firstNumber(
+        item.amount,
+        item.total,
+        item.value,
+        item.amountPeriod,
+        item.amountCurrent,
+        item.amountMinor != null ? toMajor(item.amountMinor) : null,
+      );
+      if (label == null || amountRaw == null) return null;
+
+      const amountYtdRaw = firstNumber(
+        item.amountYtd,
+        item.amountYearToDate,
+        item.amountYTD,
+        item.yearToDate,
+        item.totalYtd,
+        item.amountYtdMinor != null ? toMajor(item.amountYtdMinor) : null,
+        item.ytd,
+      );
+
+      const amount = absolute ? Math.abs(amountRaw) : amountRaw;
+      const amountYtd =
+        amountYtdRaw == null ? null : absolute ? Math.abs(amountYtdRaw) : amountYtdRaw;
+      const category = pickFirst(item.category, item.type, item.rawLabel, label);
+
+      return { label, amount, amountYtd, category };
+    })
+    .filter(Boolean);
+}
+
+function pickFirst(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) continue;
+    if (typeof candidate === 'string') {
+      const trimmed = candidate.trim();
+      if (trimmed) return trimmed;
+      continue;
+    }
+    if (candidate instanceof Date) {
+      if (!Number.isNaN(candidate.getTime())) return candidate;
+      continue;
+    }
+    if (typeof candidate === 'object') {
+      if (Array.isArray(candidate)) {
+        if (candidate.length) return candidate;
+        continue;
+      }
+      if (Object.keys(candidate).length) return candidate;
+      continue;
+    }
+    if (candidate !== '') return candidate;
+  }
+  return null;
+}
+
+function firstNumber(...candidates) {
+  for (const candidate of candidates) {
+    if (candidate == null || candidate === '') continue;
+    const num = Number(candidate);
+    if (Number.isFinite(num)) return num;
+  }
+  return null;
+}
+
+function sumDefined(values = []) {
+  const numbers = values.filter((value) => Number.isFinite(value));
+  if (!numbers.length) return null;
+  return numbers.reduce((acc, value) => acc + value, 0);
+}
+
+function toIsoDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function toDateOnly(value) {
+  const iso = toIsoDate(value);
+  return iso ? iso.slice(0, 10) : null;
+}
+
+function formatMonthLabel(month) {
+  if (!month || typeof month !== 'string') return null;
+  const trimmed = month.trim();
+  if (!/^[0-9]{4}-[0-9]{2}$/.test(trimmed)) return null;
+  const candidate = dayjs(`${trimmed}-01`);
+  if (!candidate.isValid()) return null;
+  return candidate.format('MMM YYYY');
+}

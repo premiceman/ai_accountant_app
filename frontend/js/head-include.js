@@ -1,5 +1,24 @@
 (function () {
   const head = document.head;
+  const doc = document.documentElement;
+  const THEME_STORAGE_KEY = 'phloat-theme';
+
+  function getStoredTheme() {
+    try {
+      return localStorage.getItem(THEME_STORAGE_KEY);
+    } catch (err) {
+      return null;
+    }
+  }
+
+  const prefersDark = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const storedTheme = getStoredTheme();
+  const existingTheme = (doc.getAttribute('data-theme') || '').toLowerCase();
+  const initialTheme = storedTheme || (existingTheme === 'dark' ? 'dark' : existingTheme === 'light' ? 'light' : (prefersDark ? 'dark' : 'light'));
+  const normalizedTheme = initialTheme === 'dark' ? 'dark' : 'light';
+  doc.setAttribute('data-theme', normalizedTheme);
+  doc.classList.toggle('theme-dark', normalizedTheme === 'dark');
+  doc.style.colorScheme = normalizedTheme === 'dark' ? 'dark' : 'light';
 
   function add(tag, attrs) {
     const el = document.createElement(tag);
@@ -72,6 +91,9 @@
 
   // Global styles with high priority loading
   loadStylesheetFast('/css/styles.css');
+
+  // Theme orchestrator
+  add('script', { src: '/js/theme.js', defer: '' });
 
   // Chart.js
   add('script', { src: 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js' });

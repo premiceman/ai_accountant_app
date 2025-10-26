@@ -10,18 +10,22 @@
     "start": "node dist/index.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "npm run build && node dist/tests/rawInstitutionNames.test.js && node dist/tests/v1Dashboard.test.js",
+    "test:payslip": "npm run build && node dist/services/insights/__tests__/payslipMetrics.test.js",
     "copy-shared": "node ../../scripts/copy-shared.js ./shared",
-    "postinstall": "npm run copy-shared"
+    "postinstall": "npm run copy-shared",
+    "job:backfill:payslip": "npm run build && node dist/jobs/backfillPayslipMetricsV1.js"
   },
   "dependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.9",
     "ajv": "^8.17.1",
     "@aws-sdk/client-s3": "^3.637.0",
+    "date-fns": "file:vendor/date-fns",
     "dayjs": "^1.11.13",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mongoose": "^8.5.1",
+    "mongodb": "^6.8.0",
     "pdf-parse": "^1.1.1",
     "tesseract.js": "^5.0.4",
     "pino": "^9.1.0",
