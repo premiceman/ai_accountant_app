@@ -78,6 +78,19 @@ function run(): void {
       metadata: {
         employerName: 'Acme Corp',
         period: { start: '2024-04-01', end: '2024-04-30', month: '2024-04' },
+        totals: {
+          grossPeriod: 2500,
+          netPeriod: 2000,
+        },
+        earnings: [
+          { rawLabel: 'Base salary', category: 'base_salary', amountPeriod: 2500 },
+        ],
+        deductions: [
+          { rawLabel: 'Income Tax', category: 'income_tax', amountPeriod: 300 },
+          { rawLabel: 'National Insurance', category: 'national_insurance', amountPeriod: 150 },
+          { rawLabel: 'Pension Contribution', category: 'pension_employee', amountPeriod: 100 },
+          { rawLabel: 'Student Loan', category: 'student_loan', amountPeriod: 50 },
+        ],
       },
     }) as any,
     payslipClassification

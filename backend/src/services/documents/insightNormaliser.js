@@ -108,7 +108,7 @@ function derivePeriodMetadata(metadata = {}, metrics = {}) {
   const periodStart = ensureIsoDate(metrics.periodStart ?? periodMeta.start);
   const periodEnd = ensureIsoDate(metrics.periodEnd ?? periodMeta.end);
   const payDate = ensureIsoDate(metrics.payDate ?? metadata.payDate ?? periodMeta.end ?? metadata.documentDate);
-  const month = ensureIsoMonth(periodMeta.month ?? metadata.documentMonth ?? payDate);
+  const month = ensureIsoMonth(periodMeta.month ?? periodMeta.Date ?? metadata.documentMonth ?? payDate);
 
   if (periodStart) periodMeta.start = periodStart;
   if (periodEnd) periodMeta.end = periodEnd;
