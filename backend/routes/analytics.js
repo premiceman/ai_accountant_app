@@ -1551,6 +1551,10 @@ function normaliseStatementDocument(doc) {
   const enriched = enrichInsight(doc, id) || {};
   const preferred = enriched.__preferred || getPreferredInsight(doc) || {};
   const metadata = enriched.metadata || doc.metadata || {};
+  const statementMetadata = metadata.statement || {};
+  const statementPeriod = statementMetadata.period || {};
+  const accountMetadata = metadata.account || {};
+  const balanceMetadata = metadata.balances || {};
   const metrics = mergeStatementMetrics(enriched.metrics || doc.metrics || {}, preferred.metricsV1 || null);
 
   const round = (value) => {
@@ -1561,28 +1565,39 @@ function normaliseStatementDocument(doc) {
   const periodStartRaw = pickFirst(
     metrics.period?.start,
     metrics.periodStart,
+    statementPeriod.startDate,
+    statementPeriod.start,
+    statementPeriod.from,
     metadata.period?.start,
     metadata.periodStart,
     metadata.period?.from,
     metadata.period?.Start,
+    statementMetadata.periodStart,
     doc.documentDate,
     doc.documentDateV1,
   );
   const periodEndRaw = pickFirst(
     metrics.period?.end,
     metrics.periodEnd,
+    statementPeriod.endDate,
+    statementPeriod.end,
+    statementPeriod.to,
     metadata.period?.end,
     metadata.periodEnd,
     metadata.period?.to,
     metadata.period?.End,
+    statementMetadata.periodEnd,
     doc.documentDate,
     doc.documentDateV1,
   );
   const periodMonth = pickFirst(
     metrics.period?.month,
     metrics.periodMonth,
+    statementPeriod.month,
+    statementPeriod.Date,
     metadata.period?.month,
     metadata.periodMonth,
+    statementMetadata.periodMonth,
     doc.documentMonth,
   );
 
@@ -1631,6 +1646,8 @@ function normaliseStatementDocument(doc) {
     metrics.balances?.opening,
     metrics.totals?.openingBalance,
     metadata.openingBalance,
+    balanceMetadata.openingBalance,
+    balanceMetadata.opening,
   );
   const closingBalance = firstNumber(
     metrics.closingBalance,
@@ -1639,10 +1656,13 @@ function normaliseStatementDocument(doc) {
     metrics.balances?.closing,
     metrics.totals?.closingBalance,
     metadata.closingBalance,
+    balanceMetadata.closingBalance,
+    balanceMetadata.closing,
   );
 
   const accountName = pickFirst(
     metadata.accountName,
+    accountMetadata.holderName,
     metadata.account?.name,
     metadata.account?.displayName,
     metadata.accountLabel,
@@ -1664,11 +1684,16 @@ function normaliseStatementDocument(doc) {
     metadata.account?.numberMasked,
     metadata.account?.maskedNumber,
     metadata.account?.accountNumberMasked,
+    accountMetadata.accountNumber,
   );
   const accountType = pickFirst(
     metadata.accountType,
     metadata.account?.type,
     metadata.type,
+  );
+  const sortCode = pickFirst(
+    metadata.sortCode,
+    accountMetadata.sortCode,
   );
 
   const uploadedAt = toIsoDate(
@@ -1681,16 +1706,46 @@ function normaliseStatementDocument(doc) {
   );
 
   const txSource = Array.isArray(enriched.transactions) ? enriched.transactions : Array.isArray(doc.transactions) ? doc.transactions : [];
+  const normaliseTxDate = (value) => {
+    if (!value) return value;
+    if (value instanceof Date) return value;
+    const str = String(value).trim();
+    if (/^\d{2}\/\d{4}$/.test(str)) {
+      const [month, year] = str.split('/');
+      if (month && year) {
+        const normalisedMonth = month.padStart(2, '0');
+        return `${year}-${normalisedMonth}-01`;
+      }
+    }
+    return value;
+  };
   const transactions = txSource
     .map((tx, index) => {
       if (!tx || typeof tx !== 'object') return null;
-      const amountRaw = firstNumber(
+      const moneyInRaw = firstNumber(
+        tx.moneyIn,
+        tx.credit,
+        tx.amountIn,
+        tx.deposit,
+        tx.moneyInMinor != null ? toMajor(tx.moneyInMinor) : null,
+      );
+      const moneyOutRaw = firstNumber(
+        tx.moneyOut,
+        tx.debit,
+        tx.amountOut,
+        tx.withdrawal,
+        tx.moneyOutMinor != null ? toMajor(tx.moneyOutMinor) : null,
+      );
+      let amountRaw = firstNumber(
         tx.amount,
         tx.total,
         tx.value,
         tx.amountMajor,
         tx.amountMinor != null ? toMajor(tx.amountMinor) : null,
       );
+      if (amountRaw == null && (moneyInRaw != null || moneyOutRaw != null)) {
+        amountRaw = (moneyInRaw || 0) - (moneyOutRaw || 0);
+      }
       if (amountRaw == null) return null;
       const directionRaw = String(tx.direction || '').toLowerCase();
       const signedAmount = directionRaw === 'outflow'
@@ -1701,7 +1756,7 @@ function normaliseStatementDocument(doc) {
       const direction = signedAmount < 0 ? 'outflow' : 'inflow';
       const description = pickFirst(tx.description, tx.memo, tx.narrative, 'Transaction');
       const category = pickFirst(tx.category, tx.categoryName, tx.type, 'Other');
-      const date = toDateOnly(tx.date || tx.postedDate || tx.transactionDate || tx.timestamp);
+      const date = toDateOnly(normaliseTxDate(tx.date || tx.postedDate || tx.transactionDate || tx.timestamp));
       const accountLabel = pickFirst(tx.accountName, tx.account, accountName);
       const txId = pickFirst(tx.id, tx.transactionId, `${id}:${index}`);
       return {
@@ -1763,6 +1818,7 @@ function normaliseStatementDocument(doc) {
     institutionName: institutionName || null,
     accountNumberMasked: accountNumberMasked || null,
     accountType: accountType || null,
+    sortCode: sortCode || null,
     currency,
     period: {
       start: periodStartRaw ? toDateOnly(periodStartRaw) : null,

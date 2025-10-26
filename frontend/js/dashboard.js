@@ -466,6 +466,7 @@
     const accountParts = [];
     if (statement.accountName) accountParts.push(statement.accountName);
     if (statement.accountNumberMasked) accountParts.push(statement.accountNumberMasked);
+    if (statement.sortCode) accountParts.push(statement.sortCode);
 
     setText('statement-institution', institutionLabel);
     setText('statement-account', accountParts.length ? accountParts.join(' • ') : '—');
@@ -862,6 +863,7 @@
       accountName: entry.accountName || 'Account',
       institutionName: entry.institutionName || null,
       accountNumberMasked: entry.accountNumberMasked || null,
+      sortCode: entry.sortCode || entry.accountSortCode || null,
       accountType: entry.accountType || null,
       moneyIn: Number.isFinite(moneyIn) ? Number(moneyIn) : null,
       moneyOut: Number.isFinite(moneyOut) ? Number(moneyOut) : null,
