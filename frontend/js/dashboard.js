@@ -4,6 +4,9 @@
     payslips: [],
     selectedId: null,
     chart: null,
+    statements: [],
+    statementSelectedId: null,
+    statementChart: null,
   };
 
   init().catch((error) => {
@@ -15,15 +18,16 @@
     const { me } = await Auth.requireAuth();
     Auth.setBannerTitle('Intelligence Dashboard');
 
-    const [insights, payslipDataset] = await Promise.all([
+    const [insights, payslipDataset, statementDataset] = await Promise.all([
       loadInsights().catch((error) => {
         console.warn('Proceeding without document insights', error);
         return {};
       }),
       loadPayslipDataset(),
+      loadStatementDataset(),
     ]);
 
-    renderDashboard({ me, insights, payslipDataset });
+    renderDashboard({ me, insights, payslipDataset, statementDataset });
   }
 
   async function loadInsights() {
@@ -61,6 +65,29 @@
     }
   }
 
+  async function loadStatementDataset() {
+    try {
+      const response = await Auth.fetch('/api/analytics/statements', { cache: 'no-store' });
+      if (response.status === 404) {
+        return { list: [], error: null };
+      }
+      if (!response.ok) {
+        const text = await safeRead(response);
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const list = Array.isArray(payload?.statements)
+        ? payload.statements
+        : Array.isArray(payload)
+          ? payload
+          : [];
+      return { list, error: null };
+    } catch (error) {
+      console.error('Failed to load statement dataset', error);
+      return { list: [], error };
+    }
+  }
+
   async function safeRead(response) {
     try {
       const type = response.headers.get('content-type') || '';
@@ -78,29 +105,48 @@
     }
   }
 
-  function renderDashboard({ insights = {}, payslipDataset = { list: [] }, me = null } = {}) {
+  function renderDashboard({ insights = {}, payslipDataset = { list: [] }, statementDataset = { list: [] }, me = null } = {}) {
     if (me?.firstName) {
       const greeting = byId('greeting-name');
       if (greeting) greeting.textContent = me.firstName;
     }
 
-    const { list: rawPayslips = [], error: datasetError = null } = payslipDataset || {};
-    const normalised = normalisePayslipList(rawPayslips);
+    const { list: rawPayslips = [], error: payslipError = null } = payslipDataset || {};
+    const payslips = normalisePayslipList(rawPayslips);
 
-    if (!normalised.length && datasetError) {
-      softError('Unable to load payslip data right now. Please refresh.');
+    const { list: rawStatements = [], error: statementError = null } = statementDataset || {};
+    const statements = normaliseStatementList(rawStatements);
+
+    if (!payslips.length && !statements.length) {
+      if (payslipError && statementError) {
+        softError('Unable to load document analytics right now. Please refresh.');
+      } else if (payslipError) {
+        softError('Unable to load payslip data right now. Please refresh.');
+      } else if (statementError) {
+        softError('Unable to load statement data right now. Please refresh.');
+      }
     }
 
-    toggleDashboardEmpty(!normalised.length);
+    toggleDashboardEmpty(!(payslips.length || statements.length));
 
-    state.payslips = normalised;
-    state.selectedId = pickDefaultSelection(normalised, state.selectedId);
+    state.payslips = payslips;
+    state.selectedId = pickDefaultSelection(payslips, state.selectedId);
 
-    renderPayslipSelector(normalised, state.selectedId);
-    const selected = getSelectedPayslip();
-    renderPayslipSummary(selected);
-    renderHistogram(selected);
-    renderPayslipJson(selected);
+    renderPayslipSelector(payslips, state.selectedId);
+    const selectedPayslip = getSelectedPayslip();
+    renderPayslipSummary(selectedPayslip);
+    renderHistogram(selectedPayslip);
+    renderPayslipJson(selectedPayslip);
+
+    state.statements = statements;
+    state.statementSelectedId = pickDefaultSelection(statements, state.statementSelectedId);
+
+    renderStatementSelector(statements, state.statementSelectedId);
+    const selectedStatement = getSelectedStatement();
+    renderStatementSummary(selectedStatement);
+    renderStatementChart(selectedStatement);
+    renderStatementCategories(selectedStatement);
+    renderStatementJson(selectedStatement);
   }
 
   function renderPayslipSelector(payslips, selectedId) {
@@ -346,6 +392,267 @@
     }
   }
 
+  function renderStatementSelector(statements, selectedId) {
+    const select = byId('statement-selector');
+    if (!select) return;
+
+    select.innerHTML = '';
+
+    if (!Array.isArray(statements) || statements.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No statements available';
+      select.appendChild(option);
+      select.disabled = true;
+      return;
+    }
+
+    statements.forEach((statement) => {
+      const option = document.createElement('option');
+      option.value = statement.id;
+      option.textContent = statement.optionLabel;
+      select.appendChild(option);
+    });
+
+    select.disabled = false;
+    select.value = selectedId || statements[0]?.id || '';
+
+    if (!select.dataset.bound) {
+      select.addEventListener('change', (event) => {
+        const id = event.target.value || null;
+        state.statementSelectedId = id;
+        const selected = getSelectedStatement();
+        renderStatementSummary(selected);
+        renderStatementChart(selected);
+        renderStatementCategories(selected);
+        renderStatementJson(selected);
+      });
+      select.dataset.bound = 'true';
+    }
+  }
+
+  function getSelectedStatement() {
+    if (!state.statementSelectedId) return null;
+    return state.statements.find((item) => item.id === state.statementSelectedId) || null;
+  }
+
+  function renderStatementSummary(statement) {
+    const empty = byId('statement-empty');
+    const content = byId('statement-content');
+
+    if (!statement) {
+      content?.classList.add('d-none');
+      if (empty) {
+        empty.textContent = 'Upload a bank statement or choose one from the selector to review incomings, outgoings and balances.';
+        empty.classList.remove('d-none');
+      }
+      setText('statement-institution', '—');
+      setText('statement-account', '—');
+      setText('statement-period', '—');
+      setText('statement-money-in', '£—');
+      setText('statement-money-out', '£—');
+      setText('statement-net', '£—');
+      setText('statement-opening-balance', '£—');
+      setText('statement-closing-balance', '£—');
+      setText('statement-uploaded', '—');
+      renderTransactionsTable(byId('statement-transactions-body'), []);
+      return;
+    }
+
+    empty?.classList.add('d-none');
+    content?.classList.remove('d-none');
+
+    const institutionLabel = statement.institutionName || '—';
+    const accountParts = [];
+    if (statement.accountName) accountParts.push(statement.accountName);
+    if (statement.accountNumberMasked) accountParts.push(statement.accountNumberMasked);
+
+    setText('statement-institution', institutionLabel);
+    setText('statement-account', accountParts.length ? accountParts.join(' • ') : '—');
+    setText('statement-period', statement.periodLabel || '—');
+    setText('statement-money-in', formatMoney(statement.moneyIn));
+    setText('statement-money-out', formatMoney(statement.moneyOut));
+    setText('statement-net', formatMoney(statement.net, { sign: true }));
+    setText('statement-opening-balance', formatMoney(statement.openingBalance));
+    setText('statement-closing-balance', formatMoney(statement.closingBalance));
+    setText('statement-uploaded', statement.uploadedLabel || '—');
+
+    const tbody = byId('statement-transactions-body');
+    const topTransactions = statement.transactions
+      .slice()
+      .sort((a, b) => Math.abs(b.amount || 0) - Math.abs(a.amount || 0))
+      .slice(0, 10);
+    renderTransactionsTable(tbody, topTransactions);
+  }
+
+  function renderStatementChart(statement) {
+    const empty = byId('statement-chart-empty');
+    const wrapper = byId('statement-chart-wrapper');
+    const canvas = byId('statement-chart');
+    if (!empty || !wrapper || !canvas) return;
+
+    const defaultMessage = 'Select a statement to view spending by category.';
+
+    if (!statement) {
+      destroyStatementChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      if (!empty.textContent) empty.textContent = defaultMessage;
+      else empty.textContent = defaultMessage;
+      return;
+    }
+
+    const categories = Array.isArray(statement.spendCategories)
+      ? statement.spendCategories.filter((item) => Number(item.amount) > 0)
+      : [];
+
+    if (!categories.length) {
+      destroyStatementChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      empty.textContent = 'No spending categories available for this statement.';
+      return;
+    }
+
+    if (typeof window.Chart === 'undefined') {
+      console.warn('Chart.js is not available.');
+      destroyStatementChart();
+      wrapper.classList.add('d-none');
+      empty.classList.remove('d-none');
+      empty.textContent = 'Chart library unavailable. Install Chart.js to view the pie chart.';
+      return;
+    }
+
+    destroyStatementChart();
+
+    const labels = categories.map((item) => item.label);
+    const data = categories.map((item) => Math.abs(item.amount || 0));
+    const ctx = canvas.getContext('2d');
+    const computedStyle = getComputedStyle(document.documentElement);
+    const muted = computedStyle.getPropertyValue('--bs-secondary-color') || '#6c757d';
+    const borderColor = computedStyle.getPropertyValue('--bs-border-color-translucent') || 'rgba(108,117,125,0.2)';
+    const colors = buildChartPalette(labels.length);
+
+    state.statementChart = new window.Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Spending by category',
+            data,
+            backgroundColor: colors,
+            borderColor,
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '55%',
+        plugins: {
+          legend: {
+            labels: {
+              color: muted || '#6c757d',
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label(context) {
+                const label = context.label || '';
+                const value = Number(context.parsed);
+                const category = categories[context.dataIndex];
+                const share = category?.share;
+                const shareLabel = Number.isFinite(share) ? ` (${formatPercent(share)})` : '';
+                return `${label}: ${formatMoney(value)}${shareLabel}`;
+              },
+            },
+          },
+        },
+      },
+    });
+
+    wrapper.classList.remove('d-none');
+    empty.classList.add('d-none');
+  }
+
+  function destroyStatementChart() {
+    if (state.statementChart && typeof state.statementChart.destroy === 'function') {
+      state.statementChart.destroy();
+    }
+    state.statementChart = null;
+  }
+
+  function buildChartPalette(count) {
+    const basePalette = [
+      'rgba(103,89,255,0.85)',
+      'rgba(16,185,129,0.85)',
+      'rgba(245,158,11,0.85)',
+      'rgba(239,68,68,0.85)',
+      'rgba(59,130,246,0.85)',
+      'rgba(236,72,153,0.85)',
+      'rgba(20,184,166,0.85)',
+      'rgba(249,115,22,0.85)',
+      'rgba(37,99,235,0.85)',
+      'rgba(147,51,234,0.85)',
+    ];
+    if (!count || count <= basePalette.length) {
+      return basePalette.slice(0, Math.max(0, count));
+    }
+    const colors = [];
+    for (let index = 0; index < count; index += 1) {
+      colors.push(basePalette[index % basePalette.length]);
+    }
+    return colors;
+  }
+
+  function renderStatementCategories(statement) {
+    const tbody = byId('statement-categories-body');
+    if (!tbody) return;
+
+    clearTable(tbody);
+
+    const categories = Array.isArray(statement?.spendCategories)
+      ? statement.spendCategories.filter((item) => Number(item.amount) > 0)
+      : [];
+
+    if (!categories.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="3" class="text-muted small">No spending categories available.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    categories.forEach((item) => {
+      const tr = document.createElement('tr');
+      const label = escapeHtml(item.label || 'Category');
+      tr.innerHTML = `
+        <td>${label}</td>
+        <td class="text-end">${formatMoney(item.amount)}</td>
+        <td class="text-end">${formatPercent(item.share)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderStatementJson(statement) {
+    const pre = byId('statement-json');
+    if (!pre) return;
+
+    if (!statement) {
+      pre.textContent = 'No statement selected.';
+      return;
+    }
+
+    try {
+      pre.textContent = JSON.stringify(statement.raw, null, 2);
+    } catch (error) {
+      console.warn('Failed to stringify statement JSON', error);
+      pre.textContent = 'Unable to render JSON payload.';
+    }
+  }
+
   function renderLineItems(tbody, rows) {
     if (!tbody) return;
     clearTable(tbody);
@@ -361,6 +668,28 @@
       tr.innerHTML = `
         <td>${label}</td>
         <td class="text-end">${formatMoney(row.amount)}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderTransactionsTable(tbody, transactions) {
+    if (!tbody) return;
+    clearTable(tbody);
+    if (!Array.isArray(transactions) || !transactions.length) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="3" class="text-muted small">No transactions available.</td>';
+      tbody.appendChild(tr);
+      return;
+    }
+
+    transactions.forEach((tx) => {
+      const tr = document.createElement('tr');
+      const description = escapeHtml(tx.description || 'Transaction');
+      const dateLabel = tx.date ? formatDateLabel(tx.date) : '—';
+      tr.innerHTML = `
+        <td>${description}</td>
+        <td>${dateLabel || '—'}</td>
+        <td class="text-end">${formatMoney(tx.amount, { sign: true })}</td>`;
       tbody.appendChild(tr);
     });
   }
@@ -483,6 +812,131 @@
     };
   }
 
+  function normaliseStatementList(entries = []) {
+    if (!Array.isArray(entries)) return [];
+    const normalised = entries
+      .map((entry, index) => normaliseStatementEntry(entry, index))
+      .filter((entry) => entry != null);
+    normalised.sort((a, b) => {
+      const aDate = a.periodEnd || a.periodStart || null;
+      const bDate = b.periodEnd || b.periodStart || null;
+      return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+    });
+    normalised.forEach((entry, idx) => {
+      const baseLabel = entry.periodLabel && entry.periodLabel !== '—'
+        ? entry.periodLabel
+        : `Statement ${idx + 1}`;
+      const accountParts = [entry.accountName, entry.institutionName].filter(Boolean);
+      entry.optionLabel = accountParts.length ? `${baseLabel} • ${accountParts.join(' • ')}` : baseLabel;
+    });
+    return normalised;
+  }
+
+  function normaliseStatementEntry(entry, fallbackIndex = 0) {
+    if (!entry || typeof entry !== 'object') return null;
+    const id = String(entry.id || entry.fileId || entry.insightId || `statement-${fallbackIndex}`);
+    const totals = entry.totals || {};
+    const balances = entry.balances || {};
+    const period = entry.period || {};
+
+    const moneyIn = pickNumber(totals, ['moneyIn', 'totalIn', 'income']);
+    const moneyOut = pickNumber(totals, ['moneyOut', 'totalOut', 'spend']);
+    let net = pickNumber(totals, ['net']);
+    if (net == null && Number.isFinite(moneyIn) && Number.isFinite(moneyOut)) {
+      net = Number(moneyIn) - Number(moneyOut);
+    }
+
+    const openingBalance = pickNumber(balances, ['opening', 'openingBalance']);
+    const closingBalance = pickNumber(balances, ['closing', 'closingBalance']);
+
+    const periodStart = parseDate(period.start);
+    const periodEnd = parseDate(period.end);
+    const periodLabel = period.label || formatPeriodLabel({ start: period.start, end: period.end, month: period.month });
+    const uploadedAt = parseDate(entry.uploadedAt);
+
+    const transactions = normaliseStatementTransactions(entry.transactions);
+    const spendCategories = normaliseStatementCategories(entry.categories);
+
+    return {
+      id,
+      accountName: entry.accountName || 'Account',
+      institutionName: entry.institutionName || null,
+      accountNumberMasked: entry.accountNumberMasked || null,
+      accountType: entry.accountType || null,
+      moneyIn: Number.isFinite(moneyIn) ? Number(moneyIn) : null,
+      moneyOut: Number.isFinite(moneyOut) ? Number(moneyOut) : null,
+      net: Number.isFinite(net) ? Number(net) : null,
+      openingBalance: Number.isFinite(openingBalance) ? Number(openingBalance) : null,
+      closingBalance: Number.isFinite(closingBalance) ? Number(closingBalance) : null,
+      periodStart,
+      periodEnd,
+      periodLabel: periodLabel || '—',
+      uploadedAt,
+      uploadedLabel: formatDateTime(uploadedAt),
+      transactions,
+      spendCategories,
+      raw: entry.raw || entry,
+      currency: entry.currency || 'GBP',
+      optionLabel: '',
+    };
+  }
+
+  function normaliseStatementTransactions(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return null;
+        const amountRaw = Number(item.amount);
+        if (!Number.isFinite(amountRaw)) return null;
+        const directionRaw = String(item.direction || '').toLowerCase();
+        const direction = directionRaw === 'outflow'
+          ? 'outflow'
+          : directionRaw === 'inflow'
+            ? 'inflow'
+            : amountRaw < 0
+              ? 'outflow'
+              : 'inflow';
+        const signedAmount = direction === 'outflow' ? -Math.abs(amountRaw) : Math.abs(amountRaw);
+        const date = parseDate(item.date);
+        return {
+          id: String(item.id || item.transactionId || `statement-tx-${index}`),
+          description: item.description || item.label || item.memo || 'Transaction',
+          category: item.category || 'Other',
+          amount: signedAmount,
+          direction,
+          date,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0));
+  }
+
+  function normaliseStatementCategories(list) {
+    if (!Array.isArray(list)) return [];
+    const mapped = list
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const amountRaw = pickNumber(item, ['amount', 'outflow']);
+        if (!Number.isFinite(amountRaw)) return null;
+        const label = item.label || item.category || 'Category';
+        const shareRaw = pickNumber(item, ['share']);
+        return {
+          label,
+          category: item.category || label,
+          amount: Math.abs(Number(amountRaw)),
+          share: Number.isFinite(shareRaw) ? Number(shareRaw) : null,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.amount - a.amount);
+
+    const total = mapped.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+    return mapped.map((item) => ({
+      ...item,
+      share: Number.isFinite(item.share) ? item.share : total ? item.amount / total : null,
+    }));
+  }
+
   function pickDefaultSelection(list, currentId) {
     if (!Array.isArray(list) || list.length === 0) return null;
     if (currentId && list.some((item) => item.id === currentId)) {
@@ -502,7 +956,7 @@
       }
       const msg = el.querySelector('[data-error-message]');
       if (msg) {
-        msg.textContent = 'Add payslips in the document vault to see your earnings analytics populate instantly.';
+        msg.textContent = 'Add payslips or bank statements in the document vault to see your analytics populate instantly.';
       }
     }
   }
@@ -545,6 +999,14 @@
     if (num > 0) return `+£${formatted}`;
     if (num < 0) return `−£${formatted}`;
     return `£${formatted}`;
+  }
+
+  function formatPercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '—';
+    const pct = num * 100;
+    const decimals = Math.abs(pct) >= 10 ? 1 : 2;
+    return `${pct.toFixed(decimals)}%`;
   }
 
   function pickNumber(obj, keys) {

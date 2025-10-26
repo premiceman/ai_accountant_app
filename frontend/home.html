@@ -148,6 +148,113 @@
         </section>
       </div>
     </div>
+
+    <div class="row g-4 mt-0 mt-xl-4">
+      <div class="col-12 col-xl-6">
+        <section class="card shadow-sm h-100" id="statement-card">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+              <div>
+                <h2 class="h5 mb-1">Bank statement summary</h2>
+                <p class="text-muted small mb-0">Overview for the selected statement.</p>
+              </div>
+              <div class="text-end">
+                <div class="small text-muted">Institution</div>
+                <div class="fw-semibold" id="statement-institution">—</div>
+                <div class="small text-muted mt-2">Account</div>
+                <div class="fw-semibold" id="statement-account">—</div>
+              </div>
+            </div>
+            <div id="statement-empty" class="text-muted small">Upload a bank statement or choose one from the selector to review incomings, outgoings and balances.</div>
+            <div id="statement-content" class="d-none">
+              <div class="row g-3 mb-3" id="statement-highlights">
+                <div class="col-12 col-md-4">
+                  <div class="border rounded p-3 bg-body-tertiary h-100">
+                    <div class="text-muted small text-uppercase">Money in</div>
+                    <div class="h5 mb-0" id="statement-money-in">£—</div>
+                  </div>
+                </div>
+                <div class="col-12 col-md-4">
+                  <div class="border rounded p-3 bg-body-tertiary h-100">
+                    <div class="text-muted small text-uppercase">Money out</div>
+                    <div class="h5 mb-0" id="statement-money-out">£—</div>
+                  </div>
+                </div>
+                <div class="col-12 col-md-4">
+                  <div class="border rounded p-3 bg-body-tertiary h-100">
+                    <div class="text-muted small text-uppercase">Net</div>
+                    <div class="h5 mb-0" id="statement-net">£—</div>
+                  </div>
+                </div>
+              </div>
+              <div class="mb-3">
+                <div class="text-muted small">Statement period</div>
+                <div class="fw-semibold" id="statement-period">—</div>
+              </div>
+              <div class="row g-3 mb-3">
+                <div class="col-12 col-sm-6">
+                  <div class="text-muted small">Opening balance</div>
+                  <div class="fw-semibold" id="statement-opening-balance">£—</div>
+                </div>
+                <div class="col-12 col-sm-6">
+                  <div class="text-muted small">Closing balance</div>
+                  <div class="fw-semibold" id="statement-closing-balance">£—</div>
+                </div>
+              </div>
+              <div class="mb-3">
+                <div class="text-muted small">Uploaded</div>
+                <div class="fw-semibold" id="statement-uploaded">—</div>
+              </div>
+              <div class="table-responsive">
+                <h6 class="text-uppercase small text-muted mb-1">Top transactions</h6>
+                <table class="table table-sm align-middle mb-0">
+                  <thead class="table-light"><tr><th>Description</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+                  <tbody id="statement-transactions-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <section class="card shadow-sm h-100" id="statement-analytics-card">
+          <div class="card-body d-flex flex-column h-100">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-start gap-3 mb-3">
+              <div>
+                <h2 class="h5 mb-1">Statement analytics</h2>
+                <p class="text-muted small mb-0">Visualise spending by category for the selected statement.</p>
+              </div>
+              <div class="w-100 w-sm-auto">
+                <label for="statement-selector" class="form-label text-muted small mb-1">Select statement</label>
+                <select id="statement-selector" class="form-select form-select-sm" aria-label="Select statement" disabled>
+                  <option value="">No statements available</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex-grow-1 d-flex flex-column">
+              <div id="statement-chart-empty" class="text-muted small py-4 text-center flex-grow-1 d-flex align-items-center justify-content-center">
+                Select a statement to view spending by category.
+              </div>
+              <div id="statement-chart-wrapper" class="d-none">
+                <canvas id="statement-chart" height="260" role="img" aria-label="Pie chart of spending by category"></canvas>
+              </div>
+            </div>
+            <div class="table-responsive mt-4">
+              <h6 class="text-uppercase small text-muted mb-1">Category totals</h6>
+              <table class="table table-sm align-middle mb-0">
+                <thead class="table-light"><tr><th>Category</th><th class="text-end">Amount spent</th><th class="text-end">Share</th></tr></thead>
+                <tbody id="statement-categories-body"></tbody>
+              </table>
+            </div>
+            <details id="statement-json-panel" class="mt-4">
+              <summary class="small text-muted">View raw JSON payload</summary>
+              <pre id="statement-json" class="bg-body-tertiary border rounded p-3 small text-break mt-2 mb-0">No statement selected.</pre>
+            </details>
+          </div>
+        </section>
+      </div>
+    </div>
   </main>
 
   <script src="/js/nav.js"></script>
