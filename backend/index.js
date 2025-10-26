@@ -5,7 +5,6 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const crypto = require('crypto');
 let morgan; try { morgan = require('morgan'); } catch { morgan = () => (req,res,next)=>next(); }
 const mongoose = require('mongoose');
 
@@ -32,9 +31,6 @@ const integrationsRouter = safeRequire('./routes/integrations')     || safeRequi
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
 const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
-const filesRouter     = safeRequire('./routes/files');
-const ragRouter       = safeRequire('./routes/rag');
-const jobsRouter      = safeRequire('./routes/jobs');
 const truelayerRouter  = null;
 const qaDevRouter    = safeRequire('./src/routes/__qa__.routes')   || safeRequire('./routes/__qa__');
 const jsonTestRouter = safeRequire('./src/routes/jsonTest.routes');
@@ -52,92 +48,11 @@ const FRONTEND_DIR = path.join(__dirname, '../frontend');
 const UPLOADS_DIR  = path.join(__dirname, '../uploads');
 const DATA_DIR     = path.join(__dirname, '../data');
 
-const isProd = process.env.NODE_ENV === 'production';
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000').split(',').map((origin) => origin.trim()).filter(Boolean);
-
 
 // ---- Middleware ----
 app.use(morgan('combined'));
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-}));
-function parseCookies(header) {
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (!key) continue;
-    out[key] = decodeURIComponent(rest.join('=') || '');
-  }
-  return out;
-}
-
-function serializeCookie(name, value, options = {}) {
-  const pieces = [`${name}=${encodeURIComponent(value)}`];
-  if (typeof options.maxAge === 'number') {
-    pieces.push(`Max-Age=${Math.floor(options.maxAge / 1000)}`);
-  }
-  if (options.domain) pieces.push(`Domain=${options.domain}`);
-  pieces.push(`Path=${options.path || '/'}`);
-  if (options.httpOnly) pieces.push('HttpOnly');
-  if (options.secure) pieces.push('Secure');
-  if (options.sameSite) pieces.push(`SameSite=${options.sameSite}`);
-  return pieces.join('; ');
-}
-
-app.use((req, res, next) => {
-  req.cookies = parseCookies(req.headers.cookie || '');
-  res.cookie = (name, value, options = {}) => {
-    const serialised = serializeCookie(name, value, options);
-    const existing = res.getHeader('Set-Cookie');
-    if (!existing) {
-      res.setHeader('Set-Cookie', serialised);
-    } else if (Array.isArray(existing)) {
-      res.setHeader('Set-Cookie', [...existing, serialised]);
-    } else {
-      res.setHeader('Set-Cookie', [existing, serialised]);
-    }
-    return res;
-  };
-  res.clearCookie = (name, options = {}) => {
-    const opts = { ...options, maxAge: 0 };
-    res.cookie(name, '', opts);
-    return res;
-  };
-  next();
-});
-
+app.use(cors({ origin: ['http://localhost:3000','http://localhost:8080'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
-
-const CSRF_COOKIE_NAME = 'csrfToken';
-
-app.use((req, res, next) => {
-  if (!req.path.startsWith('/api')) {
-    return next();
-  }
-  const method = req.method.toUpperCase();
-  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    let token = req.cookies[CSRF_COOKIE_NAME];
-    if (!token) {
-      token = crypto.randomBytes(32).toString('hex');
-    }
-    res.cookie(CSRF_COOKIE_NAME, token, { httpOnly: false, sameSite: 'lax', secure: isProd });
-    return next();
-  }
-  const cookieToken = req.cookies[CSRF_COOKIE_NAME];
-  const headerToken = req.headers['x-csrf-token'] || req.headers['x-xsrf-token'] || req.body?._csrf || req.query?._csrf;
-  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-    return res.status(403).json({ error: 'Invalid CSRF token' });
-  }
-  return next();
-});
 
 // ---- Static ----
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -184,9 +99,6 @@ mount('/api/tax', taxRouter, 'tax');
 mount('/api/json-test', jsonTestRouter, 'json-test');
 mount('/api/json-test', jsonTestAsyncRouter, 'json-test-async');
 mount('/api/pdf', pdfTrimRouter, 'pdf');
-mount('/api', filesRouter, 'files');
-mount('/api', ragRouter, 'rag');
-mount('/api', jobsRouter, 'jobs');
 mount('/', adminRequeueRouter, 'admin-requeue');
 if (qaDevRouter) {
   mount('/__qa__', qaDevRouter, 'qa-dev');
@@ -214,16 +126,6 @@ app.use((req, res, next) => {
 });
 
 // ---- Error handler ----
-app.use((err, req, res, next) => {
-  if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ error: 'CORS not allowed' });
-  }
-  if (err.code === 'EBADCSRFTOKEN') {
-    return res.status(403).json({ error: 'Invalid CSRF token' });
-  }
-  return next(err);
-});
-
 app.use((err, _req, res, _next) => {
   console.error('❌ Server error:', err);
   res.status(500).json({ error: 'Server error' });
@@ -234,10 +136,6 @@ const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accoun
 mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    const { start: startWorker } = safeRequire('./services/jobWorker') || { start: () => {} };
-    if (typeof startWorker === 'function') {
-      startWorker();
-    }
     app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
   })
   .catch((err) => {
