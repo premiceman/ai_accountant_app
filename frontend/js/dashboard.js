@@ -50,60 +50,23 @@
       if (greeting) greeting.textContent = me.firstName;
     }
 
-    const sources = normaliseSources(insights?.sources);
-    const latestPayslip = selectLatestSource(sources, 'payslip');
-    const latestStatement = selectLatestSource(sources, 'current_account_statement');
+    const incomeSummary = insights?.aggregates?.income || null;
+    const cashflowSummary = insights?.aggregates?.cashflow || null;
 
-    toggleDashboardEmpty(!latestPayslip && !latestStatement);
-    renderPayslip(latestPayslip);
-    renderBankStatement(latestStatement);
+    const hasIncome = incomeSummary
+      && (incomeSummary.gross != null || incomeSummary.net != null || Array.isArray(incomeSummary.earnings));
+    const hasCashflow = cashflowSummary && cashflowSummary.hasData;
+
+    toggleDashboardEmpty(!hasIncome && !hasCashflow);
+    renderPayslip(hasIncome ? incomeSummary : null);
+    renderBankStatement(hasCashflow ? cashflowSummary : null);
   }
 
-  function normaliseSources(sources) {
-    if (!sources || typeof sources !== 'object') return [];
-    return Object.values(sources).filter(Boolean);
-  }
-
-  function selectLatestSource(sourceList, baseKey) {
-    if (!Array.isArray(sourceList) || !sourceList.length) return null;
-    const matching = sourceList.filter((entry) => {
-      const key = entry?.baseKey || entry?.key || '';
-      return key === baseKey || key.startsWith(`${baseKey}:`);
-    });
-    if (!matching.length) return null;
-    matching.sort((a, b) => getEntryTimestamp(b) - getEntryTimestamp(a));
-    return matching[0] || null;
-  }
-
-  function getEntryTimestamp(entry) {
-    const metrics = entry?.metrics || {};
-    const metadata = entry?.metadata || {};
-    const period = metadata?.period || entry?.period || {};
-    const files = Array.isArray(entry?.files) ? entry.files : [];
-    const candidates = [
-      metrics.payDate,
-      metadata.payDate,
-      metrics.periodEnd,
-      metrics.periodStart,
-      period.end,
-      period.start,
-      metadata.documentDate,
-      entry?.documentDate,
-      ...(files.map((file) => file?.uploadedAt)),
-    ];
-    const timestamps = candidates
-      .map(parseDate)
-      .filter(Boolean)
-      .map((date) => date.getTime());
-    if (!timestamps.length) return 0;
-    return Math.max(...timestamps);
-  }
-
-  function renderPayslip(entry) {
+  function renderPayslip(summary) {
     const empty = byId('payslip-empty');
     const content = byId('payslip-content');
 
-    if (!entry) {
+    if (!summary) {
       if (content) content.classList.add('d-none');
       if (empty) {
         empty.textContent = 'Upload a current payslip to unlock granular analytics.';
@@ -122,29 +85,27 @@
     empty?.classList.add('d-none');
     content?.classList.remove('d-none');
 
-    const metrics = entry.metrics || {};
-    const metadata = entry.metadata || {};
+    const periodLabel = summary.periodLabel
+      || formatPeriodLabel({ start: summary.periodStart, end: summary.periodEnd, month: summary.periodMonth });
+    const payFrequency = summary.payFrequency || '—';
+    const gross = summary.gross != null ? Number(summary.gross) : null;
+    const net = summary.net != null ? Number(summary.net) : null;
+    const deductionsTotal = summary.totalDeductions != null
+      ? Number(summary.totalDeductions)
+      : summary.tax != null
+        ? Number(summary.tax)
+        : null;
 
-    setText('payslip-period', buildPayslipPeriodLabel(metrics, metadata));
-    setText('payslip-frequency', metrics.payFrequency || '—');
-    setText('payslip-gross', formatMoney(pickNumber(metrics, ['gross', 'grossAmount'])));
-    setText('payslip-net', formatMoney(pickNumber(metrics, ['net', 'netPay'])));
-    setText('payslip-deductions', formatMoney(pickNumber(metrics, ['totalDeductions', 'deductionsTotal', 'tax'])));
+    setText('payslip-period', periodLabel || '—');
+    setText('payslip-frequency', payFrequency || '—');
+    setText('payslip-gross', formatMoney(Number.isFinite(gross) ? gross : undefined));
+    setText('payslip-net', formatMoney(Number.isFinite(net) ? net : undefined));
+    setText('payslip-deductions', formatMoney(Number.isFinite(deductionsTotal) ? deductionsTotal : undefined));
 
-    renderLineItems(byId('payslip-earnings-body'), normaliseLineItems(metrics.earnings));
-    renderLineItems(byId('payslip-deductions-body'), normaliseLineItems(metrics.deductions));
+    renderLineItems(byId('payslip-earnings-body'), normaliseLineItems(summary.earnings));
+    renderLineItems(byId('payslip-deductions-body'), normaliseLineItems(summary.deductions));
   }
 
-  function buildPayslipPeriodLabel(metrics = {}, metadata = {}) {
-    const start = metrics.periodStart || metadata.period?.start || null;
-    const end = metrics.periodEnd || metadata.period?.end || null;
-    if (start && end) return formatRange(start, end);
-    const payDate = metrics.payDate || metadata.payDate || metadata.documentDate;
-    if (payDate) return formatDateLabel(payDate);
-    const month = metadata.period?.month || metadata.documentMonth;
-    if (month) return formatMonth(month);
-    return '—';
-  }
 
   function renderLineItems(tbody, rows) {
     if (!tbody) return;
@@ -170,16 +131,20 @@
     return list
       .map((item) => ({
         label: item?.label || item?.name || item?.category || 'Item',
-        amount: pickNumber(item, ['amount', 'value', 'total', 'gross', 'net'])
+        amount: (() => {
+          const direct = Number(item?.amount);
+          if (Number.isFinite(direct)) return direct;
+          return pickNumber(item, ['value', 'total', 'gross', 'net']);
+        })()
       }))
       .filter((item) => item.label);
   }
 
-  function renderBankStatement(entry) {
+  function renderBankStatement(summary) {
     const empty = byId('bank-empty');
     const content = byId('bank-content');
 
-    if (!entry) {
+    if (!summary) {
       if (content) content.classList.add('d-none');
       if (empty) {
         empty.textContent = 'Upload a current account statement to populate this summary.';
@@ -197,21 +162,18 @@
     empty?.classList.add('d-none');
     content?.classList.remove('d-none');
 
-    const metrics = entry.metrics || {};
-    const metadata = entry.metadata || {};
-    const period = metadata.period || entry.period || {};
+    const periodLabel = summary.periodLabel
+      || formatPeriodLabel({ start: summary.periodStart, end: summary.periodEnd });
+    const income = Number(summary.income);
+    const spend = Number(summary.spend);
 
-    const start = period.start || metrics.periodStart || null;
-    const end = period.end || metrics.periodEnd || null;
-    const month = period.month || metadata.documentMonth || null;
+    setText('bank-period', periodLabel || '—');
+    setText('bank-opening', '£—');
+    setText('bank-closing', '£—');
+    setText('bank-in', formatMoney(Number.isFinite(income) ? income : undefined));
+    setText('bank-out', formatMoney(Number.isFinite(spend) ? spend : undefined));
 
-    setText('bank-period', formatPeriodLabel({ start, end, month }));
-    setText('bank-opening', formatMoney(pickNumber(metrics, ['openingBalance', 'opening'])));
-    setText('bank-closing', formatMoney(pickNumber(metrics, ['closingBalance', 'closing'])));
-    setText('bank-in', formatMoney(pickNumber(metrics, ['inflows', 'totalMoneyIn', 'moneyIn'])));
-    setText('bank-out', formatMoney(pickNumber(metrics, ['outflows', 'totalMoneyOut', 'moneyOut'])));
-
-    renderTransactions(byId('bank-transactions-body'), entry.transactions || []);
+    renderTransactions(byId('bank-transactions-body'), summary.transactions || []);
   }
 
   function renderTransactions(tbody, transactions) {
