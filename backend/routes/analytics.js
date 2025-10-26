@@ -1528,7 +1528,7 @@ function normaliseLineItems(list, { absolute = false } = {}) {
   return list
     .map((item) => {
       if (!item) return null;
-      const label = pickFirst(item.label, item.name, item.category);
+      const label = pickFirst(item.label, item.name, item.rawLabel, item.category);
       const amountRaw = firstNumber(
         item.amount,
         item.total,
@@ -1538,8 +1538,23 @@ function normaliseLineItems(list, { absolute = false } = {}) {
         item.amountMinor != null ? toMajor(item.amountMinor) : null,
       );
       if (label == null || amountRaw == null) return null;
+
+      const amountYtdRaw = firstNumber(
+        item.amountYtd,
+        item.amountYearToDate,
+        item.amountYTD,
+        item.yearToDate,
+        item.totalYtd,
+        item.amountYtdMinor != null ? toMajor(item.amountYtdMinor) : null,
+        item.ytd,
+      );
+
       const amount = absolute ? Math.abs(amountRaw) : amountRaw;
-      return { label, amount };
+      const amountYtd =
+        amountYtdRaw == null ? null : absolute ? Math.abs(amountYtdRaw) : amountYtdRaw;
+      const category = pickFirst(item.category, item.type, item.rawLabel, label);
+
+      return { label, amount, amountYtd, category };
     })
     .filter(Boolean);
 }
