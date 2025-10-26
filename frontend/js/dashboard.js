@@ -156,6 +156,9 @@
         empty.textContent = 'Upload a payslip or choose one from the selector to explore your earnings and deductions.';
         empty.classList.remove('d-none');
       }
+      setText('payslip-tax-code', '—');
+      setText('payslip-earnings-ytd', '£—');
+      setText('payslip-deductions-ytd', '£—');
       setText('payslip-gross', '£—');
       setText('payslip-net', '£—');
       setText('payslip-deductions', '£—');
@@ -174,9 +177,21 @@
 
     setText('payslip-period', payslip.periodLabel || '—');
     setText('payslip-frequency', payslip.payFrequency || '—');
+    setText('payslip-tax-code', payslip.taxCode || '—');
+    setText(
+      'payslip-earnings-ytd',
+      formatMoney(Number.isFinite(payslip.earningsYtdTotal) ? payslip.earningsYtdTotal : undefined),
+    );
+    setText(
+      'payslip-deductions-ytd',
+      formatMoney(Number.isFinite(payslip.deductionsYtdTotal) ? payslip.deductionsYtdTotal : undefined),
+    );
     setText('payslip-gross', formatMoney(Number.isFinite(payslip.gross) ? payslip.gross : undefined));
     setText('payslip-net', formatMoney(Number.isFinite(payslip.net) ? payslip.net : undefined));
-    setText('payslip-deductions', formatMoney(Number.isFinite(payslip.deductionsTotal) ? payslip.deductionsTotal : undefined));
+    setText(
+      'payslip-deductions',
+      formatMoney(Number.isFinite(payslip.deductionsTotal) ? payslip.deductionsTotal : undefined),
+    );
     setText('payslip-paydate', payslip.payDateLabel || '—');
     setText('payslip-uploaded', payslip.uploadedLabel || '—');
     setText('payslip-employer', payslip.employer || '—');
@@ -360,6 +375,17 @@
           if (Number.isFinite(direct)) return direct;
           return pickNumber(item, ['value', 'total', 'gross', 'net']);
         })() || 0,
+        amountYtd: (() => {
+          const ytd = pickNumber(item, [
+            'amountYtd',
+            'amountYearToDate',
+            'ytd',
+            'valueYtd',
+            'totalYtd',
+            'yearToDate',
+          ]);
+          return Number.isFinite(ytd) ? Number(ytd) : null;
+        })(),
       }))
       .filter((item) => item.label);
   }
@@ -401,6 +427,30 @@
     const earnings = normaliseLineItems(entry.earnings || totals.earnings || []);
     const deductions = normaliseLineItems(entry.deductions || totals.deductions || []);
 
+    const earningsYtdSum = sumYtdValues(earnings);
+    const deductionsYtdSum = sumYtdValues(deductions);
+    const earningsYtdTotal =
+      earningsYtdSum
+      ?? pickNumber(totals, ['grossYtd', 'earningsYtd', 'totalEarningsYtd', 'grossYearToDate'])
+      ?? pickNumber(entry, ['grossYtd', 'earningsYtd', 'totalEarningsYtd', 'grossYearToDate']);
+    const deductionsYtdTotal =
+      deductionsYtdSum
+      ?? pickNumber(totals, ['deductionsYtd', 'totalDeductionsYtd', 'withholdingYtd', 'deductionsYearToDate'])
+      ?? pickNumber(entry, ['deductionsYtd', 'totalDeductionsYtd', 'withholdingYtd', 'deductionsYearToDate']);
+
+    const metadata = entry.metadata || entry.meta || {};
+    const employee = entry.employee || metadata.employee || {};
+    const taxCode = [
+      entry.taxCode,
+      totals.taxCode,
+      employee.taxCode,
+      employee.taxCodeCurrent,
+      metadata.taxCode,
+      metadata.taxCodeCurrent,
+      metadata.employee?.taxCode,
+      metadata.employee?.taxCodeCurrent,
+    ].find((value) => typeof value === 'string' && value.trim().length > 0) || null;
+
     const id = String(entry.id || entry._id || entry.entryId || `payslip-${fallbackIndex}`);
 
     const resolvedGross = Number.isFinite(gross) ? Number(gross) : null;
@@ -423,6 +473,9 @@
       deductionsTotal: resolvedDeductions,
       earnings,
       deductions,
+      earningsYtdTotal: Number.isFinite(earningsYtdTotal) ? Number(earningsYtdTotal) : null,
+      deductionsYtdTotal: Number.isFinite(deductionsYtdTotal) ? Math.abs(Number(deductionsYtdTotal)) : null,
+      taxCode,
       uploadedAt,
       uploadedLabel: formatDateTime(uploadedAt),
       raw: entry,
@@ -465,6 +518,20 @@
     while (tbody.firstChild) {
       tbody.removeChild(tbody.firstChild);
     }
+  }
+
+  function sumYtdValues(items) {
+    if (!Array.isArray(items) || !items.length) return null;
+    let total = 0;
+    let hasValue = false;
+    items.forEach((item) => {
+      const value = Number(item?.amountYtd);
+      if (Number.isFinite(value)) {
+        total += Math.abs(value);
+        hasValue = true;
+      }
+    });
+    return hasValue ? total : null;
   }
 
   function formatMoney(value, { sign = false } = {}) {
