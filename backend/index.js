@@ -1,6 +1,7 @@
 // NOTE: Hotfix — TS types for shared flags + FE v1 flip + staged loader + prefer-v1 legacy; aligns with Phase-1/2/3 specs. Additive, non-breaking.
 // backend/index.js
 require('dotenv').config();
+require('./config');
 
 const path = require('path');
 const express = require('express');
