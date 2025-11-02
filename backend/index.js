@@ -30,6 +30,7 @@ const billingRouter = safeRequire('./routes/billing')               || safeRequi
 const vaultRouter  = safeRequire('./routes/vault')                || safeRequire('./src/routes/vault');
 const integrationsRouter = safeRequire('./routes/integrations')     || safeRequire('./src/routes/integrations');
 const analyticsRouter = safeRequire('./routes/analytics')           || safeRequire('./src/routes/analytics');
+const analyticsEngine = safeRequire('./src/services/analytics/engine');
 const flagsRouter     = safeRequire('./src/routes/flags')           || safeRequire('./routes/flags');
 const taxRouter       = safeRequire('./routes/tax')                 || safeRequire('./src/routes/tax');
 const truelayerRouter  = null;
@@ -139,6 +140,9 @@ const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/ai_accoun
 mongoose.connect(mongoUri, {})
   .then(() => {
     console.log('✅ Connected to MongoDB');
+    if (analyticsEngine?.startAnalyticsEngine) {
+      analyticsEngine.startAnalyticsEngine();
+    }
     app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
   })
   .catch((err) => {
