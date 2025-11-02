@@ -18,48 +18,66 @@ const App = (() => {
 
   const Api = {
     getMe: () => request('/api/v2/me'),
-    updateMe: (payload) => request('/api/v2/me', { method: 'PATCH', body: JSON.stringify(payload) }),
-    getBatches: () => request('/api/v2/vault/files'),
-    presign: (payload) => request('/api/v2/vault/presign', { method: 'POST', body: JSON.stringify(payload) }),
-    ingest: (payload) => request('/api/v2/vault/ingest', { method: 'POST', body: JSON.stringify(payload) }),
-    analyticsSummary: () => request('/api/v2/analytics/summary'),
-    analyticsTimeseries: () => request('/api/v2/analytics/timeseries'),
-    analyticsCategories: (month) => request(`/api/v2/analytics/categories?month=${encodeURIComponent(month || '')}`),
-    analyticsCommitments: () => request('/api/v2/analytics/commitments'),
-    getAdvice: () => request('/api/v2/advice'),
-    rebuildAdvice: () => request('/api/v2/advice/rebuild', { method: 'POST' }),
-    taxSnapshot: (taxYear) => request(`/api/v2/tax/snapshot?taxYear=${encodeURIComponent(taxYear)}`),
-    taxBundle: () => request('/api/v2/tax/bundle', { method: 'POST' }),
-    requeue: (id) => request(`/api/v2/admin/dead-letters/${id}/requeue`, { method: 'POST' }),
   };
 
-  function formatMoney(pence) {
-    const amount = Number(pence || 0) / 100;
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(amount);
+  async function signOut() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (error) {
+      console.warn('Sign out request failed', error);
+    }
+    window.location.href = '/';
   }
 
-  function formatDate(date) {
-    if (!date) return '';
-    return new Date(date).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+  function bindSignOut() {
+    const buttons = document.querySelectorAll('[data-action="signout"]');
+    buttons.forEach((button) => {
+      if (button.dataset.bound === 'true') return;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        signOut();
+      });
+      button.dataset.bound = 'true';
+    });
   }
 
-  async function bootstrap(activeNavId) {
+  function highlightNav(activeNavId) {
     const navItems = document.querySelectorAll('nav a');
     navItems.forEach((item) => {
       if (item.dataset.nav === activeNavId) {
         item.classList.add('active');
+      } else {
+        item.classList.remove('active');
       }
     });
-    const me = await Api.getMe();
-    if (!me) return null;
-    const nameEl = document.querySelector('[data-user-name]');
-    if (nameEl) {
-      nameEl.textContent = `${me.profile.firstName} ${me.profile.lastName}`;
-    }
-    return me;
   }
 
-  return { Api, formatMoney, formatDate, bootstrap };
+  async function bootstrap(activeNavId) {
+    highlightNav(activeNavId);
+    bindSignOut();
+
+    try {
+      const me = await Api.getMe();
+      if (!me) return null;
+      const nameEl = document.querySelector('[data-user-name]');
+      if (nameEl) {
+        const first = me.profile?.firstName || '';
+        const last = me.profile?.lastName || '';
+        const name = [first, last].filter(Boolean).join(' ').trim();
+        nameEl.textContent = name || 'Welcome back';
+      }
+      return me;
+    } catch (error) {
+      console.error('Failed to load user profile', error);
+      const message = document.getElementById('dashboard-message');
+      if (message) {
+        message.textContent = 'We could not load your account details. Please refresh the page to try again.';
+      }
+      return null;
+    }
+  }
+
+  return { Api, bootstrap, signOut };
 })();
 
 window.App = App;
