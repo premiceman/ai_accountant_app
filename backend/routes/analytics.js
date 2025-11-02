@@ -9,11 +9,69 @@ const User = require('../models/User');
 const DocumentInsight = require('../models/DocumentInsight');
 const { applyDocumentInsights, setInsightsProcessing } = require('../src/services/documents/insightsStore');
 const { rebuildMonthlyAnalytics } = require('../src/services/vault/analytics');
+const { getOrCreateSnapshot, getSeries } = require('../src/services/analytics/engine');
 const { paths, readJsonSafe } = require('../src/store/jsondb');
 const { featureFlags } = require('../src/lib/featureFlags');
 const { preferV1 } = require('../src/lib/analyticsV1');
 
 const router = express.Router();
+
+function toIso(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function sanitiseSnapshot(doc) {
+  if (!doc) return null;
+  const metrics = JSON.parse(JSON.stringify(doc.metrics || {}));
+  if (Array.isArray(metrics.anomalies)) {
+    metrics.anomalies = metrics.anomalies.map((item) => ({
+      ...item,
+      date: toIso(item.date),
+    }));
+  }
+  return {
+    id: doc._id ? doc._id.toString() : null,
+    userId: doc.userId ? doc.userId.toString() : null,
+    period: {
+      month: doc.period?.month || null,
+      start: toIso(doc.period?.start),
+      end: toIso(doc.period?.end),
+    },
+    metrics,
+    createdAt: toIso(doc.createdAt) || null,
+  };
+}
+
+router.get('/overview', auth, async (req, res) => {
+  const month = req.query.month ? String(req.query.month) : dayjs().format('YYYY-MM');
+  try {
+    const snapshot = await getOrCreateSnapshot(req.user.id, month);
+    if (!snapshot) {
+      return res.status(404).json({ error: 'Snapshot unavailable' });
+    }
+    return res.json(sanitiseSnapshot(snapshot));
+  } catch (err) {
+    if (/Invalid period month/i.test(err?.message || '')) {
+      return res.status(400).json({ error: 'Invalid month parameter' });
+    }
+    console.error('Failed to load analytics overview', err);
+    return res.status(500).json({ error: 'Unable to load analytics overview' });
+  }
+});
+
+router.get('/series', auth, async (req, res) => {
+  const range = req.query.range ? String(req.query.range) : '6m';
+  try {
+    const series = await getSeries(req.user.id, range);
+    return res.json(series);
+  } catch (err) {
+    console.error('Failed to load analytics series', err);
+    return res.status(500).json({ error: 'Unable to load analytics series' });
+  }
+});
 try {
   // lazily require to avoid circular deps when worker package not installed
   const analyticsV1Router = require('../src/routes/analytics.v1.routes.js');
