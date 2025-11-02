@@ -41,6 +41,7 @@ import {
 } from './models/index.js';
 import { rebuildMonthlyAnalytics } from './services/analytics.js';
 import { buildPayslipMetricsV1, buildStatementV1 } from '../../../shared/lib/insights/normalizeV1.js';
+import { categoriseTransactions } from './services/transactionCategorizer.js';
 
 const logger = pino({ name: 'document-job-loop', level: process.env.LOG_LEVEL ?? 'info' });
 const TRIAGE_AREA = 'statement-triage';
@@ -538,11 +539,11 @@ function formatAjvErrors(errors: ValidationError[] | null | undefined): string {
     .join('; ');
 }
 
-export function enrichPayloadWithV1(
+export async function enrichPayloadWithV1(
   payload: InsightUpsertPayload,
   classification: SupportedClassification,
   options?: { jobId?: string }
-): InsightUpsertPayload {
+): Promise<InsightUpsertPayload> {
   const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
   const fallbackIso = v1.ensureIsoDate(metadata.documentDate ?? payload.documentDate ?? payload.documentDateV1 ?? null);
   const inferredMonth = v1.ensureIsoMonth(
@@ -593,7 +594,7 @@ export function enrichPayloadWithV1(
   }
 
   const rawTransactions = Array.isArray(payload.transactions) ? payload.transactions : [];
-  const normalizedTransactions: v1.TransactionV1[] = [];
+  let normalizedTransactions: v1.TransactionV1[] = [];
   let droppedCount = 0;
   const dropSummary: { invalidAmount: number; invalidDate: number; validationFailed: number } = {
     invalidAmount: 0,
@@ -693,6 +694,18 @@ export function enrichPayloadWithV1(
     }
     normalizedTransactions.push(candidate);
   });
+
+  if (normalizedTransactions.length && isStatementClassification(classification.type)) {
+    try {
+      normalizedTransactions = await categoriseTransactions({
+        userId: payload.userId as unknown as Types.ObjectId,
+        transactions: normalizedTransactions,
+        logger,
+      });
+    } catch (error) {
+      logger.warn({ err: error, fileId: payload.fileId }, 'Failed to categorise transactions');
+    }
+  }
 
   if (shouldLogTriage) {
     const sample = normalizedTransactions.slice(0, 3);
@@ -1038,7 +1051,7 @@ async function processJob(job: UserDocumentJobDoc): Promise<void> {
       logger.warn({ jobId: job.jobId, err }, 'Statement extraction failed; using defaults');
     }
   }
-  enrichPayloadWithV1(payload, classification, { jobId: job.jobId });
+  await enrichPayloadWithV1(payload, classification, { jobId: job.jobId });
   if (shouldLogTriage) {
     logger.info(
       {
