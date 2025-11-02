@@ -38,6 +38,7 @@ const jsonTestRouter = safeRequire('./src/routes/jsonTest.routes');
 const jsonTestAsyncRouter = safeRequire('./src/routes/jsonTest.async.routes');
 const pdfTrimRouter = safeRequire('./src/routes/pdfTrim.routes') || safeRequire('./routes/pdfTrim.routes');
 const adminRequeueRouter = safeRequire('./src/routes/admin.requeue.routes.js') || safeRequire('./routes/admin.requeue.routes');
+const jobsRouter = safeRequire('./src/routes/jobs.routes.js') || safeRequire('./routes/jobs.routes');
 
 // ---- AUTH GATE ----
 const { requireAuthOrHtmlUnauthorized } = safeRequire('./middleware/authGate') || { requireAuthOrHtmlUnauthorized: null };
@@ -100,6 +101,7 @@ mount('/api/tax', taxRouter, 'tax');
 mount('/api/json-test', jsonTestRouter, 'json-test');
 mount('/api/json-test', jsonTestAsyncRouter, 'json-test-async');
 mount('/api/pdf', pdfTrimRouter, 'pdf');
+mount('/api/jobs', jobsRouter, 'jobs');
 mount('/', adminRequeueRouter, 'admin-requeue');
 if (qaDevRouter) {
   mount('/__qa__', qaDevRouter, 'qa-dev');

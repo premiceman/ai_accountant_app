@@ -4,3 +4,8 @@ export * from './uploadSession.js';
 export * from './account.js';
 export * from './userAnalytics.js';
 export * from './userOverride.js';
+export * from './vaultDocument.js';
+export * from './vaultJob.js';
+export * from './documentExtract.js';
+export * from './documentRecord.js';
+export * from './documentDlq.js';
