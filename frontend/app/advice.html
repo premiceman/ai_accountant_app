@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Advice · AI Accountant</title>
+  <link rel="stylesheet" href="/app/css/app.css" />
+  <script defer src="/app/js/app.js"></script>
+  <script defer src="/app/js/advice.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <nav>
+      <h1>AI ACCOUNTANT</h1>
+      <a data-nav="dashboard" href="/app/dashboard">Dashboard</a>
+      <a data-nav="documents" href="/app/documents">Documents</a>
+      <a data-nav="analytics" href="/app/analytics">Analytics</a>
+      <a data-nav="advice" href="/app/advice">Advice</a>
+      <a data-nav="tax" href="/app/tax">Tax</a>
+      <a data-nav="profile" href="/app/profile">Profile</a>
+    </nav>
+    <main>
+      <div class="page-header">
+        <div>
+          <span class="badge">Guided next steps</span>
+          <h2>AI-driven advice</h2>
+          <p class="subtitle">Structured recommendations based on analytics snapshots with provenance.</p>
+        </div>
+        <button class="button" id="rebuild-btn">Regenerate advice</button>
+      </div>
+      <div id="advice-list" class="card-grid"></div>
+    </main>
+  </div>
+</body>
+</html>

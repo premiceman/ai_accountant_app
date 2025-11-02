@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard · AI Accountant</title>
+  <link rel="stylesheet" href="/app/css/app.css" />
+  <script defer src="/app/js/app.js"></script>
+  <script defer src="/app/js/dashboard.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <nav>
+      <h1>AI ACCOUNTANT</h1>
+      <a data-nav="dashboard" href="/app/dashboard">Dashboard</a>
+      <a data-nav="documents" href="/app/documents">Documents</a>
+      <a data-nav="analytics" href="/app/analytics">Analytics</a>
+      <a data-nav="advice" href="/app/advice">Advice</a>
+      <a data-nav="tax" href="/app/tax">Tax</a>
+      <a data-nav="profile" href="/app/profile">Profile</a>
+    </nav>
+    <main>
+      <div class="page-header">
+        <div>
+          <span class="badge">Welcome back</span>
+          <h2 data-user-name>—</h2>
+          <p class="subtitle">Track cashflow, ingestion progress, and outstanding actions.</p>
+        </div>
+      </div>
+      <div class="card-grid" id="summary-cards">
+        <div class="card">
+          <h3>Latest net cash</h3>
+          <p id="net-cash">—</p>
+        </div>
+        <div class="card">
+          <h3>Monthly salary</h3>
+          <p id="salary-net">—</p>
+        </div>
+        <div class="card">
+          <h3>Documents processed</h3>
+          <p id="doc-count">—</p>
+        </div>
+      </div>
+      <div class="card" style="margin-top:32px;">
+        <div class="page-header" style="margin-bottom:0;">
+          <div>
+            <h3 style="margin:0;">Recent activity</h3>
+            <p class="subtitle">Snapshot of the last six months</p>
+          </div>
+        </div>
+        <table class="table" id="timeseries-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Inflows</th>
+              <th>Outflows</th>
+              <th>Net</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

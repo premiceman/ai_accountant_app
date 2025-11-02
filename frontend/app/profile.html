@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Profile · AI Accountant</title>
+  <link rel="stylesheet" href="/app/css/app.css" />
+  <script defer src="/app/js/app.js"></script>
+  <script defer src="/app/js/profile.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <nav>
+      <h1>AI ACCOUNTANT</h1>
+      <a data-nav="dashboard" href="/app/dashboard">Dashboard</a>
+      <a data-nav="documents" href="/app/documents">Documents</a>
+      <a data-nav="analytics" href="/app/analytics">Analytics</a>
+      <a data-nav="advice" href="/app/advice">Advice</a>
+      <a data-nav="tax" href="/app/tax">Tax</a>
+      <a data-nav="profile" href="/app/profile">Profile</a>
+    </nav>
+    <main>
+      <div class="page-header">
+        <div>
+          <span class="badge">Account settings</span>
+          <h2>Profile</h2>
+          <p class="subtitle">Update your personal details. Authentication is powered by WorkOS.</p>
+        </div>
+      </div>
+      <div class="card">
+        <form id="profile-form">
+          <div class="form-grid">
+            <div>
+              <label for="firstName">First name</label>
+              <input id="firstName" name="firstName" required />
+            </div>
+            <div>
+              <label for="lastName">Last name</label>
+              <input id="lastName" name="lastName" required />
+            </div>
+            <div>
+              <label for="country">Country</label>
+              <select id="country" name="country">
+                <option value="uk">United Kingdom</option>
+                <option value="us">United States</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:24px;">
+            <label for="interests">Financial interests</label>
+            <textarea id="interests" name="interests" rows="3" placeholder="Comma separated"></textarea>
+          </div>
+          <div style="margin-top:24px; display:flex; gap:12px;">
+            <button class="button" type="submit">Save changes</button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

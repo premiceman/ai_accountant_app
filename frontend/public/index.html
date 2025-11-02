@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Accountant</title>
+  <link rel="icon" href="/favicon.ico" type="image/png" />
+  <link rel="stylesheet" href="/assets/fonts.css" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --fg: #e2e8f0;
+      --accent: #38bdf8;
+      --accent-dark: #0284c7;
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(135deg, rgba(15,23,42,0.95), rgba(2,132,199,0.85));
+      color: var(--fg);
+    }
+    header {
+      padding: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 1040px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      margin: 0;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    header a {
+      color: var(--fg);
+      text-decoration: none;
+      font-weight: 600;
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 10px 18px;
+      border-radius: 999px;
+      transition: background 0.2s ease;
+    }
+    header a:hover {
+      background: rgba(148, 197, 255, 0.15);
+    }
+    main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 24px 80px;
+    }
+    .hero {
+      max-width: 960px;
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 48px;
+      align-items: center;
+    }
+    .hero h2 {
+      font-size: clamp(2.5rem, 5vw, 3.5rem);
+      margin-bottom: 16px;
+      line-height: 1.1;
+    }
+    .hero p {
+      font-size: 1.1rem;
+      line-height: 1.6;
+      max-width: 520px;
+    }
+    .cta {
+      margin-top: 32px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .cta a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px 28px;
+      border-radius: 999px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .cta a.primary {
+      background: var(--accent);
+      color: #0f172a;
+      box-shadow: 0 12px 32px rgba(56, 189, 248, 0.35);
+    }
+    .cta a.primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 40px rgba(56, 189, 248, 0.45);
+    }
+    .cta a.secondary {
+      border: 1px solid rgba(226, 232, 240, 0.4);
+      color: var(--fg);
+    }
+    .feature-grid {
+      margin-top: 32px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 24px;
+    }
+    .feature {
+      background: rgba(15, 23, 42, 0.45);
+      padding: 20px;
+      border-radius: 16px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      backdrop-filter: blur(10px);
+    }
+    .feature h3 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 1.05rem;
+    }
+    footer {
+      padding: 24px;
+      text-align: center;
+      font-size: 0.9rem;
+      color: rgba(226, 232, 240, 0.7);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Accountant</h1>
+    <a href="/api/auth/workos/start?intent=signup">Login / Sign up</a>
+  </header>
+  <main>
+    <div class="hero">
+      <div>
+        <h2>Finance automation for modern operators</h2>
+        <p>Upload payslips and bank statements, let Docupipe structure the numbers, and receive clean analytics and personalised guidance with full provenance.</p>
+        <div class="cta">
+          <a class="primary" href="/api/auth/workos/start?intent=signup">Get started with WorkOS</a>
+          <a class="secondary" href="/api/auth/workos/login">Already using AI Accountant? Log in</a>
+        </div>
+        <div class="feature-grid">
+          <div class="feature">
+            <h3>Secure document vault</h3>
+            <p>Documents live in Cloudflare R2 with per-user isolation and presigned upload links.</p>
+          </div>
+          <div class="feature">
+            <h3>Canonical data</h3>
+            <p>Docupipe workflows produce strict v2 JSON mapped into MongoDB and analytics snapshots.</p>
+          </div>
+          <div class="feature">
+            <h3>Actionable advice</h3>
+            <p>OpenAI generates recommendations backed by snapshot provenance—no black box numbers.</p>
+          </div>
+        </div>
+      </div>
+      <div>
+        <img src="/assets/landing-visual.svg" alt="Financial insights preview" style="width:100%;border-radius:20px;border:1px solid rgba(148,163,184,0.25);box-shadow:0 20px 60px rgba(15,23,42,0.55);" />
+      </div>
+    </div>
+  </main>
+  <footer>
+    © <span id="year"></span> AI Accountant. Automated ingest → analytics → advice.
+  </footer>
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
