@@ -1,4 +1,4 @@
-const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { Readable } = require('node:stream');
 const { config } = require('../config');
@@ -64,6 +64,11 @@ async function writeBuffer(key, buffer, contentType) {
   await client.send(command);
 }
 
+async function deleteObject(key) {
+  const command = new DeleteObjectCommand({ Bucket: config.r2.bucket, Key: key });
+  await client.send(command);
+}
+
 async function statObject(key) {
   try {
     const command = new HeadObjectCommand({ Bucket: config.r2.bucket, Key: key });
@@ -84,5 +89,6 @@ module.exports = {
   readObjectBuffer,
   writeJson,
   writeBuffer,
+  deleteObject,
   statObject,
 };

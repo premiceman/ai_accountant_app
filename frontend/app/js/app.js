@@ -1,9 +1,14 @@
 const App = (() => {
   async function request(path, options = {}) {
+    const isFormData = options.body instanceof FormData;
+    const headers = {
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(options.headers || {}),
+    };
     const res = await fetch(path, {
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
       ...options,
+      headers,
     });
     if (res.status === 401) {
       window.location.href = '/';
@@ -18,6 +23,12 @@ const App = (() => {
 
   const Api = {
     getMe: () => request('/api/v2/me'),
+    uploadDocument: (formData) =>
+      request('/api/v2/dashboard/documents', { method: 'POST', body: formData }),
+    getDashboardAnalytics: (month) => {
+      const query = month ? `?month=${encodeURIComponent(month)}` : '';
+      return request(`/api/v2/dashboard/analytics${query}`);
+    },
   };
 
   async function signOut() {

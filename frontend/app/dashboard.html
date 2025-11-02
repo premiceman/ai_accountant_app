@@ -21,13 +21,119 @@
         <div>
           <span class="badge">Welcome back</span>
           <h2 data-user-name>—</h2>
-          <p class="subtitle">The workspace is being rebuilt. You’ll see new features here soon.</p>
+          <p class="subtitle">Upload payslips and bank statements to unlock monthly insights.</p>
         </div>
       </div>
-      <section class="card empty-state" aria-live="polite">
-        <h3>Dashboard reset in progress</h3>
-        <p id="dashboard-message">We’re clearing out the previous experience to prepare for the rebuild.</p>
+
+      <section class="card upload-card" aria-live="polite">
+        <div class="panel-header">
+          <div>
+            <h3>Document upload</h3>
+            <p class="subtitle">Documents are stored in your secure R2 vault and processed through Docupipe.</p>
+          </div>
+        </div>
+        <form id="upload-form" class="upload-form" novalidate>
+          <input id="document-input" class="visually-hidden" type="file" accept="application/pdf" />
+          <div id="upload-dropzone" class="upload-dropzone" tabindex="0">
+            <div class="dropzone-content">
+              <div class="dropzone-icon">📄</div>
+              <p class="dropzone-title">Drag &amp; drop a PDF here, or</p>
+              <button type="button" class="button" id="document-button">Select PDF</button>
+              <p class="dropzone-subtitle">Supported: payslips and bank statements (.pdf, max 20&nbsp;MB)</p>
+            </div>
+          </div>
+        </form>
+        <ul class="status-list" id="upload-status">
+          <li class="status-item" data-step="upload">
+            <span class="status-icon" aria-hidden="true"></span>
+            <span class="status-label">Uploading to Cloudflare R2</span>
+          </li>
+          <li class="status-item" data-step="docupipe">
+            <span class="status-icon" aria-hidden="true"></span>
+            <span class="status-label">Running Docupipe workflow</span>
+          </li>
+          <li class="status-item" data-step="analytics">
+            <span class="status-icon" aria-hidden="true"></span>
+            <span class="status-label">Saving analytics</span>
+          </li>
+        </ul>
+        <div class="upload-feedback" id="upload-feedback" role="status"></div>
       </section>
+
+      <section class="card analytics-card">
+        <div class="panel-header">
+          <div>
+            <h3>Monthly analytics</h3>
+            <p class="subtitle">Select a month to view consolidated payslip and statement metrics.</p>
+          </div>
+          <div class="month-select">
+            <label for="analytics-month">Month</label>
+            <select id="analytics-month" name="analytics-month"></select>
+          </div>
+        </div>
+        <div class="analytics-loading" id="analytics-loading" hidden>
+          <span class="loading-spinner" aria-hidden="true"></span>
+          <span>Loading analytics…</span>
+        </div>
+        <div class="summary-grid" id="summary-grid"></div>
+        <p class="empty-indicator" id="summary-empty" hidden>No analytics are available yet. Upload a payslip or bank statement to get started.</p>
+      </section>
+
+      <div class="card-grid">
+        <section class="card" id="payslip-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Payslips</h3>
+              <p class="subtitle">Net pay, tax and deductions for the selected month.</p>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="table" id="payslip-table">
+              <thead>
+                <tr>
+                  <th scope="col">Employer</th>
+                  <th scope="col">Pay date</th>
+                  <th scope="col">Gross</th>
+                  <th scope="col">Net</th>
+                  <th scope="col">Income tax</th>
+                  <th scope="col">NI</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="empty-indicator" id="payslip-empty" hidden>No payslips processed for this month yet.</p>
+        </section>
+
+        <section class="card" id="statement-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Bank statements</h3>
+              <p class="subtitle">Track income, spend and cashflow from your accounts.</p>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="table" id="statement-table">
+              <thead>
+                <tr>
+                  <th scope="col">Account</th>
+                  <th scope="col">Opening</th>
+                  <th scope="col">Closing</th>
+                  <th scope="col">Income</th>
+                  <th scope="col">Spend</th>
+                  <th scope="col">Net</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="top-transactions" id="statement-top" hidden>
+            <h4>Top transactions</h4>
+            <ul id="transaction-list"></ul>
+          </div>
+          <p class="empty-indicator" id="statement-empty" hidden>No statements processed for this month yet.</p>
+        </section>
+      </div>
     </main>
   </div>
 </body>
