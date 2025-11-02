@@ -6,7 +6,7 @@ const { ensureAuthenticatedApi, ensureAuthenticatedPage } = require('../../middl
 const { buildRouter } = require('./routes');
 const { connectMongo } = require('./models');
 
-const FRONTEND_DIR = path.join(__dirname, '../../frontend');
+const FRONTEND_DIR = path.resolve(__dirname, '../../..', 'frontend');
 const LANDING_DIR = path.join(FRONTEND_DIR, 'public');
 const APP_DIR = path.join(FRONTEND_DIR, 'app');
 
