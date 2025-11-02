@@ -1,4 +1,4 @@
-const User = require('../../models/User');
+const User = require('../models/User');
 
 const EDITABLE_FIELDS = ['firstName', 'lastName', 'country', 'profileInterests'];
 
