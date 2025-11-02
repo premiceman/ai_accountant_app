@@ -20,6 +20,12 @@ const VaultDocumentSchema = new mongoose.Schema(
         {
           documentId: { type: String, default: null },
           workflowId: { type: String, default: null },
+          runId: { type: String, default: null },
+          jobId: { type: String, default: null },
+          status: { type: String, default: null },
+          submittedAt: { type: Date, default: null },
+          completedAt: { type: Date, default: null },
+          lastPolledAt: { type: Date, default: null },
         },
         { _id: false }
       ),
