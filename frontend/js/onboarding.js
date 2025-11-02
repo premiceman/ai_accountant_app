@@ -630,7 +630,7 @@
         <div class="legal-box">
           <label>
             <input type="checkbox" id="chk-eula" ${state.form.acceptEula ? 'checked' : ''}>
-            <span>I have read and agree to the <a href="/legal.html" target="_blank" rel="noopener">End User Licence Agreement</a>.</span>
+            <span>I have read and agree to the <a href="/legal#eula" target="_blank" rel="noopener">End User Licence Agreement</a>.</span>
           </label>
           <label>
             <input type="checkbox" id="chk-privacy" ${state.form.acceptPrivacy ? 'checked' : ''}>

@@ -299,6 +299,13 @@
 
     $('#f-eula-ver').value = state.user.eulaVersion || '—';
     $('#f-eula-at').value = isoToNice(state.user.eulaAcceptedAt);
+
+    const workos = state.user.workos || {};
+    $('#f-workos-user').value = workos.userId || '—';
+    $('#f-workos-profile').value = workos.profileId || '—';
+    $('#f-workos-org').value = workos.organizationId || '—';
+    $('#f-workos-sync').value = isoToNice(workos.lastSyncAt);
+
     $('#f-created').value = isoToNice(state.user.createdAt);
     $('#f-updated').value = isoToNice(state.user.updatedAt);
 
@@ -416,8 +423,8 @@
     showStatus('Saving your changes…', 'info');
 
     try {
-      const res = await Auth.fetch('/api/user/me', {
-        method: 'PUT',
+      const res = await Auth.fetch('/api/v2/me', {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -431,7 +438,11 @@
         throw new Error(message);
       }
 
-      const updated = await res.json();
+      const payloadRes = await res.json();
+      const updated = payloadRes?.me || payloadRes || null;
+      if (!updated) {
+        throw new Error('Unable to parse profile response.');
+      }
       state.user = updated;
       cacheUser(updated);
       renderProfile();
@@ -704,7 +715,7 @@
 
   async function refreshData() {
     const [meRes, subscriptionRes, paymentRes, plansRes] = await Promise.all([
-      Auth.fetch('/api/user/me?t=' + Date.now(), { cache: 'no-store' }),
+      Auth.fetch('/api/v2/me?t=' + Date.now(), { cache: 'no-store' }),
       Auth.fetch('/api/billing/subscription?t=' + Date.now(), { cache: 'no-store' }),
       Auth.fetch('/api/billing/payment-methods?t=' + Date.now(), { cache: 'no-store' }),
       Auth.fetch('/api/billing/plans?t=' + Date.now(), { cache: 'no-store' })
@@ -717,8 +728,13 @@
       const text = await meRes.text();
       throw new Error(text || 'Unable to load profile');
     }
-    state.user = await meRes.json();
-    cacheUser(state.user);
+    const mePayload = await meRes.json();
+    const me = mePayload?.me || mePayload || null;
+    if (!me) {
+      throw new Error('Unable to load profile');
+    }
+    state.user = me;
+    cacheUser(me);
 
     if (subscriptionRes.ok) {
       state.subscription = await subscriptionRes.json();

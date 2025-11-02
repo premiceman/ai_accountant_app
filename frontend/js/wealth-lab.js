@@ -31,11 +31,13 @@
   }
 
   async function reloadPlan() {
-    const res = await Auth.fetch('/api/user/me', { cache: 'no-store' });
+    const res = await Auth.fetch('/api/v2/me', { cache: 'no-store' });
     if (!res.ok) return;
     const payload = await res.json();
-    state.me = payload;
-    state.plan = normalisePlan(payload.wealthPlan || {});
+    const me = payload?.me || payload || null;
+    if (!me) return;
+    state.me = me;
+    state.plan = normalisePlan(me.wealthPlan || {});
   }
 
   function cacheModals() {

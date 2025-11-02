@@ -1498,5 +1498,9 @@ router.post('/change-password', auth, async (req, res) => {
   }
 });
 
+router.publicUser = publicUser;
+router.normaliseUsername = normaliseUsername;
+router.escapeRegex = escapeRegex;
+
 module.exports = router;
 

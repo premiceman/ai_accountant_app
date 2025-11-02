@@ -170,6 +170,14 @@ const UserSchema = new mongoose.Schema({
       start:  { type: Date, default: null },
       end:    { type: Date, default: null }
     }
+  },
+
+  workos: {
+    userId:        { type: String, default: null },
+    profileId:     { type: String, default: null },
+    organizationId:{ type: String, default: null },
+    connectionId:  { type: String, default: null },
+    lastSyncAt:    { type: Date, default: null }
   }
 }, { timestamps: true });
 

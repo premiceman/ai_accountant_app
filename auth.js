@@ -3,6 +3,66 @@
   // Keep compatibility with legacy token keys already in your app.
   const STORAGE_KEYS = ['token', 'jwt', 'authToken'];
   const USER_CACHE_KEY = 'me';
+  const LANDING_PATH = '/';
+  const APP_HOME = '/app';
+  const ONBOARDING_PAGE = 'onboarding.html';
+  const ONBOARDING_ROUTE = '/app/onboarding';
+  const CSRF_COOKIE_NAME = 'phloat_csrf';
+  const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
+
+  function currentPage() {
+    const path = (location.pathname || '/').split('/').pop();
+    return path && path.includes('.') ? path : 'index.html';
+  }
+
+  function needsMandatoryOnboarding(user) {
+    if (!user) return true;
+    if (user.onboardingComplete) return false;
+    const hasUsername = typeof user.username === 'string' && user.username.trim().length >= 3;
+    const hasDob = !!user.dateOfBirth;
+    const interests = Array.isArray(user.profileInterests) ? user.profileInterests : [];
+    const survey = user.onboardingSurvey || {};
+    const hasSurveySignals = Array.isArray(survey.valueSignals) && survey.valueSignals.length >= 3 &&
+      Array.isArray(survey.tierSignals) && survey.tierSignals.length >= 3;
+    const hasPlanChoice = survey.planChoice && survey.planChoice.selection;
+    return !(hasUsername && hasDob && interests.length && hasSurveySignals && hasPlanChoice);
+  }
+
+  function redirectToOnboarding() {
+    if (currentPage() === ONBOARDING_PAGE || location.pathname === ONBOARDING_ROUTE) return;
+    location.replace(ONBOARDING_ROUTE);
+  }
+
+  function getCookieValue(name) {
+    if (typeof document === 'undefined') return null;
+    const cookies = document.cookie ? document.cookie.split(';') : [];
+    for (const cookie of cookies) {
+      const [key, ...rest] = cookie.split('=');
+      if (!key) continue;
+      if (key.trim() === name) {
+        try {
+          return decodeURIComponent(rest.join('=').trim());
+        } catch {
+          return rest.join('=').trim();
+        }
+      }
+    }
+    return null;
+  }
+
+  function getCsrfToken() {
+    return getCookieValue(CSRF_COOKIE_NAME);
+  }
+
+  function redirectToLanding() {
+    if (location.pathname === LANDING_PATH) return;
+    location.replace(LANDING_PATH);
+  }
+
+  function redirectToAppHome() {
+    if (location.pathname === APP_HOME) return;
+    location.replace(APP_HOME);
+  }
 
   // ---------- Token helpers ----------
   function getToken() {
@@ -51,7 +111,18 @@
     const token = getToken();
     const headers = new Headers(options.headers || {});
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch(window.API ? window.API.url(url) : url, { ...options, headers });
+    const method = (options.method || 'GET').toUpperCase();
+    if (!SAFE_METHODS.has(method)) {
+      const csrfToken = getCsrfToken();
+      if (csrfToken && !headers.has('X-CSRF-Token')) {
+        headers.set('X-CSRF-Token', csrfToken);
+      }
+    }
+    const response = await fetch(window.API ? window.API.url(url) : url, {
+      ...options,
+      credentials: options.credentials || 'include',
+      headers,
+    });
     if (response.status === 401 || response.status === 403) {
       clearTokens();
     }
@@ -75,16 +146,15 @@
     const t = getToken();
     if (!t) return null;
     try {
-      const res = await fetch((window.API ? window.API.url('/api/user/me') : '/api/user/me'), {
-        headers: { Authorization: `Bearer ${t}` },
-        cache: 'no-store'
-      });
+      const res = await fetchWithAuth('/api/v2/me', { cache: 'no-store' });
       if (res.status === 401 || res.status === 403) {
         clearTokens();
         return null;
       }
       if (!res.ok) return null;
-      const me = await res.json();
+      const payload = await res.json();
+      const me = payload?.me || payload || null;
+      if (!me) return null;
       window.__ME__ = me;
       try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
       return me;
@@ -97,7 +167,8 @@
     const normalizedIntent = intent === 'signup' ? 'signup' : 'login';
     const basePath = normalizedIntent === 'signup' ? '/api/auth/workos/start' : '/api/auth/workos/login';
     const url = new URL(basePath, window.location.origin);
-    if (next) url.searchParams.set('next', next);
+    const target = typeof next === 'string' && next.trim().startsWith('/') ? next.trim() : APP_HOME;
+    url.searchParams.set('next', target);
     url.searchParams.set('intent', normalizedIntent);
     if (remember) url.searchParams.set('remember', 'true');
     if (email) url.searchParams.set('email', email);
@@ -105,20 +176,49 @@
   }
 
   async function requireAuth() {
-    const t = getToken();
-    if (!t || isExpired(t)) {
+    const token = getToken();
+    if (!token || isExpired(token)) {
       clearTokens();
-      throw new Error('Not authenticated');
+      redirectToLanding();
+      return new Promise(() => {});
     }
-    const me = await loadUser(true);
-    if (!me) {
+
+    try {
+      const res = await fetchWithAuth('/api/v2/me', { cache: 'no-store' });
+      if (res.status === 401 || res.status === 403) {
+        clearTokens();
+        redirectToLanding();
+        return new Promise(() => {});
+      }
+      if (!res.ok) {
+        redirectToLanding();
+        return new Promise(() => {});
+      }
+
+      const payload = await res.json();
+      const me = payload?.me || payload || null;
+      if (!me) {
+        clearTokens();
+        redirectToLanding();
+        return new Promise(() => {});
+      }
+
+      window.__ME__ = me;
+      try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+
+      if (needsMandatoryOnboarding(me) && location.pathname !== ONBOARDING_ROUTE) {
+        redirectToOnboarding();
+        return new Promise(() => {});
+      }
+
+      const g = document.getElementById('greeting-name');
+      if (g && me?.firstName) g.textContent = me.firstName;
+      return { me, token };
+    } catch {
       clearTokens();
-      throw new Error('Not authenticated');
+      redirectToLanding();
+      return new Promise(() => {});
     }
-    window.__ME__ = me;
-    const g = document.getElementById('greeting-name');
-    if (g && me?.firstName) g.textContent = me.firstName;
-    return { me, token: t };
   }
 
   // ---------- Strict gate for protected pages ----------
@@ -127,77 +227,89 @@
   //   Auth.enforce({ allowAnonymous:[...], bounceIfAuthed:true }); // login/signup
   async function enforce(opts = {}) {
     const defaults = {
-      allowAnonymous: ['index.html', 'login.html', 'signup.html', '404.html', 'unauthorized.html'],
-      bounceIfAuthed: false,   // on login/signup: if already authed, go to next/home
-      validateWithServer: true // actually hit /api/user/me when a token exists
+      allowAnonymous: [
+        'index.html',
+        'login.html',
+        'signup.html',
+        '404.html',
+        'unauthorized.html',
+        'legal.html',
+        'whats-new.html',
+        LANDING_PATH,
+        '/login',
+        '/signup',
+        '/legal',
+        '/whats-new',
+        '/unauthorized',
+      ],
+      bounceIfAuthed: false,
+      validateWithServer: true,
     };
     const cfg = { ...defaults, ...opts };
 
-    // Current page filename, e.g. "home.html"
-    const page = (() => {
-      const p = (location.pathname || '/').split('/').pop();
-      return p && p.includes('.') ? p : 'index.html';
-    })();
-
-    const hasToken = !!getToken();
+    const pathname = location.pathname || '/';
+    const page = currentPage();
+    const allowSet = new Set(cfg.allowAnonymous);
     const token = getToken();
+    const hasToken = !!token;
     const looksValid = hasToken && !isExpired(token);
+    const isAnonymous = allowSet.has(pathname) || allowSet.has(page);
 
-    // Helper: redirect to login with ?next=<current>
-    function toLogin() {
-      const url = buildWorkOSUrl({
-        intent: 'login',
-        next: location.pathname + location.search,
-      });
-      location.replace(url);
-    }
-    // Helper: redirect to app home or provided next
-    function toAppHomeFromLogin() {
-      const params = new URLSearchParams(location.search);
-      const next = params.get('next');
-      location.replace(next && next.startsWith('/') ? next : './home.html');
-    }
-
-    // Anonymous pages (login/signup/index/etc.)
-    if (cfg.allowAnonymous.includes(page)) {
+    if (isAnonymous) {
       if (!cfg.bounceIfAuthed) return;
-      // If we're on login/signup and already authenticated, bounce to app.
-      if (!hasToken) return;                      // clearly not authed
-      if (!looksValid && !cfg.validateWithServer) return; // unsure, let them log in
-
-      if (cfg.validateWithServer) {
-        try {
-          const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
-          if (res.ok) return toAppHomeFromLogin(); // definitely authed
-        } catch { /* ignore and let page load */ }
-        return; // couldn't confirm; allow login page
-      } else {
-        return toAppHomeFromLogin();
+      if (!looksValid) return;
+      if (!cfg.validateWithServer) {
+        redirectToAppHome();
+        return;
       }
+      try {
+        const res = await fetchWithAuth('/api/v2/me', { cache: 'no-store' });
+        if (res.ok) {
+          const payload = await res.json();
+          const me = payload?.me || payload || null;
+          if (me) {
+            window.__ME__ = me;
+            try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
+            if (needsMandatoryOnboarding(me) && pathname !== ONBOARDING_ROUTE) {
+              redirectToOnboarding();
+              return;
+            }
+          }
+          redirectToAppHome();
+        }
+      } catch { /* allow anonymous page if verification fails */ }
+      return;
     }
 
-    // Protected pages (everything else)
-    if (!hasToken) return toLogin();
-    if (isExpired(token)) { clearTokens(); return toLogin(); }
+    if (!hasToken || isExpired(token)) {
+      clearTokens();
+      redirectToLanding();
+      return;
+    }
 
     if (cfg.validateWithServer) {
       try {
-        const res = await fetchWithAuth('/api/user/me', { cache: 'no-store' });
-        if (!res.ok) { clearTokens(); return toLogin(); }
-        // Cache user for the page (and keep existing tolerant flow intact)
-        try {
-          const me = await res.json();
+        const res = await fetchWithAuth('/api/v2/me', { cache: 'no-store' });
+        if (!res.ok) {
+          clearTokens();
+          redirectToLanding();
+          return;
+        }
+        const payload = await res.json();
+        const me = payload?.me || payload || null;
+        if (me) {
           window.__ME__ = me;
           try { localStorage.setItem(USER_CACHE_KEY, JSON.stringify(me)); } catch {}
-        } catch { /* ignore parse errors; tolerant */ }
+          if (needsMandatoryOnboarding(me) && pathname !== ONBOARDING_ROUTE) {
+            redirectToOnboarding();
+            return;
+          }
+        }
       } catch {
-        // Network error => safest is to require re-auth
-        return toLogin();
+        clearTokens();
+        redirectToLanding();
       }
     }
-
-    // Keep your current pattern: pages often call requireAuth() after this
-    return;
   }
 
   // ---------- Optional nicety used by your pages ----------
@@ -216,7 +328,7 @@
       performance.mark?.('phloat:auth:signout:start');
     } catch { /* no-op */ }
 
-    const defaultLanding = '/index.html';
+    const defaultLanding = LANDING_PATH;
     const redirectTarget = typeof redirect === 'string' && redirect.trim().length
       ? redirect.trim()
       : null;
@@ -233,11 +345,15 @@
       console.info?.('[instrumentation] auth:signout:init', context);
     } catch { /* no-op */ }
 
+    try {
+      fetchWithAuth('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    } catch { /* ignore */ }
+
     clearTokens();
 
     let destination = redirectTarget || defaultLanding;
     if (!destination) {
-      destination = buildWorkOSUrl({ intent: 'login', next: nextTarget || defaultLanding });
+      destination = buildWorkOSUrl({ intent: 'login', next: nextTarget || APP_HOME });
     }
 
     try {
@@ -260,6 +376,7 @@
     requireAuth,
     fetch: fetchWithAuth,
     enforce,
+    needsOnboarding: needsMandatoryOnboarding,
     setBannerTitle,
     signOut,
     buildWorkOSUrl,

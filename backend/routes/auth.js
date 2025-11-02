@@ -13,6 +13,7 @@ try {
 
 const User = require('../models/User');
 const Subscription = require('../models/Subscription');
+const { issueSessionCookies, clearSessionCookies } = require('../utils/session');
 
 const router = express.Router();
 
@@ -116,11 +117,11 @@ function parseCookieHeader(header) {
 }
 
 function sanitizeNext(next) {
-  if (typeof next !== 'string' || !next) return '/home.html';
+  if (typeof next !== 'string' || !next) return '/app';
   const trimmed = next.trim();
-  if (!trimmed) return '/home.html';
+  if (!trimmed) return '/app';
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('//')) {
-    return '/home.html';
+    return '/app';
   }
   if (!trimmed.startsWith('/')) {
     return '/' + trimmed.replace(/^\.+/, '');
@@ -203,7 +204,7 @@ async function buildAuthorizationUrl({
     provider = chosenProviderKey;
   }
 
-  const sanitizedNext = sanitizeNext(next || '/home.html');
+  const sanitizedNext = sanitizeNext(next || '/app');
   const rememberFlag = parseBooleanParam(remember);
   const parsedIntent = parseIntent(intent);
 
@@ -314,6 +315,19 @@ async function ensureLocalUserFromWorkOS(workosUser, {
     user.emailVerified = workosUser.emailVerified;
   }
 
+  const orgMemberships = Array.isArray(workosUser?.organizationMemberships)
+    ? workosUser.organizationMemberships
+    : [];
+  const primaryMembership = orgMemberships.find((membership) => membership && membership.organizationId) || null;
+
+  user.workos = {
+    userId: workosUser?.id || user.workos?.userId || null,
+    profileId: workosUser?.profile?.id || workosUser?.profileId || user.workos?.profileId || null,
+    organizationId: primaryMembership?.organizationId || workosUser?.organizationId || user.workos?.organizationId || null,
+    connectionId: workosUser?.connectionId || primaryMembership?.connectionId || user.workos?.connectionId || null,
+    lastSyncAt: new Date(),
+  };
+
   await user.save();
 
   if (created) {
@@ -338,7 +352,7 @@ async function ensureLocalUserFromWorkOS(workosUser, {
 async function prepareWorkOSAuthorization(req, res) {
   ensureWorkOSConfigured();
 
-  const sanitizedNext = sanitizeNext(req.query.next || '/home.html');
+  const sanitizedNext = sanitizeNext(req.query.next || '/app');
   const rememberFlag = parseBooleanParam(req.query.remember);
   const intent = parseIntent(req.query.intent);
   const csrfToken = crypto.randomBytes(32).toString('hex');
@@ -568,7 +582,9 @@ router.post('/signup', async (req, res) => {
       console.warn('WorkOS auto-login after signup failed:', authErr);
     }
 
+    const rememberSession = parseBooleanParam(req.body?.remember);
     const token = issueToken(localUser._id);
+    issueSessionCookies(res, token, { remember: rememberSession });
     res.status(201).json({ token, user: publicUser(localUser) });
   } catch (e) {
     console.error('Signup error:', e);
@@ -597,6 +613,8 @@ router.post('/login', async (req, res) => {
 
     if (!emailN) return res.status(400).json({ error: 'Email is required' });
 
+    const rememberSession = parseBooleanParam(req.body?.remember);
+
     const result = await workos.userManagement.authenticateWithPassword({
       clientId: WORKOS_CLIENT_ID,
       email: emailN,
@@ -609,6 +627,7 @@ router.post('/login', async (req, res) => {
     if (!localUser) return res.status(500).json({ error: 'Account sync failed' });
 
     const token = issueToken(localUser._id);
+    issueSessionCookies(res, token, { remember: rememberSession });
     res.json({ token, user: publicUser(localUser) });
   } catch (err) {
     const status = err?.statusCode || err?.status || 500;
@@ -683,7 +702,7 @@ async function handleWorkOSCallback(req, res) {
     clearWorkOSPkceCookie(res);
 
     const stateData = decodeState(state);
-    const next = sanitizeNext(stateData.next || '/home.html');
+    const next = sanitizeNext(stateData.next || '/app');
     const remember = !!stateData.remember;
     const intent = parseIntent(stateData.intent);
 
@@ -701,6 +720,7 @@ async function handleWorkOSCallback(req, res) {
     }
 
     const token = issueToken(localUser._id);
+    issueSessionCookies(res, token, { remember });
     const userPayload = publicUser(localUser);
     const storage = remember ? 'localStorage' : 'sessionStorage';
     const tokenJson = JSON.stringify(token);
@@ -748,11 +768,21 @@ router.post('/verify-email', async (req, res) => {
     await user.save();
 
     const jwtToken = issueToken(user._id);
+    issueSessionCookies(res, jwtToken, { remember: true });
     res.json({ token: jwtToken, user: publicUser(user) });
   } catch (e) {
     console.error('Verify email error:', e);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+router.post('/logout', (req, res) => {
+  try {
+    clearSessionCookies(res);
+  } catch (err) {
+    console.warn('Failed to clear session cookies during logout', err);
+  }
+  res.json({ ok: true });
 });
 
 module.exports = router;

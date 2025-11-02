@@ -32,13 +32,14 @@
 
   async function loadInsights() {
     try {
-      const response = await Auth.fetch('/api/user/me', { cache: 'no-store' });
+      const response = await Auth.fetch('/api/v2/me', { cache: 'no-store' });
       if (!response.ok) {
         const text = await safeRead(response);
         throw new Error(text || `Request failed (${response.status})`);
       }
       const payload = await response.json();
-      return payload?.documentInsights || {};
+      const me = payload?.me || payload || null;
+      return me?.documentInsights || {};
     } catch (error) {
       console.error('Failed to load document insights', error);
       throw error;
