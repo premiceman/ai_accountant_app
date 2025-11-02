@@ -13,47 +13,41 @@
     <nav>
       <h1>AI ACCOUNTANT</h1>
       <a data-nav="dashboard" href="/app/dashboard">Dashboard</a>
-      <a data-nav="documents" href="/app/documents">Documents</a>
-      <a data-nav="analytics" href="/app/analytics">Analytics</a>
-      <a data-nav="advice" href="/app/advice">Advice</a>
-      <a data-nav="tax" href="/app/tax">Tax</a>
       <a data-nav="profile" href="/app/profile">Profile</a>
+      <button class="signout" type="button" data-action="signout">Sign out</button>
     </nav>
     <main>
       <div class="page-header">
         <div>
-          <span class="badge">Account settings</span>
+          <span class="badge">Account</span>
           <h2>Profile</h2>
-          <p class="subtitle">Update your personal details. Authentication is powered by WorkOS.</p>
+          <p class="subtitle">View the information associated with your account.</p>
         </div>
       </div>
-      <div class="card">
-        <form id="profile-form">
-          <div class="form-grid">
-            <div>
-              <label for="firstName">First name</label>
-              <input id="firstName" name="firstName" required />
-            </div>
-            <div>
-              <label for="lastName">Last name</label>
-              <input id="lastName" name="lastName" required />
-            </div>
-            <div>
-              <label for="country">Country</label>
-              <select id="country" name="country">
-                <option value="uk">United Kingdom</option>
-                <option value="us">United States</option>
-              </select>
-            </div>
+      <div class="card profile-card" aria-live="polite">
+        <dl class="profile-grid">
+          <div>
+            <dt>Name</dt>
+            <dd id="profile-name">—</dd>
           </div>
-          <div style="margin-top:24px;">
-            <label for="interests">Financial interests</label>
-            <textarea id="interests" name="interests" rows="3" placeholder="Comma separated"></textarea>
+          <div>
+            <dt>Email</dt>
+            <dd id="profile-email">—</dd>
           </div>
-          <div style="margin-top:24px; display:flex; gap:12px;">
-            <button class="button" type="submit">Save changes</button>
+          <div>
+            <dt>Country</dt>
+            <dd id="profile-country">—</dd>
           </div>
-        </form>
+          <div>
+            <dt>License tier</dt>
+            <dd id="profile-tier">—</dd>
+          </div>
+          <div class="profile-interests">
+            <dt>Financial interests</dt>
+            <dd id="profile-interests">—</dd>
+          </div>
+        </dl>
+        <p class="profile-note">To update your details, please contact support while the new workspace is being prepared.</p>
       </div>
     </main>
   </div>

@@ -1,24 +1,36 @@
-document.addEventListener('DOMContentLoaded', async () => {
-  const me = await App.bootstrap('profile');
-  if (!me) return;
-  const form = document.getElementById('profile-form');
-  form.firstName.value = me.profile.firstName;
-  form.lastName.value = me.profile.lastName;
-  form.country.value = me.profile.country || 'uk';
-  form.interests.value = (me.profile.profileInterests || []).join(', ');
+(function () {
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value || '—';
+  }
 
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const payload = {
-      firstName: form.firstName.value,
-      lastName: form.lastName.value,
-      country: form.country.value,
-      profileInterests: form.interests.value.split(',').map((item) => item.trim()).filter(Boolean),
-    };
-    const result = await App.Api.updateMe(payload);
-    form.firstName.value = result.profile.firstName;
-    form.lastName.value = result.profile.lastName;
-    form.country.value = result.profile.country || 'uk';
-    form.interests.value = (result.profile.profileInterests || []).join(', ');
+  function formatInterests(interests) {
+    if (!Array.isArray(interests) || !interests.length) {
+      return '—';
+    }
+    return interests.join(', ');
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    App.bootstrap('profile')
+      .then((me) => {
+        if (!me?.profile) return;
+        const profile = me.profile;
+        const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ').trim();
+        setText('profile-name', fullName || profile.email || '—');
+        setText('profile-email', profile.email || '—');
+        setText('profile-country', profile.country ? profile.country.toUpperCase() : '—');
+        setText('profile-tier', (profile.licenseTier || 'free').replace(/\b\w/g, (c) => c.toUpperCase()));
+        setText('profile-interests', formatInterests(profile.profileInterests));
+      })
+      .catch((error) => {
+        console.error('Failed to load profile', error);
+        setText('profile-name', '—');
+        setText('profile-email', '—');
+        setText('profile-country', '—');
+        setText('profile-tier', '—');
+        setText('profile-interests', '—');
+      });
   });
-});
+})();
