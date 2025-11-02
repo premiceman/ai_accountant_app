@@ -9,3 +9,4 @@ export * from './vaultJob.js';
 export * from './documentExtract.js';
 export * from './documentRecord.js';
 export * from './documentDlq.js';
+export * from './transactionCategoryCache.js';

@@ -53,7 +53,7 @@ function buildBasePayload(overrides: Partial<Record<string, unknown>>): Record<s
   };
 }
 
-function run(): void {
+async function run(): Promise<void> {
   const userId = new Types.ObjectId();
 
   const payslipClassification = {
@@ -63,7 +63,7 @@ function run(): void {
     institutionName: null,
   };
 
-  const payslipPayload = enrichPayloadWithV1(
+  const payslipPayload = await enrichPayloadWithV1(
     buildBasePayload({
       userId,
       fileId: 'file-pay',
@@ -107,7 +107,7 @@ function run(): void {
     institutionName: 'HSBC',
   };
 
-  const statementPayload = enrichPayloadWithV1(
+  const statementPayload = await enrichPayloadWithV1(
     buildBasePayload({
       userId,
       fileId: 'file-statement',
@@ -187,30 +187,28 @@ function run(): void {
     },
   });
 
-  rebuildMonthlyAnalytics({ userId, month: '2024-04' })
-    .then(() => {
-      assert.ok(capturedAnalytics, 'expected analytics document to be written');
-      assert.equal(capturedAnalytics.income.gross, 2500);
-      assert.equal(capturedAnalytics.income.net, 2000);
-      assert.equal(capturedAnalytics.income.other, 2000);
-      assert.equal(capturedAnalytics.spend.total, 150);
-      assert.equal(capturedAnalytics.cashflow.net, 1850);
-      const topCategories = capturedAnalytics.spend.byCategory.map((entry: any) => entry.category);
-      assert.ok(topCategories.includes('Groceries'));
-      console.log('V1 dashboard smoke test passed');
-    })
-    .finally(() => {
-      (DocumentInsightModel.find as any) = originalFind;
-      (UserOverrideModel.find as any) = originalOverridesFind;
-      (UserAnalyticsModel.findOneAndUpdate as any) = originalAnalyticsUpdate;
-    })
-    .catch((error) => {
-      console.error('V1 dashboard smoke test failed', error);
-      process.exitCode = 1;
-      (DocumentInsightModel.find as any) = originalFind;
-      (UserOverrideModel.find as any) = originalOverridesFind;
-      (UserAnalyticsModel.findOneAndUpdate as any) = originalAnalyticsUpdate;
-    });
+  try {
+    await rebuildMonthlyAnalytics({ userId, month: '2024-04' });
+    assert.ok(capturedAnalytics, 'expected analytics document to be written');
+    assert.equal(capturedAnalytics.income.gross, 2500);
+    assert.equal(capturedAnalytics.income.net, 2000);
+    assert.equal(capturedAnalytics.income.other, 2000);
+    assert.equal(capturedAnalytics.spend.total, 150);
+    assert.equal(capturedAnalytics.cashflow.net, 1850);
+    const topCategories = capturedAnalytics.spend.byCategory.map((entry: any) => entry.category);
+    assert.ok(topCategories.includes('Groceries'));
+    console.log('V1 dashboard smoke test passed');
+  } catch (error) {
+    console.error('V1 dashboard smoke test failed', error);
+    process.exitCode = 1;
+  } finally {
+    (DocumentInsightModel.find as any) = originalFind;
+    (UserOverrideModel.find as any) = originalOverridesFind;
+    (UserAnalyticsModel.findOneAndUpdate as any) = originalAnalyticsUpdate;
+  }
 }
 
-run();
+run().catch((error) => {
+  console.error('V1 dashboard smoke test encountered an unexpected error', error);
+  process.exitCode = 1;
+});

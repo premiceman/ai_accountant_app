@@ -113,7 +113,7 @@ function groupByCategory(transactions: v1.TransactionV1[]): {
   const totals = new Map<string, number>();
   for (const tx of transactions) {
     if (tx.direction !== 'outflow') continue;
-    if (tx.category === 'Transfers') continue;
+    if (tx.category === 'Transfers' || tx.category === 'Savings/Transfers') continue;
     const amountMinor = Math.abs(tx.amountMinor);
     if (!amountMinor) continue;
     totals.set(tx.category, (totals.get(tx.category) || 0) + amountMinor);
@@ -478,7 +478,7 @@ export async function rebuildMonthlyAnalytics({
       } else if (tx.direction === 'outflow') {
         const amount = v1.toMajorUnits(Math.abs(tx.amountMinor));
         cashOut += amount;
-        if (tx.category !== 'Transfers') {
+        if (tx.category !== 'Transfers' && tx.category !== 'Savings/Transfers') {
           spendTotal += amount;
         }
         if (/(hmrc|tax)/i.test(tx.description)) {
