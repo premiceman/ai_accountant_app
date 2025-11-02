@@ -2,519 +2,223 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>AI Accountant — Control Center</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phloat — The AI Accountant for Scaling Teams</title>
+  <meta name="description" content="Phloat automates document intelligence, analytics, and tax prep so finance teams can focus on strategy.">
+  <link rel="icon" href="/favicon.ico" type="image/svg+xml">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
   <link rel="stylesheet" href="/css/styles.css" fetchpriority="high">
-  <script>window.__API_BASE = window.__API_BASE || 'http://localhost:3000';</script>
-  <script src="/js/head-include.js"></script>
 </head>
-<body class="suite-body">
-  <header class="suite-topbar topbar-glass py-2">
-    <div class="container-fluid d-flex align-items-center justify-content-between gap-3">
-      <div class="d-flex align-items-center gap-3">
-        <a class="navbar-brand topbar-logo brand-mark" href="#">
-          <span class="brand-dot" aria-hidden="true"></span>
-          <span>AI Accountant</span>
-        </a>
-        <div class="topbar-tagline d-none d-md-flex align-items-center text-muted">
-          <svg class="flex-shrink-0" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4"/><path d="m16.2 7.8 2.8-2.8"/><path d="M18 12h4"/><path d="m16.2 16.2 2.8 2.8"/><path d="M12 18v4"/><path d="m5 5 2.8 2.8"/><path d="M2 12h4"/><path d="m5 19 2.8-2.8"/><circle cx="12" cy="12" r="3"/></svg>
-          <span>Vault intelligence & analytics suite</span>
-        </div>
-      </div>
-      <div class="d-flex align-items-center gap-3 topbar-actions">
-        <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">
-          <span class="visually-hidden">Toggle colour theme</span>
-          <span class="theme-toggle__track" aria-hidden="true">
-            <i class="bi bi-brightness-high-fill theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true"></i>
-            <i class="bi bi-moon-stars-fill theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true"></i>
-            <span class="theme-toggle__thumb" aria-hidden="true"></span>
-          </span>
-          <span class="theme-toggle__label">
-            <span class="theme-toggle__label-text" data-theme-toggle-label>Light</span>
-          </span>
-        </button>
-        <div class="topbar-status badge rounded-pill text-uppercase fw-semibold">
-          <span class="pulse-dot" aria-hidden="true"></span>
-          Operational
-        </div>
-        <a class="btn btn-sm btn-outline-primary d-none d-sm-inline-flex" href="/whats-new.html">What's new</a>
-        <div id="suite-user-meta" class="topbar-user-meta" aria-live="polite"></div>
+<body class="landing-page">
+  <header class="landing-header border-bottom py-3">
+    <div class="container d-flex align-items-center justify-content-between gap-3">
+      <a class="navbar-brand topbar-logo brand-mark" href="/">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <span>Phloat</span>
+      </a>
+      <nav class="landing-nav d-none d-md-flex align-items-center gap-4 text-muted">
+        <a class="nav-link px-0" href="#features">Features</a>
+        <a class="nav-link px-0" href="#security">Security</a>
+        <a class="nav-link px-0" href="#pricing">Pricing</a>
+      </nav>
+      <div class="d-flex align-items-center gap-2">
+        <a id="cta-login" class="btn btn-outline-primary" href="/api/auth/workos/login">Login</a>
+        <a id="cta-signup" class="btn btn-primary" href="/api/auth/workos/start?intent=signup">Sign up</a>
       </div>
     </div>
   </header>
 
-  <div class="suite-layout">
-    <aside class="suite-nav app-sidebar" aria-label="Primary">
-      <nav class="app-nav gap-2">
-        <div class="app-nav-section" data-expanded="true">
-          <div class="app-nav-title app-nav-heading text-uppercase small">Navigation</div>
-          <div class="app-nav-items" role="list">
-            <button type="button" class="app-nav-item active" data-nav-target="vault-section">
-              <span class="nav-icon" aria-hidden="true"><i class="bi bi-safe2"></i></span>
-              <span class="label">Vault</span>
-            </button>
-            <button type="button" class="app-nav-item" data-nav-target="overview-section">
-              <span class="nav-icon" aria-hidden="true"><i class="bi bi-graph-up"></i></span>
-              <span class="label">Overview</span>
-            </button>
-            <button type="button" class="app-nav-item" data-nav-target="income-section">
-              <span class="nav-icon" aria-hidden="true"><i class="bi bi-cash-stack"></i></span>
-              <span class="label">Income</span>
-            </button>
-            <button type="button" class="app-nav-item" data-nav-target="spending-section">
-              <span class="nav-icon" aria-hidden="true"><i class="bi bi-credit-card"></i></span>
-              <span class="label">Spending</span>
-            </button>
-            <button type="button" class="app-nav-item" data-nav-target="tax-section">
-              <span class="nav-icon" aria-hidden="true"><i class="bi bi-file-earmark-text"></i></span>
-              <span class="label">Tax &amp; HMRC</span>
-            </button>
-            <button type="button" class="app-nav-item" data-nav-target="wealth-section">
-              <span class="nav-icon" aria-hidden="true"><i class="bi bi-gem"></i></span>
-              <span class="label">Wealth</span>
-            </button>
+  <main>
+    <section class="landing-hero py-5 py-lg-6 bg-body-tertiary border-bottom">
+      <div class="container">
+        <div class="row align-items-center g-5">
+          <div class="col-12 col-lg-6">
+            <span class="badge rounded-pill text-bg-primary-subtle text-primary-emphasis mb-3">AI Accountant Platform</span>
+            <h1 class="display-4 fw-bold mb-3">Financial operations at startup speed.</h1>
+            <p class="lead text-secondary mb-4">Centralise document intelligence, analytics, and tax planning in a single control centre. Phloat connects to your vault, reconciles transactions, and surfaces the next best action for every stakeholder.</p>
+            <div class="d-flex flex-wrap gap-3">
+              <a class="btn btn-primary btn-lg" id="hero-primary" href="/api/auth/workos/start?intent=signup">Start with WorkOS</a>
+              <a class="btn btn-outline-primary btn-lg" id="hero-secondary" href="/api/auth/workos/login">Access your workspace</a>
+            </div>
+            <div class="d-flex flex-wrap gap-4 mt-4 text-muted small">
+              <div class="d-flex align-items-center gap-2"><i class="bi bi-shield-lock"></i><span>Tenant isolation &amp; encryption in transit + at rest</span></div>
+              <div class="d-flex align-items-center gap-2"><i class="bi bi-graph-up"></i><span>Realtime analytics from structured document data</span></div>
+            </div>
           </div>
-        </div>
-        <div class="app-nav-spacer"></div>
-        <button id="nav-signout" class="app-nav-item signout" type="button">
-          <span class="nav-icon" aria-hidden="true"><i class="bi bi-box-arrow-right"></i></span>
-          <span class="label">Sign out</span>
-        </button>
-      </nav>
-    </aside>
-
-    <main class="suite-main">
-      <div id="suite-global-error" class="alert alert-danger d-none" role="alert">
-        <div class="d-flex flex-wrap align-items-center gap-3">
-          <div class="flex-grow-1">
-            <strong>Something went wrong.</strong>
-            <div class="small text-muted" id="suite-global-error-message">Please try again.</div>
+          <div class="col-12 col-lg-6">
+            <div class="ratio ratio-4x3 shadow-lg rounded-4 overflow-hidden landing-hero-visual">
+              <div class="landing-hero-placeholder d-flex flex-column justify-content-center align-items-center text-center">
+                <i class="bi bi-bar-chart-steps display-4 text-primary"></i>
+                <p class="text-secondary mb-0 mt-3 px-4">Automated dashboards, vault intelligence, and personalised advice the moment documents arrive.</p>
+              </div>
+            </div>
           </div>
-          <button id="suite-global-retry" type="button" class="btn btn-outline-light btn-sm">Retry</button>
         </div>
       </div>
+    </section>
 
-      <section id="suite-processing-ribbon" class="suite-ribbon card shadow-sm d-none" aria-live="polite"></section>
+    <section id="features" class="py-5 py-lg-6">
+      <div class="container">
+        <div class="text-center mb-5">
+          <span class="text-uppercase small text-muted fw-semibold">Why teams choose Phloat</span>
+          <h2 class="mt-2 fw-bold">From ingestion to insight, fully automated</h2>
+          <p class="text-secondary mb-0">Consolidate workflows across tax, payroll, and wealth planning with secure automation and AI copilots.</p>
+        </div>
+        <div class="row g-4">
+          <div class="col-12 col-lg-4">
+            <div class="card h-100 shadow-sm border-0 landing-card">
+              <div class="card-body p-4">
+                <div class="icon-circle text-primary mb-3"><i class="bi bi-cloud-arrow-up-fill"></i></div>
+                <h3 class="h5">Document vault intelligence</h3>
+                <p class="text-secondary">Upload statements, payroll, and contracts once. Phloat classifies, extracts, and reconciles every file with a complete audit trail.</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-4">
+            <div class="card h-100 shadow-sm border-0 landing-card">
+              <div class="card-body p-4">
+                <div class="icon-circle text-primary mb-3"><i class="bi bi-robot"></i></div>
+                <h3 class="h5">AI advice copilots</h3>
+                <p class="text-secondary">Receive context-aware recommendations on tax elections, compensation, and savings so leaders can act with confidence.</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-12 col-lg-4">
+            <div class="card h-100 shadow-sm border-0 landing-card">
+              <div class="card-body p-4">
+                <div class="icon-circle text-primary mb-3"><i class="bi bi-diagram-3"></i></div>
+                <h3 class="h5">Collaborative dashboards</h3>
+                <p class="text-secondary">Share secure portals across finance, HR, and advisors with live KPIs, scenario planning, and custom notifications.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
-      <section id="vault-section" class="suite-section" data-section>
-        <header class="suite-section-header">
-          <h1 class="suite-section-title">Vault</h1>
-          <p class="suite-section-subtitle text-secondary">Upload, preview, and manage documents while monitoring real-time processing.</p>
-        </header>
+    <section id="security" class="py-5 py-lg-6 bg-body-tertiary border-top border-bottom">
+      <div class="container">
+        <div class="row g-5 align-items-center">
+          <div class="col-12 col-lg-6">
+            <h2 class="fw-bold">Security and compliance baked in</h2>
+            <p class="text-secondary">Phloat is designed for regulated finance workflows. Every tenant is isolated, encrypted, and monitored with detailed access logs.</p>
+            <ul class="list-unstyled text-secondary mb-0">
+              <li class="d-flex gap-2 mb-2"><i class="bi bi-check-circle-fill text-primary"></i><span>WorkOS SSO &amp; MFA enforcement with device posture checks</span></li>
+              <li class="d-flex gap-2 mb-2"><i class="bi bi-check-circle-fill text-primary"></i><span>HttpOnly, Secure cookies with SameSite protections for session continuity</span></li>
+              <li class="d-flex gap-2 mb-2"><i class="bi bi-check-circle-fill text-primary"></i><span>Granular access controls scoped to each user and organisation</span></li>
+              <li class="d-flex gap-2"><i class="bi bi-check-circle-fill text-primary"></i><span>Data residency in the UK with immutable audit logging</span></li>
+            </ul>
+          </div>
+          <div class="col-12 col-lg-6">
+            <div class="card shadow-sm border-0">
+              <div class="card-body p-4">
+                <h3 class="h5">Enterprise controls</h3>
+                <p class="text-secondary">Support for SOC 2 workflows, vendor due diligence, and regulatory reporting.</p>
+                <div class="row g-3">
+                  <div class="col-6">
+                    <div class="border rounded-3 p-3 h-100">
+                      <h4 class="h6">Session hygiene</h4>
+                      <p class="small text-secondary mb-0">Auto-expiring sessions with CSRF protection and refresh-on-activity.</p>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="border rounded-3 p-3 h-100">
+                      <h4 class="h6">Audit visibility</h4>
+                      <p class="small text-secondary mb-0">Every API call is attributed, timestamped, and exportable for compliance.</p>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="border rounded-3 p-3 h-100">
+                      <h4 class="h6">Data lifecycle</h4>
+                      <p class="small text-secondary mb-0">Retention policies with secure shredding and tenant-level purge tooling.</p>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="border rounded-3 p-3 h-100">
+                      <h4 class="h6">Identity federation</h4>
+                      <p class="small text-secondary mb-0">Connect Azure AD, Google Workspace, Okta, or direct magic links via WorkOS.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
-        <div class="suite-card card shadow-sm mb-4">
+    <section id="pricing" class="py-5 py-lg-6">
+      <div class="container">
+        <div class="text-center mb-4">
+          <h2 class="fw-bold">Get started in minutes</h2>
+          <p class="text-secondary mb-0">Plug in your vault, sync documents, and invite collaborators with enterprise-grade guardrails.</p>
+        </div>
+        <div class="card shadow-sm border-0 mx-auto" style="max-width: 720px;">
           <div class="card-body p-4 p-lg-5">
-            <div class="d-flex flex-column flex-lg-row gap-3 align-items-start align-items-lg-center justify-content-between mb-4">
+            <div class="d-flex flex-column flex-lg-row align-items-start align-items-lg-center justify-content-between gap-3">
               <div>
-                <h2 class="h4 mb-1">Upload documents</h2>
-                <p class="text-secondary mb-0">Drag and drop PDFs or ZIP archives. Uploads are encrypted and processed through the pipeline.</p>
+                <h3 class="h4 mb-1">Starter workspace</h3>
+                <p class="text-secondary mb-0">Includes document intelligence, analytics, and tax planning copilots for up to 5 team members.</p>
               </div>
-              <div class="text-secondary small d-flex align-items-center gap-2">
-                <i class="bi bi-shield-lock"></i>
-                AES-GCM encrypted at rest · Tenant-isolated access
+              <div class="text-lg-end">
+                <div class="display-6 fw-bold mb-1">£0</div>
+                <div class="text-secondary small">During preview — upgrade when ready for custom automations.</div>
               </div>
             </div>
-            <div class="d-flex flex-wrap gap-2 mb-3">
-              <input id="vault-file-input" type="file" accept=".pdf,application/pdf,.zip,application/zip" multiple hidden>
-              <button id="vault-upload-button" class="btn btn-primary"><i class="bi bi-upload me-2"></i>Select files</button>
-              <button id="vault-refresh" class="btn btn-outline-secondary"><i class="bi bi-arrow-clockwise me-2"></i>Refresh</button>
+            <div class="d-flex flex-wrap gap-3 mt-4">
+              <a class="btn btn-primary btn-lg" id="pricing-primary" href="/api/auth/workos/start?intent=signup">Create workspace</a>
+              <a class="btn btn-outline-primary btn-lg" id="pricing-secondary" href="/api/auth/workos/login">Book a walkthrough</a>
             </div>
-            <label class="vault-dropzone suite-dropzone" id="vault-dropzone" for="vault-file-input">
-              <div class="d-flex flex-column align-items-center gap-2">
-                <div class="rounded-circle d-flex align-items-center justify-content-center suite-dropzone-icon">
-                  <i class="bi bi-cloud-arrow-up-fill fs-3"></i>
-                </div>
-                <div class="text-center">
-                  <strong>Drop files here</strong> or click to browse
-                </div>
-                <small class="text-secondary">PDFs up to 75&nbsp;MB each, or ZIP archives of PDFs.</small>
-              </div>
-            </label>
-            <div id="vault-upload-queue" class="suite-upload-queue" hidden></div>
           </div>
         </div>
+      </div>
+    </section>
+  </main>
 
-        <div class="suite-card card shadow-sm">
-          <div class="card-header bg-transparent border-0 px-4 pt-4 pb-3 d-flex flex-wrap align-items-center gap-2 justify-content-between">
-            <div>
-              <h2 class="h5 mb-1">Document history</h2>
-              <p class="text-secondary mb-0">Status chips update in real time as the pipeline progresses.</p>
-            </div>
-            <button class="btn btn-outline-secondary btn-sm" type="button" id="vault-load-more" hidden>Load more</button>
-          </div>
-          <div class="card-body p-0">
-            <div class="table-responsive">
-              <table class="table align-middle mb-0" id="vault-table" aria-live="polite">
-                <thead>
-                  <tr>
-                    <th scope="col" class="px-4">Name</th>
-                    <th scope="col">Size</th>
-                    <th scope="col">Uploaded</th>
-                    <th scope="col">Status</th>
-                    <th scope="col" class="text-end pe-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="vault-table-body"></tbody>
-              </table>
-            </div>
-            <div id="vault-empty" class="suite-empty-state d-none">
-              <i class="bi bi-inboxes"></i>
-              <h3>No documents yet</h3>
-              <p class="text-secondary mb-0">Upload your first PDF or ZIP to kick off analytics.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="overview-section" class="suite-section" data-section>
-        <header class="suite-section-header">
-          <h2 class="suite-section-title">Overview</h2>
-          <p class="suite-section-subtitle text-secondary">Key metrics and health indicators driven by processed documents.</p>
-        </header>
-        <div id="overview-loading" class="suite-loading" aria-hidden="true">
-          <div class="placeholder-wave mb-3">
-            <span class="placeholder col-3"></span>
-            <span class="placeholder col-2"></span>
-          </div>
-          <div class="row g-3">
-            <div class="col-12 col-md-3">
-              <div class="suite-placeholder-tile"></div>
-            </div>
-            <div class="col-12 col-md-3">
-              <div class="suite-placeholder-tile"></div>
-            </div>
-            <div class="col-12 col-md-3">
-              <div class="suite-placeholder-tile"></div>
-            </div>
-            <div class="col-12 col-md-3">
-              <div class="suite-placeholder-tile"></div>
-            </div>
-          </div>
-        </div>
-        <div id="overview-content" class="d-none">
-          <div class="row g-3 mb-4" id="overview-kpis"></div>
-          <div class="row g-4">
-            <div class="col-12 col-xl-6">
-              <div class="suite-card card h-100 shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h5 mb-1">Income vs Spend</h3>
-                      <p class="text-secondary small mb-0">Grouped by month, sourced from processed statements and payslips.</p>
-                    </div>
-                  </div>
-                  <canvas id="overview-income-spend-chart" height="260" role="img" aria-label="Monthly income versus spend chart"></canvas>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-xl-6">
-              <div class="suite-card card h-100 shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h5 mb-1">Rolling net cashflow</h3>
-                      <p class="text-secondary small mb-0">Track monthly surplus or deficit across the selected horizon.</p>
-                    </div>
-                  </div>
-                  <canvas id="overview-net-chart" height="260" role="img" aria-label="Rolling net cashflow line chart"></canvas>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div id="overview-status" class="alert alert-info align-items-center gap-2 mt-4 d-none" role="status">
-            <i class="bi bi-hourglass-split"></i>
-            <span>Processing your documents… analytics refresh automatically when ready.</span>
-          </div>
-        </div>
-      </section>
-
-      <section id="income-section" class="suite-section" data-section>
-        <header class="suite-section-header">
-          <h2 class="suite-section-title">Income</h2>
-          <p class="suite-section-subtitle text-secondary">Payslip intelligence, breakdowns, and trends across employers.</p>
-        </header>
-        <div id="income-loading" class="suite-loading" aria-hidden="true">
-          <div class="placeholder-wave mb-3">
-            <span class="placeholder col-4"></span>
-            <span class="placeholder col-5"></span>
-          </div>
-          <div class="suite-placeholder-panel"></div>
-        </div>
-        <div id="income-content" class="d-none">
-          <div class="row g-4">
-            <div class="col-12 col-xl-7">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body">
-                  <div class="d-flex flex-wrap align-items-center gap-3 mb-3">
-                    <div class="me-auto">
-                      <h3 class="h5 mb-0">Payslips</h3>
-                      <p class="text-secondary small mb-0">Click a row for a detailed breakdown.</p>
-                    </div>
-                    <div class="text-secondary small" id="income-total-count"></div>
-                  </div>
-                  <div class="table-responsive">
-                    <table class="table align-middle mb-0" id="income-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Employer</th>
-                          <th scope="col">Pay date</th>
-                          <th scope="col" class="text-end">Net</th>
-                          <th scope="col" class="text-end">Tax</th>
-                          <th scope="col" class="text-end">NI</th>
-                          <th scope="col" class="text-end">Pension</th>
-                          <th scope="col" class="text-end">Student loan</th>
-                          <th scope="col" class="text-end">Other</th>
-                          <th scope="col" class="text-end">JSON</th>
-                        </tr>
-                      </thead>
-                      <tbody id="income-table-body"></tbody>
-                    </table>
-                  </div>
-                  <div id="income-empty" class="suite-empty-state d-none">
-                    <i class="bi bi-receipt"></i>
-                    <h3>No payslips yet</h3>
-                    <p class="text-secondary mb-0">Upload payslips to unlock detailed income analytics.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-xl-5 d-flex flex-column gap-4">
-              <div class="suite-card card shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h6 mb-1">Income by source</h3>
-                      <p class="text-secondary small mb-0">Top sources derived from normalized insights.</p>
-                    </div>
-                  </div>
-                  <canvas id="income-source-chart" height="220" role="img" aria-label="Income by source chart"></canvas>
-                  <ul id="income-source-list" class="list-unstyled small mb-0 mt-3"></ul>
-                </div>
-              </div>
-              <div class="suite-card card shadow-sm">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h6 mb-1">Monthly income trend</h3>
-                      <p class="text-secondary small mb-0">Recurring pay captured from payslips and statements.</p>
-                    </div>
-                  </div>
-                  <canvas id="income-trend-chart" height="200" role="img" aria-label="Monthly income trend chart"></canvas>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="spending-section" class="suite-section" data-section>
-        <header class="suite-section-header">
-          <h2 class="suite-section-title">Spending</h2>
-          <p class="suite-section-subtitle text-secondary">Category insights, top merchants, and anomaly detection from bank statements.</p>
-        </header>
-        <div id="spending-loading" class="suite-loading" aria-hidden="true">
-          <div class="placeholder-wave mb-3">
-            <span class="placeholder col-5"></span>
-            <span class="placeholder col-4"></span>
-          </div>
-          <div class="suite-placeholder-panel"></div>
-        </div>
-        <div id="spending-content" class="d-none">
-          <div class="row g-4 mb-4" id="spending-category-tiles"></div>
-          <div class="row g-4">
-            <div class="col-12 col-xl-6">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h6 mb-1">Top merchants</h3>
-                      <p class="text-secondary small mb-0">Largest outflows across all linked accounts.</p>
-                    </div>
-                  </div>
-                  <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                      <thead>
-                        <tr>
-                          <th scope="col">Merchant</th>
-                          <th scope="col" class="text-end">Amount</th>
-                          <th scope="col">Category</th>
-                          <th scope="col" class="text-end">Last seen</th>
-                        </tr>
-                      </thead>
-                      <tbody id="spending-merchant-body"></tbody>
-                    </table>
-                  </div>
-                  <div id="spending-merchant-empty" class="suite-empty-state d-none">
-                    <i class="bi bi-bag"></i>
-                    <h3>No merchant data</h3>
-                    <p class="text-secondary mb-0">Upload bank statements to analyse merchant trends.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-xl-6">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h6 mb-1">Month-on-month spend</h3>
-                      <p class="text-secondary small mb-0">Anomaly badges flag spikes exceeding twice the rolling 3-month average.</p>
-                    </div>
-                  </div>
-                  <canvas id="spending-trend-chart" height="220" role="img" aria-label="Month-on-month spending chart"></canvas>
-                  <ul id="spending-anomalies" class="list-unstyled small mt-3 mb-0"></ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="tax-section" class="suite-section" data-section>
-        <header class="suite-section-header">
-          <h2 class="suite-section-title">Tax &amp; HMRC</h2>
-          <p class="suite-section-subtitle text-secondary">YTD totals and readiness checklist generated from processed payslips and statements.</p>
-        </header>
-        <div id="tax-loading" class="suite-loading" aria-hidden="true">
-          <div class="placeholder-wave mb-3">
-            <span class="placeholder col-4"></span>
-            <span class="placeholder col-3"></span>
-          </div>
-          <div class="suite-placeholder-panel"></div>
-        </div>
-        <div id="tax-content" class="d-none">
-          <div class="row g-4">
-            <div class="col-12 col-xl-6">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body">
-                  <h3 class="h6 mb-3">PAYE &amp; deductions year-to-date</h3>
-                  <dl class="row mb-0" id="tax-ytd-list"></dl>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-xl-6">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body">
-                  <h3 class="h6 mb-3">Self Assessment readiness</h3>
-                  <ul id="tax-checklist" class="list-unstyled mb-3"></ul>
-                  <div class="alert alert-secondary small mb-0" role="note">
-                    <i class="bi bi-info-circle me-2"></i>
-                    Upload missing essentials early to avoid HMRC filing crunch.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="wealth-section" class="suite-section" data-section>
-        <header class="suite-section-header">
-          <h2 class="suite-section-title">Wealth</h2>
-          <p class="suite-section-subtitle text-secondary">Balances, savings rate, and runway derived from accounts and spending.</p>
-        </header>
-        <div id="wealth-loading" class="suite-loading" aria-hidden="true">
-          <div class="placeholder-wave mb-3">
-            <span class="placeholder col-3"></span>
-            <span class="placeholder col-4"></span>
-          </div>
-          <div class="suite-placeholder-panel"></div>
-        </div>
-        <div id="wealth-content" class="d-none">
-          <div class="row g-4">
-            <div class="col-12 col-lg-7">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body">
-                  <div class="d-flex justify-content-between align-items-start mb-3">
-                    <div>
-                      <h3 class="h6 mb-1">Month-end balances</h3>
-                      <p class="text-secondary small mb-0">Derived from closing balances across bank and savings statements.</p>
-                    </div>
-                  </div>
-                  <canvas id="wealth-balance-chart" height="220" role="img" aria-label="Month-end balance trend chart"></canvas>
-                </div>
-              </div>
-            </div>
-            <div class="col-12 col-lg-5">
-              <div class="suite-card card shadow-sm h-100">
-                <div class="card-body d-flex flex-column gap-3">
-                  <div>
-                    <div class="text-secondary small">Current savings rate</div>
-                    <div id="wealth-savings-rate" class="display-6 fw-semibold">—</div>
-                  </div>
-                  <div>
-                    <div class="text-secondary small">Runway estimate</div>
-                    <div id="wealth-runway" class="h4 mb-0">—</div>
-                    <div class="small text-secondary" id="wealth-runway-caption"></div>
-                  </div>
-                  <ul id="wealth-balances" class="list-unstyled small mb-0"></ul>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div id="wealth-empty" class="suite-empty-state d-none">
-            <i class="bi bi-piggy-bank"></i>
-            <h3>No balance data yet</h3>
-            <p class="text-secondary mb-0">Upload statements with balances to unlock the wealth dashboard.</p>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <div class="toast-container position-fixed top-0 end-0 p-3" id="suite-toasts"></div>
-
-  <div class="modal fade" id="vault-preview-modal" tabindex="-1" aria-labelledby="vault-preview-title" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="vault-preview-title">Preview</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body" id="vault-preview-body">
-          <div class="ratio ratio-4x3 border rounded bg-body-secondary d-flex align-items-center justify-content-center">
-            <div class="text-center text-secondary">Generating preview…</div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        </div>
+  <footer class="landing-footer border-top py-4 mt-5">
+    <div class="container d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3 text-secondary small">
+      <div>© <span id="landing-year"></span> Phloat. All rights reserved.</div>
+      <div class="d-flex flex-wrap gap-3">
+        <a class="link-muted" href="/legal">Privacy &amp; legal</a>
+        <a class="link-muted" href="/whats-new">Release notes</a>
+        <a class="link-muted" href="mailto:hello@phloat.io">Contact</a>
       </div>
     </div>
-  </div>
-
-  <div class="offcanvas offcanvas-end" tabindex="-1" id="income-detail-panel" aria-labelledby="income-detail-title">
-    <div class="offcanvas-header">
-      <div>
-        <h5 class="offcanvas-title" id="income-detail-title">Payslip details</h5>
-        <div class="text-secondary small" id="income-detail-period"></div>
-      </div>
-      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
-    </div>
-    <div class="offcanvas-body d-flex flex-column gap-3">
-      <div id="income-detail-metrics" class="row g-3"></div>
-      <div>
-        <h6 class="text-uppercase small text-secondary mb-2">Earnings</h6>
-        <ul id="income-detail-earnings" class="list-unstyled small mb-3"></ul>
-      </div>
-      <div>
-        <h6 class="text-uppercase small text-secondary mb-2">Deductions</h6>
-        <ul id="income-detail-deductions" class="list-unstyled small mb-3"></ul>
-      </div>
-      <div>
-        <h6 class="text-uppercase small text-secondary mb-2">Raw JSON (masked)</h6>
-        <pre id="income-detail-json" class="bg-body-tertiary border rounded p-3 small text-break mb-0">—</pre>
-      </div>
-      <button type="button" class="btn btn-outline-primary" id="income-detail-explain" disabled>Explain this number (coming soon)</button>
-    </div>
-  </div>
+  </footer>
 
   <script src="/js/auth.js"></script>
-  <script src="/js/ui-hygiene.js"></script>
-  <script src="/js/suite.js"></script>
+  <script>
+    (function () {
+      const APP_HOME = '/app';
+      document.getElementById('landing-year').textContent = new Date().getFullYear();
+
+      function setAuthLinks() {
+        if (!window.Auth || typeof Auth.buildWorkOSUrl !== 'function') return;
+        const loginUrl = Auth.buildWorkOSUrl({ intent: 'login', next: APP_HOME });
+        const signupUrl = Auth.buildWorkOSUrl({ intent: 'signup', next: APP_HOME });
+        ['cta-login', 'hero-secondary', 'pricing-secondary'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.href = loginUrl;
+        });
+        ['cta-signup', 'hero-primary', 'pricing-primary'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.href = signupUrl;
+        });
+      }
+
+      if (window.Auth && typeof Auth.enforce === 'function') {
+        Auth.enforce({ bounceIfAuthed: true, allowAnonymous: ['index.html', '/', 'legal.html', '/legal', 'whats-new.html', '/whats-new', 'login.html', '/login', 'signup.html', '/signup'] });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setAuthLinks);
+      } else {
+        setAuthLinks();
+      }
+    }());
+  </script>
 </body>
 </html>

@@ -196,10 +196,10 @@ document.addEventListener('click', (ev) => {
     } else {
       // Hard fallback: clear tokens + go to login
       ['token','jwt','authToken','me'].forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch {} });
-      location.href = '/index.html';
+      location.href = '/';
     }
   } catch {
-    location.href = '/index.html';
+    location.href = '/';
   }
 });
 

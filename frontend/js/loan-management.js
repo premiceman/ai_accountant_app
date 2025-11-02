@@ -100,13 +100,14 @@
     showLoader(affordabilityLoader, 'Analysing cashflow signals…');
     affordabilityError?.classList.add('d-none');
     try {
-      const res = await Auth.fetch('/api/user/me', { cache: 'no-store' });
+      const res = await Auth.fetch('/api/v2/me', { cache: 'no-store' });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         throw new Error(text || 'Unable to load affordability profile');
       }
       const payload = await res.json();
-      state.affordability = payload?.wealthPlan?.summary?.affordability || null;
+      const me = payload?.me || payload || null;
+      state.affordability = me?.wealthPlan?.summary?.affordability || null;
       renderAffordability();
     } catch (err) {
       console.error('[loan-management] loadAffordability failed', err);

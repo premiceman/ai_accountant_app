@@ -162,8 +162,13 @@ router.post('/payment-methods', auth, async (req, res) => {
 
 router.patch('/payment-methods/:id/default', auth, async (req, res) => {
   const id = req.params.id;
-  const method = await PaymentMethod.findOne({ _id: id, userId: req.user.id });
-  if (!method) return res.status(404).json({ error: 'Payment method not found' });
+  const method = await PaymentMethod.findById(id);
+  if (!method) {
+    return res.status(404).json({ error: 'Payment method not found' });
+  }
+  if (String(method.userId) !== String(req.user.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   await PaymentMethod.updateMany({ userId: req.user.id }, { $set: { isDefault: false } });
   method.isDefault = true;
@@ -173,6 +178,14 @@ router.patch('/payment-methods/:id/default', auth, async (req, res) => {
 
 router.delete('/payment-methods/:id', auth, async (req, res) => {
   const id = req.params.id;
+  const method = await PaymentMethod.findById(id);
+  if (!method) {
+    return res.status(404).json({ error: 'Payment method not found' });
+  }
+  if (String(method.userId) !== String(req.user.id)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
   const user = await User.findById(req.user.id).lean();
   const methods = await PaymentMethod.find({ userId: req.user.id }).sort({ createdAt: 1 });
   const target = methods.find(m => String(m._id) === String(id));
@@ -236,8 +249,11 @@ router.post('/subscribe', auth, async (req, res) => {
   if (planInternal !== 'free') {
     let pm = null;
     if (paymentMethodId) {
-      pm = await PaymentMethod.findOne({ _id: paymentMethodId, userId: req.user.id });
+      pm = await PaymentMethod.findById(paymentMethodId);
       if (!pm) return res.status(400).json({ error: 'Selected payment method not found' });
+      if (String(pm.userId) !== String(req.user.id)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
     } else {
       pm = await PaymentMethod.findOne({ userId: req.user.id, isDefault: true });
       if (!pm) return res.status(400).json({ error: 'Add a payment method before subscribing' });

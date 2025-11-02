@@ -201,16 +201,16 @@ router.get('/presign-download/:docId', async (req, res, next) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    const doc = await VaultDocument.findOne({
-      _id: docId,
-      userId,
-      $or: [
-        { 'deletion.deletedAt': { $exists: false } },
-        { 'deletion.deletedAt': null },
-      ],
-    }).lean();
-
+    const doc = await VaultDocument.findById(docId).lean();
     if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const docOwnerId = typeof doc.userId?.toString === 'function' ? doc.userId.toString() : String(doc.userId || '');
+    const currentUserId = typeof userId?.toString === 'function' ? userId.toString() : String(userId || '');
+    if (docOwnerId !== currentUserId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (doc.deletion?.deletedAt) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
@@ -232,19 +232,27 @@ router.delete('/:docId', async (req, res, next) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
+    const doc = await VaultDocument.findById(docId);
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const docOwnerId = typeof doc.userId?.toString === 'function' ? doc.userId.toString() : String(doc.userId || '');
+    const currentUserId = typeof userId?.toString === 'function' ? userId.toString() : String(userId || '');
+    if (docOwnerId !== currentUserId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (doc.deletion?.deletedAt) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
     const filter = {
-      _id: docId,
+      _id: doc._id,
       userId,
       $or: [
         { 'deletion.deletedAt': { $exists: false } },
         { 'deletion.deletedAt': null },
       ],
     };
-
-    const doc = await VaultDocument.findOne(filter);
-    if (!doc) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
 
     const now = new Date();
     await VaultDocument.updateOne(filter, {
