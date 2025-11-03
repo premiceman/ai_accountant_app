@@ -6,6 +6,22 @@ const DOCUPIPE_BASE_URL = base.origin; // guarantee host-only (no path, no trail
 const DOCUPIPE_WORKFLOW_ID =
   process.env.DOCUPIPE_WORKFLOW_ID || (() => { throw new Error('Missing DOCUPIPE_WORKFLOW_ID'); })();
 
+const DOCUPIPE_API_KEY =
+  process.env.DOCUPIPE_API_KEY || (() => { throw new Error('Missing DOCUPIPE_API_KEY'); })();
+
+const DOCUPIPE_CONNECT_TIMEOUT_MS = Number(
+  process.env.DOCUPIPE_CONNECT_TIMEOUT_MS || 30000
+);
+
+const config = {
+  docupipe: {
+    baseUrl: DOCUPIPE_BASE_URL,
+    apiKey: DOCUPIPE_API_KEY,
+    workflowId: DOCUPIPE_WORKFLOW_ID,
+    connectTimeoutMs: DOCUPIPE_CONNECT_TIMEOUT_MS,
+  },
+};
+
 function docupipeUrl(path) {
   // path must start with '/'
   return new URL(path, DOCUPIPE_BASE_URL).toString();
@@ -23,4 +39,5 @@ module.exports = {
   DOCUPIPE_BASE_URL,
   DOCUPIPE_WORKFLOW_ID,
   docupipeUrl,
+  config,
 };
