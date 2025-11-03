@@ -1,5 +1,28 @@
 import https from 'node:https';
-import { URL } from 'node:url';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { URL, fileURLToPath } from 'node:url';
+
+type DocupipeConfigModule = {
+  DEFAULT_DOCUPIPE_BASE_URL: string;
+  resolveDocupipeBaseUrl(
+    env?: Partial<Record<string, string | undefined>> | NodeJS.ProcessEnv
+  ): string;
+  assertDocupipeBaseUrl(url: string, source?: string | undefined): string;
+};
+
+const require = createRequire(import.meta.url);
+const docupipeConfigPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  '..',
+  'shared',
+  'config',
+  'docupipe.js'
+);
+const { resolveDocupipeBaseUrl } = require(docupipeConfigPath) as DocupipeConfigModule;
 
 type HttpMethod = 'GET' | 'POST';
 
@@ -40,7 +63,7 @@ type StandardizationPayload = {
   [key: string]: unknown;
 };
 
-const BASE_URL = process.env.DOCUPIPE_BASE_URL || 'https://app.docupipe.ai';
+const BASE_URL = resolveDocupipeBaseUrl(process.env);
 const API_KEY = process.env.DOCUPIPE_API_KEY;
 
 function ensureApiKey(): string {
