@@ -18,12 +18,12 @@ import {
   type WorkflowJob,
 } from './docupipeClient.js';
 import { detectDocumentType, normalizePayslip, normalizeStatement } from './normalization.js';
+import { DOCUPIPE_WORKFLOW_ID } from '../config/docupipe.js';
 
 const logger = pino({ name: 'docupipe-pipeline', level: process.env.LOG_LEVEL ?? 'info' });
 
 const POLL_INTERVAL_MS = parseInterval(process.env.DOCUPIPE_POLL_INTERVAL_MS, 5000);
 const POLL_TIMEOUT_MS = parseInterval(process.env.DOCUPIPE_POLL_TIMEOUT_MS, 10 * 60 * 1000);
-const WORKFLOW_ID = process.env.DOCUPIPE_WORKFLOW_ID ?? '';
 
 const PIPELINE_STEPS = [
   'Uploaded',
@@ -69,7 +69,7 @@ async function streamToBuffer(stream: Readable): Promise<Buffer> {
 }
 
 function ensureWorkflowConfigured(): void {
-  if (!WORKFLOW_ID) {
+  if (!DOCUPIPE_WORKFLOW_ID) {
     throw new Error('DOCUPIPE_WORKFLOW_ID not configured');
   }
 }
@@ -244,7 +244,7 @@ async function submitDocupipe(doc: VaultDocument): Promise<void> {
   await markStep(doc._id, 'Classified', { status: 'running', startedAt: submissionStartedAt });
 
   const submission = await submitDocument({
-    workflowId: WORKFLOW_ID,
+    workflowId: DOCUPIPE_WORKFLOW_ID,
     filename: doc.filename,
     base64Contents: fileBuffer.toString('base64'),
   });
@@ -256,7 +256,7 @@ async function submitDocupipe(doc: VaultDocument): Promise<void> {
         status: 'processing',
         'docupipe.status': 'processing',
         'docupipe.documentId': submission.documentId,
-        'docupipe.workflowId': WORKFLOW_ID,
+        'docupipe.workflowId': DOCUPIPE_WORKFLOW_ID,
         'docupipe.jobId': submission.jobId ?? null,
         'docupipe.runId': submission.runId ?? null,
         'docupipe.submittedAt': submissionStartedAt,

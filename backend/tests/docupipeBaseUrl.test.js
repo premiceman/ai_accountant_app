@@ -1,23 +1,43 @@
 const assert = require('node:assert/strict');
-const { resolveDocupipeBaseUrl, DEFAULT_DOCUPIPE_BASE_URL } = require('../../shared/config/docupipe');
+const path = require('node:path');
+
+const modulePath = path.join(__dirname, '..', 'src', 'config', 'docupipe');
+
+function loadConfig() {
+  delete require.cache[require.resolve(modulePath)];
+  // eslint-disable-next-line global-require
+  return require(modulePath);
+}
 
 async function run() {
   const original = process.env.DOCUPIPE_BASE_URL;
+  const originalWorkflow = process.env.DOCUPIPE_WORKFLOW_ID;
   try {
+    process.env.DOCUPIPE_WORKFLOW_ID = 'wf-test';
     delete process.env.DOCUPIPE_BASE_URL;
-    const defaultUrl = resolveDocupipeBaseUrl(process.env);
-    assert.equal(defaultUrl, DEFAULT_DOCUPIPE_BASE_URL);
-
-    const custom = resolveDocupipeBaseUrl({ DOCUPIPE_BASE_URL: 'https://custom.example.com/' });
-    assert.equal(custom, 'https://custom.example.com');
-
-    assert.throws(
-      () => resolveDocupipeBaseUrl({ DOCUPIPE_BASE_URL: 'not-a-valid-url' }),
-      /DOCUPIPE_BASE_URL "not-a-valid-url" is not a valid absolute URL/i
+    let config = loadConfig();
+    assert.equal(config.DOCUPIPE_BASE_URL, 'https://app.docupipe.ai');
+    assert.equal(
+      config.docupipeUrl(`/workflows/${config.DOCUPIPE_WORKFLOW_ID}/dispatch`).startsWith(
+        'https://app.docupipe.ai/workflows/'
+      ),
+      true
     );
+
+    process.env.DOCUPIPE_BASE_URL = 'https://custom.example.com/workflows/abc';
+    config = loadConfig();
+    assert.equal(config.DOCUPIPE_BASE_URL, 'https://custom.example.com');
+
+    process.env.DOCUPIPE_BASE_URL = 'not-a-valid-url';
+    assert.throws(() => loadConfig(), /Invalid URL/);
 
     console.log('docupipeBaseUrl tests passed');
   } finally {
+    if (originalWorkflow === undefined) {
+      delete process.env.DOCUPIPE_WORKFLOW_ID;
+    } else {
+      process.env.DOCUPIPE_WORKFLOW_ID = originalWorkflow;
+    }
     if (original === undefined) {
       delete process.env.DOCUPIPE_BASE_URL;
     } else {

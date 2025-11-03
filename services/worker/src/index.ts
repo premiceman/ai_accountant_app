@@ -4,33 +4,11 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import pino from 'pino';
 import { createServer } from 'node:http';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { URL, fileURLToPath } from 'node:url';
 import { createHealthRouter } from './http/health.js';
 import { startDocumentJobLoop, stopDocumentJobLoop } from './documentJobLoop.js';
 import { featureFlags } from './config/featureFlags.js';
 import { startDocupipePipeline, stopDocupipePipeline } from './services/docupipePipeline.js';
-
-type DocupipeConfigModule = {
-  DEFAULT_DOCUPIPE_BASE_URL: string;
-  resolveDocupipeBaseUrl(
-    env?: Partial<Record<string, string | undefined>> | NodeJS.ProcessEnv
-  ): string;
-  assertDocupipeBaseUrl(url: string, source?: string | undefined): string;
-};
-
-const require = createRequire(import.meta.url);
-const docupipeConfigPath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  '..',
-  'shared',
-  'config',
-  'docupipe.js'
-);
-const { resolveDocupipeBaseUrl } = require(docupipeConfigPath) as DocupipeConfigModule;
+import { DOCUPIPE_BASE_URL } from './config/docupipe.js';
 
 dotenv.config();
 
@@ -39,7 +17,7 @@ const logger = pino({ name: 'worker', level: process.env.LOG_LEVEL ?? 'info' });
 async function bootstrap() {
   const port = Number(process.env.WORKER_PORT ?? 8081);
   const app = express();
-  const docupipeBaseUrl = resolveDocupipeBaseUrl(process.env);
+  const docupipeBaseUrl = DOCUPIPE_BASE_URL;
 
   app.use(express.json());
   app.use(

@@ -1,28 +1,6 @@
 import https from 'node:https';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { URL, fileURLToPath } from 'node:url';
 
-type DocupipeConfigModule = {
-  DEFAULT_DOCUPIPE_BASE_URL: string;
-  resolveDocupipeBaseUrl(
-    env?: Partial<Record<string, string | undefined>> | NodeJS.ProcessEnv
-  ): string;
-  assertDocupipeBaseUrl(url: string, source?: string | undefined): string;
-};
-
-const require = createRequire(import.meta.url);
-const docupipeConfigPath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  '..',
-  '..',
-  'shared',
-  'config',
-  'docupipe.js'
-);
-const { resolveDocupipeBaseUrl } = require(docupipeConfigPath) as DocupipeConfigModule;
+import { docupipeUrl } from '../config/docupipe.js';
 
 type HttpMethod = 'GET' | 'POST';
 
@@ -63,7 +41,6 @@ type StandardizationPayload = {
   [key: string]: unknown;
 };
 
-const BASE_URL = resolveDocupipeBaseUrl(process.env);
 const API_KEY = process.env.DOCUPIPE_API_KEY;
 
 function ensureApiKey(): string {
@@ -76,7 +53,7 @@ function ensureApiKey(): string {
 async function requestJson<T = Record<string, unknown>>({ method, path, body }: RequestOptions): Promise<T> {
   ensureApiKey();
   const dataBuffer = body ? Buffer.from(JSON.stringify(body)) : null;
-  const url = new URL(path, BASE_URL);
+  const url = docupipeUrl(path);
 
   return await new Promise<T>((resolve, reject) => {
     const req = https.request(

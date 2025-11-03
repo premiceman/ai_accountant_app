@@ -1,11 +1,16 @@
 const { setTimeout: delay } = require('node:timers/promises');
 const { config } = require('../config');
+const {
+  DOCUPIPE_WORKFLOW_ID,
+  docupipeUrl,
+} = require('../../config/docupipe');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('docupipe');
 
 async function submitWorkflow({ fileUrl, typeHint }) {
-  const response = await fetch(`${config.docupipe.baseUrl}/workflows/${config.docupipe.workflowId}/dispatch`, {
+  const dispatchUrl = docupipeUrl(`/workflows/${DOCUPIPE_WORKFLOW_ID}/dispatch`);
+  const response = await fetch(dispatchUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -24,7 +29,8 @@ async function submitWorkflow({ fileUrl, typeHint }) {
 async function pollWorkflow(runId) {
   const deadline = Date.now() + config.docupipe.pollTimeoutMs;
   while (Date.now() < deadline) {
-    const response = await fetch(`${config.docupipe.baseUrl}/workflow-runs/${runId}`, {
+    const pollUrl = docupipeUrl(`/workflow-runs/${runId}`);
+    const response = await fetch(pollUrl, {
       headers: { Authorization: `Bearer ${config.docupipe.apiKey}` },
       signal: AbortSignal.timeout(config.docupipe.connectTimeoutMs),
     });

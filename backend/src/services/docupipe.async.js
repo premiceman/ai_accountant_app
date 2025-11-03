@@ -1,15 +1,14 @@
 'use strict';
 const https = require('https');
-const { resolveDocupipeBaseUrl } = require('../../../shared/config/docupipe');
+const { docupipeUrl } = require('../config/docupipe');
 
-const BASE_URL = resolveDocupipeBaseUrl(process.env);
 const API_KEY  = process.env.DOCUPIPE_API_KEY;
 
 function requestJson(method, path, body) {
   return new Promise((resolve, reject) => {
     if (!API_KEY) return reject(new Error('DOCUPIPE_API_KEY not set'));
     const data = body ? Buffer.from(JSON.stringify(body)) : null;
-    const url = new URL(path, BASE_URL);
+    const url = docupipeUrl(path);
     const req = https.request(url, {
       method,
       headers: {
