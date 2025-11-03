@@ -6,10 +6,12 @@ const UploadedDocument = require('../models/UploadedDocument');
 const DocumentResult = require('../models/DocumentResult');
 const { mongoose } = require('../models');
 const { config } = require('../config');
-const { runWorkflow } = require('../services/docupipe');
+const { postDocumentWithWorkflow, pollJob, getStandardization } = require('../services/docupipe');
 const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
 const { badRequest, notFound } = require('../utils/errors');
 const { sha256 } = require('../utils/hashing');
+const { resolveDocTypeFromSchema } = require('../utils/docType');
+const { createLogger } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -19,6 +21,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES },
 });
+
+const logger = createLogger('dashboard:documents');
 
 function unwrapPrimitive(value) {
   if (value === null || value === undefined) return null;
@@ -97,6 +101,71 @@ function extractDocumentPayload(result) {
     return data.document.standardized || data.document.payload || data.document;
   }
   return data.standardized || data.payload || data;
+}
+
+function extractStandardizationMetadata(stdJson) {
+  if (!stdJson || typeof stdJson !== 'object') {
+    return {
+      schemaId: null,
+      schemaName: null,
+      standardizationId: null,
+      documentId: null,
+      status: null,
+    };
+  }
+
+  const schemaId = firstStringCandidate(
+    stdJson.schemaId,
+    stdJson.schema_id,
+    stdJson.data?.schemaId,
+    stdJson.data?.schema_id,
+    stdJson.meta?.schemaId,
+    stdJson.meta?.schema_id,
+    stdJson.document?.schemaId,
+    stdJson.document?.schema_id
+  );
+  const schemaName = firstStringCandidate(
+    stdJson.schemaName,
+    stdJson.schema_name,
+    stdJson.data?.schemaName,
+    stdJson.data?.schema_name,
+    stdJson.meta?.schemaName,
+    stdJson.meta?.schema_name,
+    stdJson.document?.schemaName,
+    stdJson.document?.schema_name
+  );
+  const standardizationId = firstStringCandidate(
+    stdJson.standardizationId,
+    stdJson.standardisationId,
+    stdJson.id,
+    stdJson.data?.standardizationId,
+    stdJson.data?.standardisationId,
+    stdJson.data?.id,
+    stdJson.document?.standardizationId,
+    stdJson.document?.standardisationId,
+    stdJson.document?.id
+  );
+  const documentId = firstStringCandidate(
+    stdJson.documentId,
+    stdJson.data?.documentId,
+    stdJson.meta?.documentId,
+    stdJson.document?.documentId,
+    stdJson.document?.id,
+    standardizationId
+  );
+  const status = firstStringCandidate(
+    stdJson.status,
+    stdJson.data?.status,
+    stdJson.meta?.status
+  );
+
+  return {
+    schemaId: schemaId || null,
+    schemaName: schemaName || null,
+    standardizationId: standardizationId || null,
+    documentId: documentId || null,
+    status: status || null,
+  };
 }
 
 function normaliseDocTypeHint(value) {
@@ -257,7 +326,9 @@ function formatDocupipe(doc) {
     standardizationId: info.standardizationId || null,
     documentType: info.documentType || null,
     classification: info.classification || null,
-    schema: info.schema || null,
+    schema: info.schema || info.schemaName || null,
+    schemaId: info.schemaId || null,
+    schemaName: info.schemaName || info.schema || null,
     catalogueKey: info.catalogueKey || null,
     status: info.status || null,
   };
@@ -484,125 +555,214 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
   try {
     const duplicate = await UploadedDocument.findOne({ userId, contentHash }).lean();
     if (duplicate) {
-      const response =
-        duplicate.docType === 'payslip'
-          ? formatPayslipResponse(duplicate)
-          : formatStatementResponse(duplicate);
+      const docResultId = duplicate.docupipe?.documentResultId || duplicate.raw?.documentResultId || null;
+      let docResult = null;
+      if (docResultId) {
+        const query = { _id: docResultId };
+        if (mongoose.Types.ObjectId.isValid(userId)) {
+          query.userId = new mongoose.Types.ObjectId(userId);
+        }
+        docResult = await DocumentResult.findOne(query).lean();
+      }
+
+      const type = docResult?.type || duplicate.docType || 'unknown';
+      const standardizationId =
+        docResult?.standardizationId
+        || duplicate.docupipe?.standardizationId
+        || duplicate.docupipe?.documentId
+        || duplicate.raw?.standardizationId
+        || null;
+      const documentId =
+        docResult?.documentId
+        || duplicate.docupipe?.documentId
+        || duplicate.docupipe?.standardizationId
+        || duplicate.raw?.documentId
+        || null;
+      const schemaId =
+        docResult?.schemaId
+        || duplicate.docupipe?.schemaId
+        || duplicate.raw?.schemaId
+        || null;
+      const schemaName =
+        docResult?.schemaName
+        || duplicate.docupipe?.schemaName
+        || duplicate.docupipe?.schema
+        || duplicate.raw?.schemaName
+        || null;
+
       return res.status(200).json({
         status: 'duplicate',
-        docType: duplicate.docType,
-        month: duplicate.month,
-        document: response,
+        id: docResult ? String(docResult._id) : null,
+        type,
+        standardizationId,
+        documentId,
+        schemaId,
+        schemaName,
         message: 'This document was already processed.',
       });
+    }
+
+    if (!config.docupipe?.workflowId) {
+      throw badRequest('DocuPipe workflow is not configured');
     }
 
     const fileId = randomUUID();
     r2Key = buildDashboardKey({ userId, fileId, originalName: originalname });
     await writeBuffer(r2Key, buffer, mimetype || 'application/pdf');
     const presignedUrl = await createPresignedGet({ key: r2Key, expiresIn: 60 * 15 });
-    const typeHint = req.body?.typeHint ? String(req.body.typeHint) : undefined;
-    let workflowResult;
+
+    let submission;
     try {
-      workflowResult = await runWorkflow({ fileUrl: presignedUrl, filename: originalname, typeHint, poll: true });
+      submission = await postDocumentWithWorkflow({ fileUrl: presignedUrl, filename: originalname });
     } catch (error) {
       await deleteObject(r2Key).catch(() => {});
       throw error;
     }
 
-    const payload = extractDocumentPayload(workflowResult);
-    const initialDocupipeSummary = extractDocupipeSummary(workflowResult);
-    const docType = detectDocType(workflowResult, {
-      payload,
-      typeHint,
-      docupipe: initialDocupipeSummary,
-    });
-    if (!docType) {
+    const { initial, uploadJobId, stdJobId, stdId } = submission;
+    if (!stdId) {
       await deleteObject(r2Key).catch(() => {});
-      throw badRequest('Docupipe did not return a supported document type');
+      const stdError = new Error('DocuPipe did not return a standardization id');
+      stdError.status = 502;
+      throw stdError;
     }
 
-    let parsed;
+    let jobResult = null;
+    const jobToPoll = stdJobId || uploadJobId;
+    if (jobToPoll) {
+      try {
+        jobResult = await pollJob(jobToPoll);
+      } catch (error) {
+        await deleteObject(r2Key).catch(() => {});
+        throw error;
+      }
+    }
+
+    let standardizationJson;
     try {
-      parsed = docType === 'payslip' ? parsePayslip(payload) : parseStatement(payload);
+      standardizationJson = await getStandardization(stdId);
     } catch (error) {
       await deleteObject(r2Key).catch(() => {});
       throw error;
+    }
+
+    if (!standardizationJson || typeof standardizationJson !== 'object') {
+      await deleteObject(r2Key).catch(() => {});
+      const emptyError = new Error('DocuPipe standardization payload was empty');
+      emptyError.status = 502;
+      throw emptyError;
+    }
+
+    const metadata = extractStandardizationMetadata(standardizationJson);
+    const docType = resolveDocTypeFromSchema(standardizationJson);
+    const payload = extractDocumentPayload(standardizationJson);
+
+    let parsed = null;
+    if (docType === 'payslip' || docType === 'statement') {
+      try {
+        parsed = docType === 'payslip' ? parsePayslip(payload) : parseStatement(payload);
+      } catch (error) {
+        logger.warn('Failed to parse DocuPipe standardization payload', {
+          error: error.message,
+          docType,
+          standardizationId: metadata.standardizationId || stdId,
+        });
+        parsed = null;
+      }
     }
 
     const rawDocupipeStatus =
-      workflowResult?.docupipe?.status
-      || workflowResult?.finalJob?.status
-      || workflowResult?.finalJob?.data?.status
+      metadata.status
+      || jobResult?.status
+      || jobResult?.data?.status
       || null;
     const docupipeStatus = normaliseDocupipeStatus(rawDocupipeStatus, {
-      hasStandardizationJob: Boolean(initialDocupipeSummary.standardizationJobId),
+      hasStandardizationJob: Boolean(stdJobId),
     });
+
     const userObjectId = mongoose.Types.ObjectId.isValid(userId)
       ? new mongoose.Types.ObjectId(userId)
       : undefined;
-    const finalJobPayload = workflowResult.finalJob
-      || (workflowResult.data ? { result: workflowResult.data } : null);
 
     const documentResult = await DocumentResult.create({
       userId: userObjectId,
       fileUrl: buildDocumentResultFileUrl(r2Key),
       filename: originalname,
-      uploadJobId: initialDocupipeSummary.uploadJobId || workflowResult?.docupipe?.uploadJobId || null,
-      standardizationJobId:
-        initialDocupipeSummary.standardizationJobId || workflowResult?.docupipe?.standardizationJobId || null,
-      standardizationId: initialDocupipeSummary.standardizationId || workflowResult?.docupipe?.standardizationId || null,
-      initialResponse: workflowResult.initialResponse,
-      finalJob: finalJobPayload,
+      uploadJobId: uploadJobId || null,
+      standardizationJobId: stdJobId || null,
+      standardizationId: metadata.standardizationId || stdId || null,
+      documentId: metadata.documentId || null,
+      schemaId: metadata.schemaId || null,
+      schemaName: metadata.schemaName || null,
+      type: docType,
+      initialResponse: initial,
+      finalJob: jobResult,
+      standardization: standardizationJson,
       status: docupipeStatus,
     });
 
     const docupipeInfo = {
-      ...workflowResult.docupipe,
-      ...initialDocupipeSummary,
       documentResultId: documentResult._id,
+      uploadJobId: documentResult.uploadJobId || uploadJobId || null,
+      standardizationJobId: documentResult.standardizationJobId || stdJobId || null,
+      standardizationId: documentResult.standardizationId || metadata.standardizationId || stdId || null,
+      documentId: documentResult.documentId || metadata.documentId || null,
+      schemaId: documentResult.schemaId || metadata.schemaId || null,
+      schemaName: documentResult.schemaName || metadata.schemaName || null,
+      documentType: docType,
       status: documentResult.status,
       fileUrl: documentResult.fileUrl,
     };
-    docupipeInfo.uploadJobId = documentResult.uploadJobId || docupipeInfo.uploadJobId || null;
-    docupipeInfo.standardizationJobId =
-      documentResult.standardizationJobId || docupipeInfo.standardizationJobId || null;
-    docupipeInfo.standardizationId = documentResult.standardizationId || docupipeInfo.standardizationId || null;
-    docupipeInfo.jobId = docupipeInfo.standardizationJobId || docupipeInfo.uploadJobId || docupipeInfo.jobId || null;
-    docupipeInfo.documentId = docupipeInfo.standardizationId || docupipeInfo.documentId || null;
-    workflowResult.docupipe = docupipeInfo;
+    docupipeInfo.schema = docupipeInfo.schemaName;
+    docupipeInfo.jobId =
+      docupipeInfo.standardizationJobId
+      || docupipeInfo.uploadJobId
+      || null;
 
-    const record = await UploadedDocument.findOneAndUpdate(
+    await UploadedDocument.findOneAndUpdate(
       { userId, contentHash },
       {
         userId,
         fileId,
         docType,
-        month: parsed.month,
-        periodStart: parsed.periodStart,
-        periodEnd: parsed.periodEnd,
-        payDate: parsed.payDate || null,
+        month: parsed?.month || null,
+        periodStart: parsed?.periodStart || null,
+        periodEnd: parsed?.periodEnd || null,
+        payDate: parsed?.payDate || null,
         contentHash,
         r2Key,
         originalName: originalname,
         contentType: mimetype,
         size,
-        metadata: parsed.metadata,
-        analytics: parsed.analytics,
-        transactions: parsed.transactions || [],
+        metadata: parsed?.metadata || {},
+        analytics: parsed?.analytics || {},
+        transactions: parsed?.transactions || [],
         docupipe: docupipeInfo,
-        raw: { documentResultId: documentResult._id },
+        raw: {
+          documentResultId: documentResult._id,
+          standardizationId: docupipeInfo.standardizationId || null,
+          documentId: docupipeInfo.documentId || null,
+          schemaId: docupipeInfo.schemaId || null,
+          schemaName: docupipeInfo.schemaName || null,
+          standardization: standardizationJson,
+        },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
-    const response = docType === 'payslip' ? formatPayslipResponse(record) : formatStatementResponse(record);
+    logger.info(
+      `[DocuPipe] uploadJobId=${docupipeInfo.uploadJobId || 'null'}, stdJobId=${docupipeInfo.standardizationJobId || 'null'}, stdId=${docupipeInfo.standardizationId || 'null'}, schemaId=${docupipeInfo.schemaId || 'null'}, schemaName=${
+        docupipeInfo.schemaName || 'null'
+      }, type=${docType}`
+    );
+
     return res.status(201).json({
-      status: 'processed',
-      docType,
-      month: record.month,
-      document: response,
-      message: 'Document processed successfully.',
+      id: String(documentResult._id),
+      type: docType,
+      standardizationId: docupipeInfo.standardizationId || null,
+      documentId: docupipeInfo.documentId || null,
+      schemaId: docupipeInfo.schemaId || null,
+      schemaName: docupipeInfo.schemaName || null,
     });
   } catch (error) {
     if (r2Key) {
@@ -674,16 +834,23 @@ router.get('/documents/:fileId/json', async (req, res, next) => {
 
     let jsonPayload = null;
     if (docResult) {
-      const finalCandidate =
-        docResult.finalJob?.result
-        || docResult.finalJob?.data
-        || docResult.finalJob?.output
-        || docResult.finalJob;
-      if (finalCandidate && typeof finalCandidate === 'object') {
-        jsonPayload = finalCandidate;
+      if (docResult.standardization && typeof docResult.standardization === 'object') {
+        jsonPayload = docResult.standardization;
       } else if (docResult.initialResponse && typeof docResult.initialResponse === 'object') {
         jsonPayload = docResult.initialResponse;
+      } else {
+        const finalCandidate =
+          docResult.finalJob?.result
+          || docResult.finalJob?.data
+          || docResult.finalJob?.output
+          || docResult.finalJob;
+        if (finalCandidate && typeof finalCandidate === 'object') {
+          jsonPayload = finalCandidate;
+        }
       }
+    }
+    if (!jsonPayload && document.raw?.standardization) {
+      jsonPayload = document.raw.standardization;
     }
     if (!jsonPayload) {
       jsonPayload = document.raw && Object.keys(document.raw || {}).length ? document.raw : null;
@@ -696,6 +863,10 @@ router.get('/documents/:fileId/json', async (req, res, next) => {
           uploadJobId: docResult.uploadJobId,
           standardizationJobId: docResult.standardizationJobId,
           standardizationId: docResult.standardizationId,
+          documentId: docResult.documentId || null,
+          schemaId: docResult.schemaId || null,
+          schemaName: docResult.schemaName || null,
+          type: docResult.type || null,
           createdAt: docResult.createdAt,
           updatedAt: docResult.updatedAt,
         }

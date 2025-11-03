@@ -52,7 +52,7 @@ async function requestJson(method, path, body, { timeoutMs, context } = {}) {
   }
 }
 
-function buildDocumentPayload({ fileUrl, buffer, filename, dataset = 'invoices', typeHint }) {
+function buildDocumentPayload({ fileUrl, fileBase64, buffer, filename, dataset = 'invoices', typeHint }) {
   const payload = {
     document: {},
     dataset,
@@ -61,6 +61,11 @@ function buildDocumentPayload({ fileUrl, buffer, filename, dataset = 'invoices',
 
   if (fileUrl) {
     payload.document.url = fileUrl;
+  } else if (fileBase64) {
+    payload.document.file = {
+      contents: String(fileBase64),
+      filename: filename || 'document.pdf',
+    };
   } else if (buffer) {
     payload.document.file = {
       contents: Buffer.isBuffer(buffer) ? buffer.toString('base64') : String(buffer),
@@ -77,9 +82,17 @@ function buildDocumentPayload({ fileUrl, buffer, filename, dataset = 'invoices',
   return payload;
 }
 
-async function submitWorkflow({ fileUrl, buffer, filename, dataset, typeHint }) {
+async function postDocumentWithWorkflow({
+  fileUrl,
+  fileBase64,
+  buffer,
+  filename,
+  dataset,
+  typeHint,
+}) {
   const payload = buildDocumentPayload({
     fileUrl,
+    fileBase64,
     buffer,
     filename,
     dataset: dataset || config.docupipe.dataset || 'invoices',
@@ -92,7 +105,8 @@ async function submitWorkflow({ fileUrl, buffer, filename, dataset, typeHint }) 
       context: {
         workflowId: config.docupipe.workflowId,
         fileUrl: fileUrl || null,
-        hasBuffer: Boolean(buffer),
+        hasBuffer: Boolean(buffer) || Boolean(fileBase64),
+        dataset: payload.dataset,
       },
     });
     if (!response?.jobId) {
@@ -100,12 +114,49 @@ async function submitWorkflow({ fileUrl, buffer, filename, dataset, typeHint }) 
       err.response = response;
       throw err;
     }
-    return response;
+
+    const workflowResponse = response.workflowResponse || {};
+    const standardizeStep =
+      workflowResponse.standardizeStep
+      || workflowResponse.standardiseStep
+      || {};
+    const standardizationJobIds =
+      standardizeStep.standardizationJobIds
+      || standardizeStep.standardisationJobIds;
+    const standardizationIds =
+      standardizeStep.standardizationIds
+      || standardizeStep.standardisationIds;
+
+    const stdJobId = Array.isArray(standardizationJobIds)
+      ? standardizationJobIds[0]
+      : standardizeStep.standardizationJobId
+        || standardizeStep.standardisationJobId
+        || null;
+    const stdId = Array.isArray(standardizationIds)
+      ? standardizationIds[0]
+      : standardizeStep.standardizationId
+        || standardizeStep.standardisationId
+        || null;
+
+    const uploadJobId = response.jobId || null;
+
+    logger.info('DocuPipe workflow submitted', {
+      uploadJobId,
+      standardizationJobId: stdJobId,
+      standardizationId: stdId,
+    });
+
+    return {
+      initial: response,
+      uploadJobId,
+      stdJobId,
+      stdId,
+    };
   } catch (error) {
     logger.error('DocuPipe upload failed', {
       workflowId: config.docupipe.workflowId,
       fileUrl: fileUrl || null,
-      hasBuffer: Boolean(buffer),
+      hasBuffer: Boolean(buffer) || Boolean(fileBase64),
       error: error.message,
     });
     throw error;
@@ -116,15 +167,18 @@ async function getJob(jobId) {
   return requestJson('GET', `/job/${encodeURIComponent(jobId)}`);
 }
 
-async function pollJob(jobId, { intervalMs = config.docupipe.pollIntervalMs || 1500, timeoutMs = config.docupipe.pollTimeoutMs || 120000 } = {}) {
+async function pollJob(
+  jobId,
+  { intervalMs = config.docupipe.pollIntervalMs || 1500, timeoutMs = config.docupipe.pollTimeoutMs || 120000 } = {}
+) {
   const start = Date.now();
   for (;;) {
     const job = await getJob(jobId);
-    const status = job?.status || job?.data?.status;
-    if (status === 'completed') {
+    const status = (job?.status || job?.data?.status || '').toLowerCase();
+    if (status === 'completed' || status === 'complete' || status === 'succeeded' || status === 'success') {
       return job;
     }
-    if (status === 'failed') {
+    if (status === 'failed' || status === 'error' || status === 'errored') {
       const error = new Error(`DocuPipe job failed: ${jobId}`);
       error.job = job;
       throw error;
@@ -253,22 +307,16 @@ function summariseDocupipeResult(result) {
 }
 
 async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll = true }) {
-  const submission = await submitWorkflow({ fileUrl, buffer, filename, dataset, typeHint });
-  const uploadJobId = submission.jobId || null;
-  const workflowResponse = submission.workflowResponse || {};
-  const standardizeStep =
-    workflowResponse.standardizeStep
-    || workflowResponse.standardiseStep
-    || {};
-  const standardizationJobIds = standardizeStep.standardizationJobIds || standardizeStep.standardisationJobIds;
-  const standardizationIds = standardizeStep.standardizationIds || standardizeStep.standardisationIds;
-
-  const stdJobId = Array.isArray(standardizationJobIds)
-    ? standardizationJobIds[0]
-    : standardizeStep.standardizationJobId || standardizeStep.standardisationJobId || null;
-  const stdId = Array.isArray(standardizationIds)
-    ? standardizationIds[0]
-    : standardizeStep.standardizationId || standardizeStep.standardisationId || null;
+  const submission = await postDocumentWithWorkflow({
+    fileUrl,
+    buffer,
+    filename,
+    dataset,
+    typeHint,
+  });
+  const uploadJobId = submission.uploadJobId || null;
+  const stdJobId = submission.stdJobId || null;
+  const stdId = submission.stdId || null;
 
   let finalJob = null;
   let standardization = null;
@@ -305,7 +353,7 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
   const resolvedStatus = status || (stdJobId ? 'running' : 'completed');
 
   const docupipeInfo = {
-    documentId: submission.documentId || null,
+    documentId: submission.initial?.documentId || null,
     uploadJobId,
     standardizationJobId: stdJobId || null,
     standardizationId: stdId || null,
@@ -319,13 +367,15 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
   return {
     data: standardization || null,
     docupipe: docupipeInfo,
-    initialResponse: submission,
+    initialResponse: submission.initial,
     finalJob,
   };
 }
 
 module.exports = {
+  postDocumentWithWorkflow,
   runWorkflow,
   pollJob,
   getJob,
+  getStandardization,
 };
