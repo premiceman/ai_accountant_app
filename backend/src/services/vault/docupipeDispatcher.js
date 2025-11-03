@@ -4,6 +4,8 @@ const path = require('path');
 const VaultDocumentJob = require('../../../models/VaultDocumentJob');
 const DocumentInsight = require('../../../models/DocumentInsight');
 const { getObject, putObject } = require('../../lib/r2');
+const { createLogger } = require('../../lib/logger');
+const { DOCUPIPE_WORKFLOW_ID } = require('../../config/docupipe');
 const {
   postDocument,
   startStandardize,
@@ -11,6 +13,8 @@ const {
   getStandardization,
 } = require('../docupipe.async');
 const { normaliseDateFields } = require('../documents/dateFieldNormaliser');
+
+const logger = createLogger({ name: 'docupipe-dispatcher' });
 
 const POLL_INITIAL_DELAY = 750;
 const POLL_MAX_DELAY = 8000;
@@ -28,7 +32,10 @@ function cloneStandardizationData(data) {
   try {
     return JSON.parse(JSON.stringify(data));
   } catch (error) {
-    console.warn('[vault:docupipeDispatcher] failed to clone standardization payload', error);
+    logger.warn(
+      { error: error?.message, stack: error?.stack },
+      'Failed to clone DocuPipe standardisation payload'
+    );
     return data;
   }
 }
@@ -159,6 +166,7 @@ async function waitForJob(jobId, { label }) {
       const err = new Error(job?.error || `${label || 'Job'} failed`);
       err.code = 'DOCUPIPE_JOB_FAILED';
       err.job = job;
+      logger.error({ jobId, label, error: err.message, docupipe: job?.payload }, 'DocuPipe job failed while waiting');
       throw err;
     }
     if (job?.status === 'completed') {
@@ -276,6 +284,16 @@ async function failJob(job, error) {
   const entry = { message, code, at: new Date() };
   const nextErrors = Array.isArray(job.errors) ? job.errors.slice() : [];
   nextErrors.push(entry);
+  logger.error(
+    {
+      jobId: job?._id,
+      fileId: job?.fileId,
+      code,
+      message,
+      stack: error?.stack,
+    },
+    'DocuPipe job failed'
+  );
   await VaultDocumentJob.updateOne(
     { _id: job._id },
     {
@@ -286,6 +304,14 @@ async function failJob(job, error) {
       },
     }
   );
+}
+
+function resolveWorkflowId(job) {
+  return job?.docupipe?.workflowId || DOCUPIPE_WORKFLOW_ID;
+}
+
+function resolveTypeHint(job) {
+  return job?.docupipe?.typeHint || job?.classification?.key || job?.classification?.label || null;
 }
 
 async function performDocupipe(job) {
@@ -301,57 +327,76 @@ async function performDocupipe(job) {
     const buffer = await readR2Buffer(pdfKey);
 
     const filename = job.originalName || path.basename(pdfKey) || 'document.pdf';
-    const schemaId = job.docupipe?.schemaId || job.classification?.schemaId;
-    if (!schemaId) {
-      throw new Error('Schema ID missing for DocuPipe processing');
+    const workflowId = resolveWorkflowId(job);
+    if (!workflowId) {
+      throw new Error('Workflow ID missing for DocuPipe processing');
     }
+    const typeHint = resolveTypeHint(job);
 
     await markJobState(job, 'processing', { note: 'Submitting to DocuPipe' });
 
-    const { documentId, jobId: parseJobId } = await postDocument({ buffer, filename });
+    const dispatch = await postDocument({ buffer, filename, typeHint });
+    const runId = dispatch?.runId || dispatch?.jobId || dispatch?.documentId;
+    const parseJobId = dispatch?.jobId || runId;
+    if (!runId) {
+      throw new Error('DocuPipe workflow dispatch did not return run id');
+    }
+
+    logger.info(
+      { jobId: job?._id, fileId: job?.fileId, runId, typeHint },
+      'DocuPipe workflow dispatched'
+    );
 
     await VaultDocumentJob.updateOne(
       { _id: job._id },
       {
         $set: {
           state: 'processing',
-          'docupipe.documentId': documentId,
+          'docupipe.documentId': runId,
           'docupipe.parseJobId': parseJobId,
-          'docupipe.schemaId': schemaId,
+          'docupipe.workflowId': workflowId,
+          'docupipe.runId': runId,
+          'docupipe.typeHint': typeHint || null,
           updatedAt: new Date(),
         },
         $push: { audit: { state: 'processing', at: new Date(), note: 'DocuPipe parse started' } },
       }
     );
 
-    await waitForJob(parseJobId, { label: 'DocuPipe parse job' });
+    await waitForJob(parseJobId, { label: 'DocuPipe workflow job' });
+    logger.info(
+      { jobId: job?._id, fileId: job?.fileId, runId },
+      'DocuPipe workflow processing complete'
+    );
 
     const stdRequest = await startStandardize({
-      documentId,
-      schemaId,
-      stdVersion: job.docupipe?.stdVersion || process.env.DOCUPIPE_STD_VERSION,
+      documentId: runId,
+      workflowId,
+      typeHint,
     });
 
     const stdJobId = stdRequest?.jobId;
     const standardizationId = Array.isArray(stdRequest?.standardizationIds)
       ? stdRequest.standardizationIds[0]
       : stdRequest?.standardizationIds;
+    const effectiveStdJobId = stdJobId || runId;
+    const effectiveStandardizationId = standardizationId || runId;
 
     await VaultDocumentJob.updateOne(
       { _id: job._id },
       {
         $set: {
-          'docupipe.stdJobId': stdJobId,
-          'docupipe.standardizationId': standardizationId,
+          'docupipe.stdJobId': effectiveStdJobId,
+          'docupipe.standardizationId': effectiveStandardizationId,
           updatedAt: new Date(),
         },
         $push: { audit: { state: 'processing', at: new Date(), note: 'DocuPipe standardisation started' } },
       }
     );
 
-    await waitForJob(stdJobId, { label: 'DocuPipe standardisation job' });
+    await waitForJob(effectiveStdJobId, { label: 'DocuPipe standardisation job' });
 
-    const std = await getStandardization(standardizationId);
+    const std = await getStandardization(effectiveStandardizationId);
     if (!std || typeof std.data === 'undefined') {
       throw new Error('DocuPipe returned no data');
     }
@@ -364,6 +409,10 @@ async function performDocupipe(job) {
     const { data: processedData, missingRequiredFields } = prepareStandardizationResult(job, std.data);
 
     await writeJsonToR2(jsonKey, processedData);
+    logger.info(
+      { jobId: job?._id, fileId: job?.fileId, runId, jsonKey },
+      'DocuPipe workflow results stored'
+    );
 
     if (Array.isArray(missingRequiredFields) && missingRequiredFields.length > 0) {
       job.storage = job.storage || {};
@@ -379,8 +428,21 @@ async function performDocupipe(job) {
     }
 
     await completeJob(job, { jsonKey, data: processedData });
+    logger.info(
+      { jobId: job?._id, fileId: job?.fileId, runId },
+      'DocuPipe workflow job completed successfully'
+    );
   } catch (error) {
-    console.error('[vault:docupipeDispatcher] job failed', job?.fileId, error);
+    logger.error(
+      {
+        jobId: job?._id,
+        fileId: job?.fileId,
+        error: error?.message,
+        code: error?.code,
+        stack: error?.stack,
+      },
+      'DocuPipe workflow job encountered an error'
+    );
     await failJob(job, error);
   }
 }
@@ -389,7 +451,10 @@ function dispatch(job) {
   if (!job || !job._id) return;
   setImmediate(() => {
     performDocupipe(job).catch((err) => {
-      console.error('[vault:docupipeDispatcher] unhandled failure', err);
+      logger.error(
+        { error: err?.message, stack: err?.stack },
+        'DocuPipe dispatcher unhandled failure'
+      );
     });
   });
 }
