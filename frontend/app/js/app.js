@@ -25,6 +25,11 @@ const App = (() => {
     getMe: () => request('/api/v2/me'),
     uploadDocument: (formData) =>
       request('/api/v2/dashboard/documents', { method: 'POST', body: formData }),
+    getDashboardDocuments: () => request('/api/v2/dashboard/documents'),
+    getDashboardDocumentPreview: (fileId) =>
+      request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/preview`),
+    getDashboardDocumentJson: (fileId) =>
+      request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/json`),
     getDashboardAnalytics: (month) => {
       const query = month ? `?month=${encodeURIComponent(month)}` : '';
       return request(`/api/v2/dashboard/analytics${query}`);

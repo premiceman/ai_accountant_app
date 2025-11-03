@@ -4,8 +4,8 @@ const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
 const UploadedDocument = require('../models/UploadedDocument');
 const { runWorkflow } = require('../services/docupipe');
-const { writeBuffer, deleteObject } = require('../services/r2');
-const { badRequest } = require('../utils/errors');
+const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
+const { badRequest, notFound } = require('../utils/errors');
 const { sha256 } = require('../utils/hashing');
 
 const router = express.Router();
@@ -389,6 +389,100 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
     if (r2Key) {
       await deleteObject(r2Key).catch(() => {});
     }
+    return next(error);
+  }
+});
+
+router.get('/documents', async (req, res, next) => {
+  const userId = req.user.id;
+  try {
+    const documents = await UploadedDocument.find({ userId })
+      .sort({ createdAt: -1 })
+      .select({
+        fileId: 1,
+        docType: 1,
+        month: 1,
+        originalName: 1,
+        payDate: 1,
+        periodStart: 1,
+        periodEnd: 1,
+        size: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .lean();
+
+    const response = documents.map((doc) => ({
+      fileId: doc.fileId,
+      docType: doc.docType,
+      month: doc.month,
+      originalName: doc.originalName || null,
+      payDate: doc.payDate || null,
+      periodStart: doc.periodStart || null,
+      periodEnd: doc.periodEnd || null,
+      size: doc.size ?? null,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    }));
+
+    return res.json({ documents: response });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/documents/:fileId/json', async (req, res, next) => {
+  const userId = req.user.id;
+  const fileId = String(req.params.fileId || '');
+
+  try {
+    const document = await UploadedDocument.findOne({ userId, fileId }).lean();
+    if (!document) {
+      throw notFound('Document not found');
+    }
+
+    return res.json({
+      fileId: document.fileId,
+      docType: document.docType,
+      month: document.month,
+      originalName: document.originalName || null,
+      payDate: document.payDate || null,
+      periodStart: document.periodStart || null,
+      periodEnd: document.periodEnd || null,
+      metadata: document.metadata || {},
+      analytics: document.analytics || {},
+      transactions: document.transactions || [],
+      raw: document.raw || null,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/documents/:fileId/preview', async (req, res, next) => {
+  const userId = req.user.id;
+  const fileId = String(req.params.fileId || '');
+
+  try {
+    const document = await UploadedDocument.findOne({ userId, fileId })
+      .select({ r2Key: 1, originalName: 1, contentType: 1 })
+      .lean();
+    if (!document) {
+      throw notFound('Document not found');
+    }
+    if (!document.r2Key) {
+      throw notFound('Document preview is not available');
+    }
+
+    const url = await createPresignedGet({ key: document.r2Key, expiresIn: 60 * 5 });
+    return res.json({
+      url,
+      contentType: document.contentType || 'application/pdf',
+      originalName: document.originalName || 'document.pdf',
+    });
+  } catch (error) {
     return next(error);
   }
 });
