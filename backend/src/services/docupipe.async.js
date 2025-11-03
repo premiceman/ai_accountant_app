@@ -1,7 +1,8 @@
 'use strict';
 const https = require('https');
+const { resolveDocupipeBaseUrl } = require('../../../shared/config/docupipe');
 
-const BASE_URL = process.env.DOCUPIPE_BASE_URL || 'https://app.docupipe.ai';
+const BASE_URL = resolveDocupipeBaseUrl(process.env);
 const API_KEY  = process.env.DOCUPIPE_API_KEY;
 
 function requestJson(method, path, body) {

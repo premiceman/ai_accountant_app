@@ -29,6 +29,7 @@ async function bootstrap() {
   const server = http.createServer(app);
   server.listen(config.app.port, () => {
     console.log(`🚀 API listening on port ${config.app.port}`);
+    console.log(`📄 Docupipe base URL: ${config.docupipe.baseUrl}`);
   });
 }
 

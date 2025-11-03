@@ -1,4 +1,5 @@
 const assert = require('node:assert');
+const { resolveDocupipeBaseUrl } = require('../../../shared/config/docupipe');
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -32,7 +33,7 @@ const config = {
     publicHost: optionalEnv('R2_PUBLIC_HOST'),
   },
   docupipe: {
-    baseUrl: requireEnv('DOCUPIPE_BASE_URL').replace(/\/$/, ''),
+    baseUrl: resolveDocupipeBaseUrl(process.env),
     apiKey: requireEnv('DOCUPIPE_API_KEY'),
     workflowId: requireEnv('DOCUPIPE_WORKFLOW_ID'),
     connectTimeoutMs: Number(optionalEnv('DOCUPIPE_CONNECT_TIMEOUT_MS', '5000')),
