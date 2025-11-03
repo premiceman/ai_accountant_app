@@ -17,6 +17,7 @@ const UploadedDocumentSchema = new mongoose.Schema(
     metadata: { type: Object, default: () => ({}) },
     analytics: { type: Object, default: () => ({}) },
     transactions: { type: [Object], default: () => [] },
+    docupipe: { type: Object, default: () => ({}) },
     raw: { type: Object, default: () => ({}) },
   },
   {
