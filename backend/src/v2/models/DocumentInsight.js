@@ -14,6 +14,7 @@ const DocumentInsightSchema = new mongoose.Schema({
   contentHash: { type: String, required: true },
   sourceKey: { type: String, required: true },
   canonical: { type: Object, required: true },
+  docupipeRaw: { type: Object, default: null },
   lineage: {
     type: [{ path: String, provenance: ProvenanceSchema }],
     default: [],

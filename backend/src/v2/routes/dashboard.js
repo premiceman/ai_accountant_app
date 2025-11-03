@@ -4,7 +4,7 @@ const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
 const UploadedDocument = require('../models/UploadedDocument');
 const { runWorkflow } = require('../services/docupipe');
-const { writeBuffer, createPresignedGet, deleteObject } = require('../services/r2');
+const { writeBuffer, deleteObject } = require('../services/r2');
 const { badRequest } = require('../utils/errors');
 const { sha256 } = require('../utils/hashing');
 
@@ -332,18 +332,10 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
     const fileId = randomUUID();
     r2Key = buildDashboardKey({ userId, fileId, originalName: originalname });
     await writeBuffer(r2Key, buffer, mimetype || 'application/pdf');
-    let presignedUrl;
-    try {
-      presignedUrl = await createPresignedGet({ key: r2Key, expiresIn: 60 * 10 });
-    } catch (error) {
-      await deleteObject(r2Key).catch(() => {});
-      throw error;
-    }
-
     const typeHint = req.body?.typeHint ? String(req.body.typeHint) : undefined;
     let workflowResult;
     try {
-      workflowResult = await runWorkflow({ fileUrl: presignedUrl, typeHint });
+      workflowResult = await runWorkflow({ buffer, filename: originalname, typeHint });
     } catch (error) {
       await deleteObject(r2Key).catch(() => {});
       throw error;
@@ -380,7 +372,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         metadata: parsed.metadata,
         analytics: parsed.analytics,
         transactions: parsed.transactions || [],
-        raw: payload,
+        raw: workflowResult,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();

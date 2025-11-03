@@ -5,7 +5,7 @@ const { sha256 } = require('../../utils/hashing');
 const { badRequest } = require('../../utils/errors');
 const { queue } = require('../ingestQueue');
 const { runWorkflow } = require('../docupipe');
-const { objectKeyForUpload, readObjectBuffer, writeBuffer, createPresignedGet } = require('../r2');
+const { objectKeyForUpload, readObjectBuffer, writeBuffer } = require('../r2');
 const { validatePayslip, validateStatement } = require('../../validation/schemas');
 const DocumentInsight = require('../../models/DocumentInsight');
 const TransactionV2 = require('../../models/TransactionV2');
@@ -163,7 +163,7 @@ function resolveTaxYear(isoDate) {
   return `${year}-${String(endYear).slice(-2)}`;
 }
 
-async function writeDocumentInsight({ userId, batchId, canonical, contentHash, sourceKey }) {
+async function writeDocumentInsight({ userId, batchId, canonical, contentHash, sourceKey, docupipeRaw }) {
   const lineage = deriveLineage(canonical);
   await DocumentInsight.findOneAndUpdate(
     { userId, fileId: canonical.fileId },
@@ -175,6 +175,7 @@ async function writeDocumentInsight({ userId, batchId, canonical, contentHash, s
       contentHash,
       sourceKey,
       canonical,
+      docupipeRaw: docupipeRaw ?? null,
       lineage,
       updatedAt: new Date(),
     },
@@ -183,7 +184,8 @@ async function writeDocumentInsight({ userId, batchId, canonical, contentHash, s
 }
 
 function detectDocType(docupipePayload) {
-  const doc = docupipePayload?.documents?.[0] || docupipePayload?.document || docupipePayload;
+  const source = docupipePayload?.data ?? docupipePayload;
+  const doc = source?.documents?.[0] || source?.document || source;
   const type = (doc.documentType || doc.type || doc.category || '').toLowerCase();
   if (type.includes('payslip')) return 'payslip';
   if (type.includes('statement')) return 'statement';
@@ -197,18 +199,32 @@ function isZipBuffer(buffer) {
   return buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04;
 }
 
-async function processCanonical(userId, batchId, canonical, sourceKey) {
+async function processCanonical(userId, batchId, canonical, sourceKey, docupipeRaw) {
   if (canonical.docType === 'payslip') {
     validatePayslip(canonical);
     ensurePayslipInvariants(canonical);
-    await writeDocumentInsight({ userId, batchId, canonical, contentHash: canonical.contentHash, sourceKey });
+    await writeDocumentInsight({
+      userId,
+      batchId,
+      canonical,
+      contentHash: canonical.contentHash,
+      sourceKey,
+      docupipeRaw,
+    });
     await persistPayslip(userId, canonical);
     return;
   }
   if (canonical.docType === 'statement') {
     validateStatement(canonical);
     ensureStatementInvariants(canonical);
-    await writeDocumentInsight({ userId, batchId, canonical, contentHash: canonical.contentHash, sourceKey });
+    await writeDocumentInsight({
+      userId,
+      batchId,
+      canonical,
+      contentHash: canonical.contentHash,
+      sourceKey,
+      docupipeRaw,
+    });
     await persistStatement(userId, canonical);
     return;
   }
@@ -221,10 +237,11 @@ async function runDocupipeAndMap({ userId, batchId, fileId, fileKey, typeHint, b
   if (existing && existing.contentHash === contentHash) {
     return { status: 'skipped', contentHash };
   }
-  const fileUrl = await createPresignedGet({ key: fileKey });
-  const result = await runWorkflow({ fileUrl, typeHint });
-  const docType = detectDocType(result);
-  const documentPayload = result?.documents?.[0] || result?.document || result;
+  const filename = fileKey.split('/').pop() || `${fileId}.pdf`;
+  const result = await runWorkflow({ buffer, filename, typeHint });
+  const docupipePayload = result?.data ?? result;
+  const docType = detectDocType(docupipePayload);
+  const documentPayload = docupipePayload?.documents?.[0] || docupipePayload?.document || docupipePayload;
   let canonical;
   if (docType === 'payslip') {
     canonical = mapPayslip(documentPayload, { fileId, contentHash });
@@ -237,7 +254,7 @@ async function runDocupipeAndMap({ userId, batchId, fileId, fileKey, typeHint, b
     }));
   }
   if (!canonical) throw badRequest('Docupipe returned unsupported document');
-  await processCanonical(userId, batchId, canonical, fileKey);
+  await processCanonical(userId, batchId, canonical, fileKey, result);
   return { status: 'processed', contentHash, canonicalType: canonical.docType };
 }
 
