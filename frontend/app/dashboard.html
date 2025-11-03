@@ -74,20 +74,28 @@
           </div>
           <div class="document-preview-panels">
             <div class="document-preview-header">
-              <div>
+              <div class="document-preview-heading">
                 <h4 id="document-preview-title">No documents available</h4>
                 <p class="document-preview-meta" id="document-preview-meta"></p>
               </div>
+              <div class="document-preview-tags" id="document-preview-tags" hidden></div>
             </div>
             <div class="document-preview-pane document-preview-pane--pdf">
-              <div class="document-preview-pane-title">PDF preview</div>
+              <div class="document-preview-pane-header">
+                <div class="document-preview-pane-title">PDF preview</div>
+              </div>
               <div class="document-preview-frame-wrapper">
                 <iframe id="document-preview-frame" title="Uploaded document preview" hidden loading="lazy"></iframe>
                 <div class="document-preview-empty" id="document-preview-empty">Upload a document to preview it here.</div>
               </div>
             </div>
             <div class="document-preview-pane document-preview-pane--json">
-              <div class="document-preview-pane-title">JSON output</div>
+              <div class="document-preview-pane-header">
+                <div class="document-preview-pane-title">JSON output</div>
+                <div class="document-preview-actions">
+                  <button type="button" class="button button--ghost" id="document-json-copy" disabled>Copy JSON</button>
+                </div>
+              </div>
               <div class="document-json-wrapper">
                 <pre id="document-json" hidden></pre>
                 <div class="document-preview-empty" id="document-json-empty">Upload a document to view JSON output.</div>

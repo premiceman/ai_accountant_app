@@ -105,9 +105,65 @@ function normaliseDocTypeHint(value) {
   return null;
 }
 
-function detectDocType(result, { payload, typeHint } = {}) {
+function firstStringCandidate(...values) {
+  for (const value of values) {
+    const candidate = stringField(value);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function extractDocupipeSummary(result) {
+  const docupipe = (result && result.docupipe) || {};
+  const source = result?.data ?? result?.output ?? result ?? {};
+
+  const classification = firstStringCandidate(
+    docupipe.classification,
+    source.classification?.name,
+    source.classification?.label,
+    source.classification?.key,
+    source.classification,
+    source.catalogue?.name,
+    source.catalogue?.label,
+    source.catalogue?.key
+  );
+
+  const documentType = firstStringCandidate(
+    docupipe.documentType,
+    source.documentType,
+    source.type,
+    source.docType,
+    source.schema,
+    source.schemaName
+  );
+
+  const schema = firstStringCandidate(docupipe.schema, source.schema, source.schemaName, source.schema_id);
+  const catalogueKey = firstStringCandidate(docupipe.catalogueKey, source.catalogue?.key, source.catalogue?.id);
+
+  return {
+    documentId: firstStringCandidate(docupipe.documentId, source.documentId, source.id),
+    jobId: firstStringCandidate(docupipe.jobId),
+    classification: classification || null,
+    documentType: documentType || null,
+    schema: schema || null,
+    catalogueKey: catalogueKey || null,
+  };
+}
+
+function detectDocType(result, { payload, typeHint, docupipe } = {}) {
   const source = result?.data ?? result?.output ?? result;
   const doc = source?.documents?.[0] || source?.document || source;
+
+  const docupipeInfo = docupipe || extractDocupipeSummary(result);
+
+  const fromDocupipe =
+    normaliseDocTypeHint(docupipeInfo.classification)
+    || normaliseDocTypeHint(docupipeInfo.documentType)
+    || normaliseDocTypeHint(docupipeInfo.schema)
+    || normaliseDocTypeHint(docupipeInfo.catalogueKey);
+  if (fromDocupipe) return fromDocupipe;
 
   const fromDoc =
     normaliseDocTypeHint(doc?.documentType)
@@ -154,6 +210,18 @@ function detectDocType(result, { payload, typeHint } = {}) {
   }
 
   return null;
+}
+
+function formatDocupipe(doc) {
+  const info = doc?.docupipe || {};
+  return {
+    documentId: info.documentId || null,
+    jobId: info.jobId || null,
+    documentType: info.documentType || null,
+    classification: info.classification || null,
+    schema: info.schema || null,
+    catalogueKey: info.catalogueKey || null,
+  };
 }
 
 function safeRound(value) {
@@ -299,6 +367,7 @@ function formatPayslipResponse(doc) {
     employerName: doc.metadata?.employerName || 'Employer',
     currency: doc.metadata?.currency || 'GBP',
     metrics: doc.analytics,
+    docupipe: formatDocupipe(doc),
     createdAt: doc.createdAt,
   };
 }
@@ -324,6 +393,7 @@ function formatStatementResponse(doc) {
     },
     totals: doc.analytics?.totals || { income: null, spend: null, net: null },
     topTransactions,
+    docupipe: formatDocupipe(doc),
     createdAt: doc.createdAt,
   };
 }
@@ -388,7 +458,8 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       throw error;
     }
     const payload = extractDocumentPayload(workflowResult);
-    const docType = detectDocType(workflowResult, { payload, typeHint });
+    const docupipeInfo = extractDocupipeSummary(workflowResult);
+    const docType = detectDocType(workflowResult, { payload, typeHint, docupipe: docupipeInfo });
     if (!docType) {
       await deleteObject(r2Key).catch(() => {});
       throw badRequest('Docupipe did not return a supported document type');
@@ -419,6 +490,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         metadata: parsed.metadata,
         analytics: parsed.analytics,
         transactions: parsed.transactions || [],
+        docupipe: docupipeInfo,
         raw: workflowResult,
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -454,6 +526,7 @@ router.get('/documents', async (req, res, next) => {
         periodStart: 1,
         periodEnd: 1,
         size: 1,
+        docupipe: 1,
         createdAt: 1,
         updatedAt: 1,
       })
@@ -468,6 +541,7 @@ router.get('/documents', async (req, res, next) => {
       periodStart: doc.periodStart || null,
       periodEnd: doc.periodEnd || null,
       size: doc.size ?? null,
+      docupipe: formatDocupipe(doc),
       createdAt: doc.createdAt,
       updatedAt: doc.updatedAt,
     }));
@@ -496,6 +570,7 @@ router.get('/documents/:fileId/json', async (req, res, next) => {
       payDate: document.payDate || null,
       periodStart: document.periodStart || null,
       periodEnd: document.periodEnd || null,
+      docupipe: formatDocupipe(document),
       metadata: document.metadata || {},
       analytics: document.analytics || {},
       transactions: document.transactions || [],

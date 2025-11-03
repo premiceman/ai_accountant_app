@@ -40,10 +40,12 @@ const config = {
     baseUrl: DOCUPIPE_BASE_URL,
     workflowId: DOCUPIPE_WORKFLOW_ID,
     documentUrl: docupipeUrl('/document'),
-    dataset: optionalEnv('DOCUPIPE_DATASET', 'invoices'),
+    dataset: optionalEnv('DOCUPIPE_DATASET'),
     apiKey: requireEnv('DOCUPIPE_API_KEY'),
     connectTimeoutMs: Number(optionalEnv('DOCUPIPE_CONNECT_TIMEOUT_MS', '5000')),
     maxInFlight: Number(optionalEnv('MAX_DOCUPIPE_IN_FLIGHT', '3')),
+    pollIntervalMs: Number(optionalEnv('DOCUPIPE_POLL_INTERVAL_MS', '1500')),
+    pollTimeoutMs: Number(optionalEnv('DOCUPIPE_POLL_TIMEOUT_MS', '120000')),
   },
   openai: {
     apiKey: requireEnv('OPENAI_API_KEY'),

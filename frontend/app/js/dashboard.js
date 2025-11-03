@@ -10,6 +10,29 @@
   };
   const documentDetailsCache = new Map();
   const documentPreviewCache = new Map();
+  let jsonCopyResetTimer = null;
+
+  function formatDocupipeLabel(value) {
+    if (!value && value !== 0) return '';
+    const raw = String(value).trim();
+    if (!raw) return '';
+    const normalised = raw.replace(/[_\s-]+/g, ' ');
+    if (normalised.toUpperCase() === normalised) {
+      return normalised;
+    }
+    return normalised
+      .split(' ')
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  function normaliseComparisonValue(value) {
+    return (value || '')
+      .toString()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+  }
 
   function getStatusElement(step) {
     return document.querySelector(`#upload-status [data-step="${step}"]`);
@@ -104,6 +127,140 @@
     return state.documents.find((doc) => doc.fileId === fileId) || null;
   }
 
+  function renderDocumentTags(doc) {
+    const container = document.getElementById('document-preview-tags');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!doc) {
+      container.hidden = true;
+      return;
+    }
+
+    const tags = [];
+    if (doc.docType) {
+      tags.push({
+        label: formatDocumentType(doc.docType),
+        tone: doc.docType,
+      });
+    }
+
+    const canonicalLabel = doc.docType ? formatDocumentType(doc.docType) : '';
+    const canonicalKey = normaliseComparisonValue(canonicalLabel);
+
+    const classificationLabel = formatDocupipeLabel(doc.docupipe?.classification);
+    if (classificationLabel && normaliseComparisonValue(classificationLabel) !== canonicalKey) {
+      tags.push({ label: classificationLabel, tone: 'classification' });
+    }
+
+    const docupipeTypeLabel = formatDocupipeLabel(doc.docupipe?.documentType);
+    if (
+      docupipeTypeLabel
+      && normaliseComparisonValue(docupipeTypeLabel) !== canonicalKey
+      && normaliseComparisonValue(docupipeTypeLabel) !== normaliseComparisonValue(classificationLabel)
+    ) {
+      tags.push({ label: docupipeTypeLabel, tone: 'docupipe-type' });
+    }
+
+    if (doc.docupipe?.schema) {
+      tags.push({ label: doc.docupipe.schema, tone: 'schema' });
+    }
+
+    const catalogueLabel = formatDocupipeLabel(doc.docupipe?.catalogueKey);
+    if (
+      catalogueLabel
+      && normaliseComparisonValue(catalogueLabel) !== normaliseComparisonValue(doc.docupipe?.schema)
+      && normaliseComparisonValue(catalogueLabel) !== normaliseComparisonValue(classificationLabel)
+    ) {
+      tags.push({ label: catalogueLabel, tone: 'catalogue' });
+    }
+
+    if (!tags.length) {
+      container.hidden = true;
+      return;
+    }
+
+    tags.forEach(({ label, tone }) => {
+      const tag = document.createElement('span');
+      tag.className = 'document-preview-tag';
+      if (tone) {
+        tag.dataset.tone = tone;
+      }
+      tag.textContent = label;
+      container.appendChild(tag);
+    });
+    container.hidden = false;
+  }
+
+  function clearJsonCopyFeedback() {
+    if (jsonCopyResetTimer) {
+      clearTimeout(jsonCopyResetTimer);
+      jsonCopyResetTimer = null;
+    }
+  }
+
+  function setJsonCopyButtonEnabled(enabled) {
+    const button = document.getElementById('document-json-copy');
+    if (!button) return;
+    if (!enabled) {
+      clearJsonCopyFeedback();
+      button.disabled = true;
+      button.textContent = 'Copy JSON';
+      button.classList.remove('is-success', 'is-error');
+      return;
+    }
+    button.disabled = false;
+    button.textContent = 'Copy JSON';
+    button.classList.remove('is-success', 'is-error');
+  }
+
+  async function handleJsonCopyClick(event) {
+    const button = event.currentTarget;
+    const json = document.getElementById('document-json');
+    if (!json || !json.textContent) {
+      return;
+    }
+
+    const text = json.textContent;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'absolute';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      button.textContent = 'Copied!';
+      button.classList.remove('is-error');
+      button.classList.add('is-success');
+    } catch (error) {
+      console.error('Unable to copy JSON to clipboard', error);
+      button.textContent = 'Copy failed';
+      button.classList.remove('is-success');
+      button.classList.add('is-error');
+    }
+
+    clearJsonCopyFeedback();
+    jsonCopyResetTimer = setTimeout(() => {
+      button.textContent = 'Copy JSON';
+      button.classList.remove('is-success', 'is-error');
+    }, 2000);
+  }
+
+  function bindJsonCopy() {
+    const button = document.getElementById('document-json-copy');
+    if (!button || button.dataset.bound === 'true') return;
+    button.addEventListener('click', handleJsonCopyClick);
+    button.dataset.bound = 'true';
+    setJsonCopyButtonEnabled(false);
+  }
+
   function renderDocumentList() {
     const list = document.getElementById('document-list');
     const empty = document.getElementById('document-list-empty');
@@ -140,6 +297,13 @@
       const parts = [];
       if (doc.month) parts.push(formatMonthLabel(doc.month));
       if (doc.docType) parts.push(formatDocumentType(doc.docType));
+      const classificationLabel = formatDocupipeLabel(doc.docupipe?.classification);
+      if (classificationLabel) {
+        const canonicalLabel = doc.docType ? formatDocumentType(doc.docType) : '';
+        if (normaliseComparisonValue(classificationLabel) !== normaliseComparisonValue(canonicalLabel)) {
+          parts.push(`Docupipe ${classificationLabel}`);
+        }
+      }
       const sizeLabel = formatFileSize(doc.size);
       if (sizeLabel) parts.push(sizeLabel);
       if (doc.createdAt) parts.push(`Added ${formatDate(doc.createdAt)}`);
@@ -168,6 +332,7 @@
     if (!doc) {
       title.textContent = state.documents.length ? 'No document selected' : 'No documents available';
       meta.textContent = '';
+      renderDocumentTags(null);
       return;
     }
 
@@ -184,6 +349,7 @@
       }
     }
     meta.textContent = parts.join(' • ');
+    renderDocumentTags(doc);
   }
 
   function clearDocumentPreview(message) {
@@ -213,6 +379,7 @@
           ? 'Select a document to view the JSON output.'
           : 'Upload a document to view JSON output.');
     }
+    setJsonCopyButtonEnabled(false);
     updateDocumentPreviewHeader(null);
   }
 
@@ -237,6 +404,7 @@
       jsonEmpty.hidden = false;
       jsonEmpty.textContent = 'Loading JSON…';
     }
+    setJsonCopyButtonEnabled(false);
   }
 
   function updateMonthSelect(months, selectedMonth) {
@@ -476,15 +644,33 @@
     }
 
     if (jsonResult.status === 'fulfilled') {
+      const detail = jsonResult.value || {};
+      if (detail.docupipe) {
+        const index = state.documents.findIndex((item) => item.fileId === fileId);
+        if (index !== -1) {
+          const existing = state.documents[index];
+          const nextDoc = { ...existing, docupipe: detail.docupipe };
+          state.documents.splice(index, 1, nextDoc);
+          renderDocumentList();
+          if (state.selectedDocumentId === fileId) {
+            updateDocumentPreviewHeader(nextDoc);
+          }
+        }
+      }
       if (json) {
-        const payload = jsonResult.value || {};
-        json.textContent = JSON.stringify(payload, null, 2);
+        const payload = detail;
+        let display = payload;
+        if (payload && typeof payload === 'object' && payload.raw !== undefined) {
+          display = payload.raw ?? payload;
+        }
+        json.textContent = JSON.stringify(display, null, 2);
         json.hidden = false;
       }
       if (jsonEmpty) {
         jsonEmpty.hidden = true;
         jsonEmpty.textContent = '';
       }
+      setJsonCopyButtonEnabled(true);
     } else {
       if (json) {
         json.hidden = true;
@@ -495,6 +681,7 @@
         jsonEmpty.hidden = false;
         jsonEmpty.textContent = message;
       }
+      setJsonCopyButtonEnabled(false);
     }
   }
 
@@ -681,6 +868,7 @@
       .then(() => {
         bindUploadControls();
         bindMonthSelect();
+        bindJsonCopy();
         resetUploadStatus();
         return Promise.all([loadAnalytics(), loadDocuments()]);
       })
