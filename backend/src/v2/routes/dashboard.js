@@ -96,16 +96,63 @@ function extractDocumentPayload(result) {
   return data.standardized || data.payload || data;
 }
 
-function detectDocType(payload) {
-  if (!payload || typeof payload !== 'object') return null;
-  const typeHint = stringField(payload.documentType || payload.type || payload.category);
-  if (typeHint) {
-    const lower = typeHint.toLowerCase();
-    if (lower.includes('payslip')) return 'payslip';
-    if (lower.includes('statement')) return 'statement';
+function normaliseDocTypeHint(value) {
+  const hint = stringField(value);
+  if (!hint) return null;
+  const lower = hint.toLowerCase();
+  if (/(payslip|pay slip|payroll|salary|earnings)/.test(lower)) return 'payslip';
+  if (/(statement|bank|transaction|account)/.test(lower)) return 'statement';
+  return null;
+}
+
+function detectDocType(result, { payload, typeHint } = {}) {
+  const source = result?.data ?? result?.output ?? result;
+  const doc = source?.documents?.[0] || source?.document || source;
+
+  const fromDoc =
+    normaliseDocTypeHint(doc?.documentType)
+    || normaliseDocTypeHint(doc?.type)
+    || normaliseDocTypeHint(doc?.category)
+    || normaliseDocTypeHint(doc?.docType)
+    || normaliseDocTypeHint(doc?.labels?.primary);
+  if (fromDoc) return fromDoc;
+
+  const fromHint = normaliseDocTypeHint(typeHint);
+  if (fromHint) return fromHint;
+
+  const candidate = payload || extractDocumentPayload(result);
+  if (!candidate || typeof candidate !== 'object') return null;
+
+  const fromPayload =
+    normaliseDocTypeHint(candidate.documentType)
+    || normaliseDocTypeHint(candidate.type)
+    || normaliseDocTypeHint(candidate.category)
+    || normaliseDocTypeHint(candidate.docType);
+  if (fromPayload) return fromPayload;
+
+  if (Array.isArray(candidate.transactions) && candidate.transactions.length) return 'statement';
+  if (Array.isArray(candidate.activity) && candidate.activity.length) return 'statement';
+
+  if (
+    candidate.gross
+    || candidate.net
+    || candidate.payDate
+    || candidate.payPeriod
+    || candidate.period
+    || candidate.employee
+    || candidate.employer
+    || candidate.deductions
+    || candidate.incomeTax
+    || candidate.nationalInsurance
+  ) {
+    return 'payslip';
   }
-  if (Array.isArray(payload.transactions)) return 'statement';
-  if (payload.gross || payload.net || payload.payDate || payload.period) return 'payslip';
+
+  const analytics = candidate.analytics || candidate.summary;
+  if (analytics && (analytics.net || analytics.gross || analytics.takeHomeRatio)) {
+    return 'payslip';
+  }
+
   return null;
 }
 
@@ -341,7 +388,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       throw error;
     }
     const payload = extractDocumentPayload(workflowResult);
-    const docType = detectDocType(payload);
+    const docType = detectDocType(workflowResult, { payload, typeHint });
     if (!docType) {
       await deleteObject(r2Key).catch(() => {});
       throw badRequest('Docupipe did not return a supported document type');
