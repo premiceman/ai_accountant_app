@@ -5,7 +5,11 @@
   const state = {
     months: [],
     selectedMonth: null,
+    documents: [],
+    selectedDocumentId: null,
   };
+  const documentDetailsCache = new Map();
+  const documentPreviewCache = new Map();
 
   function getStatusElement(step) {
     return document.querySelector(`#upload-status [data-step="${step}"]`);
@@ -75,6 +79,164 @@
     const str = String(value);
     const last = str.slice(-4);
     return `••${last}`;
+  }
+
+  function formatDocumentType(type) {
+    if (type === 'payslip') return 'Payslip';
+    if (type === 'statement') return 'Statement';
+    return 'Document';
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes === null || bytes === undefined) return '';
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    if (value >= 1024 * 1024) {
+      return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    if (value >= 1024) {
+      return `${Math.round(value / 1024)} KB`;
+    }
+    return `${value} B`;
+  }
+
+  function getDocumentById(fileId) {
+    return state.documents.find((doc) => doc.fileId === fileId) || null;
+  }
+
+  function renderDocumentList() {
+    const list = document.getElementById('document-list');
+    const empty = document.getElementById('document-list-empty');
+    if (!list || !empty) return;
+
+    if (!empty.dataset.defaultText) {
+      empty.dataset.defaultText = empty.textContent || '';
+    }
+
+    list.innerHTML = '';
+    if (!state.documents.length) {
+      empty.hidden = false;
+      empty.textContent = empty.dataset.defaultText || 'No documents uploaded yet.';
+      return;
+    }
+
+    empty.hidden = true;
+    state.documents.forEach((doc) => {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'document-list-item';
+      button.dataset.fileId = doc.fileId;
+      if (state.selectedDocumentId === doc.fileId) {
+        button.classList.add('is-active');
+      }
+
+      const name = document.createElement('span');
+      name.className = 'document-list-name';
+      name.textContent = doc.originalName || formatDocumentType(doc.docType);
+
+      const meta = document.createElement('span');
+      meta.className = 'document-list-meta';
+      const parts = [];
+      if (doc.month) parts.push(formatMonthLabel(doc.month));
+      if (doc.docType) parts.push(formatDocumentType(doc.docType));
+      const sizeLabel = formatFileSize(doc.size);
+      if (sizeLabel) parts.push(sizeLabel);
+      if (doc.createdAt) parts.push(`Added ${formatDate(doc.createdAt)}`);
+      meta.textContent = parts.join(' • ');
+
+      button.append(name);
+      if (parts.length) {
+        button.append(meta);
+      }
+
+      button.addEventListener('click', () => {
+        if (state.selectedDocumentId === doc.fileId) return;
+        loadDocumentPreview(doc.fileId);
+      });
+
+      item.appendChild(button);
+      list.appendChild(item);
+    });
+  }
+
+  function updateDocumentPreviewHeader(doc) {
+    const title = document.getElementById('document-preview-title');
+    const meta = document.getElementById('document-preview-meta');
+    if (!title || !meta) return;
+
+    if (!doc) {
+      title.textContent = state.documents.length ? 'No document selected' : 'No documents available';
+      meta.textContent = '';
+      return;
+    }
+
+    title.textContent = doc.originalName || formatDocumentType(doc.docType);
+    const parts = [];
+    if (doc.docType) parts.push(formatDocumentType(doc.docType));
+    if (doc.month) parts.push(formatMonthLabel(doc.month));
+    if (doc.payDate) {
+      parts.push(`Pay date ${formatDate(doc.payDate)}`);
+    } else if (doc.periodStart || doc.periodEnd) {
+      const period = [doc.periodStart, doc.periodEnd].filter(Boolean).map((value) => formatDate(value));
+      if (period.length) {
+        parts.push(period.join(' – '));
+      }
+    }
+    meta.textContent = parts.join(' • ');
+  }
+
+  function clearDocumentPreview(message) {
+    const frame = document.getElementById('document-preview-frame');
+    const frameEmpty = document.getElementById('document-preview-empty');
+    const json = document.getElementById('document-json');
+    const jsonEmpty = document.getElementById('document-json-empty');
+
+    if (frame) {
+      frame.hidden = true;
+      frame.removeAttribute('src');
+    }
+    if (frameEmpty) {
+      frameEmpty.hidden = false;
+      frameEmpty.textContent =
+        message || (state.documents.length ? 'Select a document to preview.' : 'Upload a document to preview it here.');
+    }
+    if (json) {
+      json.hidden = true;
+      json.textContent = '';
+    }
+    if (jsonEmpty) {
+      jsonEmpty.hidden = false;
+      jsonEmpty.textContent =
+        message ||
+        (state.documents.length
+          ? 'Select a document to view the JSON output.'
+          : 'Upload a document to view JSON output.');
+    }
+    updateDocumentPreviewHeader(null);
+  }
+
+  function setDocumentPreviewLoading() {
+    const frame = document.getElementById('document-preview-frame');
+    const frameEmpty = document.getElementById('document-preview-empty');
+    const json = document.getElementById('document-json');
+    const jsonEmpty = document.getElementById('document-json-empty');
+    if (frame) {
+      frame.hidden = true;
+      frame.removeAttribute('src');
+    }
+    if (frameEmpty) {
+      frameEmpty.hidden = false;
+      frameEmpty.textContent = 'Loading preview…';
+    }
+    if (json) {
+      json.hidden = true;
+      json.textContent = '';
+    }
+    if (jsonEmpty) {
+      jsonEmpty.hidden = false;
+      jsonEmpty.textContent = 'Loading JSON…';
+    }
   }
 
   function updateMonthSelect(months, selectedMonth) {
@@ -249,6 +411,139 @@
     });
   }
 
+  async function loadDocumentPreview(fileId, { force = false } = {}) {
+    if (!fileId) {
+      state.selectedDocumentId = null;
+      clearDocumentPreview();
+      return;
+    }
+
+    state.selectedDocumentId = fileId;
+    renderDocumentList();
+    const doc = getDocumentById(fileId);
+    updateDocumentPreviewHeader(doc);
+    setDocumentPreviewLoading();
+
+    const previewPromise =
+      !force && documentPreviewCache.has(fileId)
+        ? Promise.resolve(documentPreviewCache.get(fileId))
+        : App.Api.getDashboardDocumentPreview(fileId).then((value) => {
+            documentPreviewCache.set(fileId, value);
+            return value;
+          });
+
+    const jsonPromise =
+      !force && documentDetailsCache.has(fileId)
+        ? Promise.resolve(documentDetailsCache.get(fileId))
+        : App.Api.getDashboardDocumentJson(fileId).then((value) => {
+            documentDetailsCache.set(fileId, value);
+            return value;
+          });
+
+    const [previewResult, jsonResult] = await Promise.allSettled([previewPromise, jsonPromise]);
+
+    if (state.selectedDocumentId !== fileId) {
+      return;
+    }
+
+    const frame = document.getElementById('document-preview-frame');
+    const frameEmpty = document.getElementById('document-preview-empty');
+    const json = document.getElementById('document-json');
+    const jsonEmpty = document.getElementById('document-json-empty');
+
+    if (previewResult.status === 'fulfilled' && previewResult.value?.url) {
+      if (frame) {
+        frame.src = previewResult.value.url;
+        frame.hidden = false;
+      }
+      if (frameEmpty) {
+        frameEmpty.hidden = true;
+        frameEmpty.textContent = '';
+      }
+    } else {
+      if (frame) {
+        frame.hidden = true;
+        frame.removeAttribute('src');
+      }
+      if (frameEmpty) {
+        const message =
+          previewResult.status === 'rejected'
+            ? previewResult.reason?.message || 'Unable to load preview.'
+            : 'Preview unavailable.';
+        frameEmpty.hidden = false;
+        frameEmpty.textContent = message;
+      }
+    }
+
+    if (jsonResult.status === 'fulfilled') {
+      if (json) {
+        const payload = jsonResult.value || {};
+        json.textContent = JSON.stringify(payload, null, 2);
+        json.hidden = false;
+      }
+      if (jsonEmpty) {
+        jsonEmpty.hidden = true;
+        jsonEmpty.textContent = '';
+      }
+    } else {
+      if (json) {
+        json.hidden = true;
+        json.textContent = '';
+      }
+      if (jsonEmpty) {
+        const message = jsonResult.reason?.message || 'Unable to load JSON output.';
+        jsonEmpty.hidden = false;
+        jsonEmpty.textContent = message;
+      }
+    }
+  }
+
+  async function loadDocuments({ preserveSelection = false } = {}) {
+    const empty = document.getElementById('document-list-empty');
+    if (empty && !state.documents.length) {
+      empty.hidden = false;
+      if (!empty.dataset.defaultText) {
+        empty.dataset.defaultText = empty.textContent || '';
+      }
+      empty.textContent = 'Loading documents…';
+    }
+
+    try {
+      const data = await App.Api.getDashboardDocuments();
+      state.documents = Array.isArray(data.documents) ? data.documents : [];
+      const validIds = new Set(state.documents.map((doc) => doc.fileId));
+      Array.from(documentPreviewCache.keys()).forEach((key) => {
+        if (!validIds.has(key)) {
+          documentPreviewCache.delete(key);
+        }
+      });
+      Array.from(documentDetailsCache.keys()).forEach((key) => {
+        if (!validIds.has(key)) {
+          documentDetailsCache.delete(key);
+        }
+      });
+      const hasSelection = state.documents.some((doc) => doc.fileId === state.selectedDocumentId);
+      if (!preserveSelection || !hasSelection) {
+        state.selectedDocumentId = state.documents[0]?.fileId || null;
+      }
+      renderDocumentList();
+      if (state.selectedDocumentId) {
+        await loadDocumentPreview(state.selectedDocumentId, { force: true });
+      } else {
+        clearDocumentPreview();
+      }
+    } catch (error) {
+      state.documents = [];
+      state.selectedDocumentId = null;
+      renderDocumentList();
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = error.message || 'Unable to load uploaded documents.';
+      }
+      clearDocumentPreview(error.message);
+    }
+  }
+
   async function loadAnalytics(month) {
     const loader = document.getElementById('analytics-loading');
     if (loader) loader.hidden = false;
@@ -313,6 +608,7 @@
       const message = response.message || 'Document processed successfully.';
       setUploadFeedback(message, tone);
       await loadAnalytics(response.month || state.selectedMonth);
+      await loadDocuments({ preserveSelection: false });
     } catch (error) {
       clearTimeout(docupipeTimer);
       clearTimeout(analyticsTimer);
@@ -386,7 +682,7 @@
         bindUploadControls();
         bindMonthSelect();
         resetUploadStatus();
-        return loadAnalytics();
+        return Promise.all([loadAnalytics(), loadDocuments()]);
       })
       .catch((error) => {
         console.error('Dashboard initialisation failed', error);
