@@ -2,7 +2,7 @@ const assert = require('node:assert');
 const {
   DOCUPIPE_BASE_URL,
   DOCUPIPE_WORKFLOW_ID,
-  docupipeUrl,
+  config: docupipeBaseConfig,
 } = require('../config/docupipe');
 
 function requireEnv(name) {
@@ -37,12 +37,13 @@ const config = {
     publicHost: optionalEnv('R2_PUBLIC_HOST'),
   },
   docupipe: {
-    baseUrl: DOCUPIPE_BASE_URL,
-    workflowId: DOCUPIPE_WORKFLOW_ID,
-    documentUrl: docupipeUrl('/document'),
+    baseUrl: docupipeBaseConfig?.docupipe?.baseUrl || DOCUPIPE_BASE_URL,
+    workflowId: docupipeBaseConfig?.docupipe?.workflowId || DOCUPIPE_WORKFLOW_ID,
     dataset: optionalEnv('DOCUPIPE_DATASET'),
-    apiKey: requireEnv('DOCUPIPE_API_KEY'),
-    connectTimeoutMs: Number(optionalEnv('DOCUPIPE_CONNECT_TIMEOUT_MS', '5000')),
+    apiKey: docupipeBaseConfig?.docupipe?.apiKey || requireEnv('DOCUPIPE_API_KEY'),
+    connectTimeoutMs:
+      docupipeBaseConfig?.docupipe?.connectTimeoutMs
+      || Number(optionalEnv('DOCUPIPE_CONNECT_TIMEOUT_MS', '30000')),
     maxInFlight: Number(optionalEnv('MAX_DOCUPIPE_IN_FLIGHT', '3')),
     pollIntervalMs: Number(optionalEnv('DOCUPIPE_POLL_INTERVAL_MS', '1500')),
     pollTimeoutMs: Number(optionalEnv('DOCUPIPE_POLL_TIMEOUT_MS', '120000')),

@@ -3,6 +3,9 @@ const multer = require('multer');
 const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
 const UploadedDocument = require('../models/UploadedDocument');
+const DocumentResult = require('../models/DocumentResult');
+const { mongoose } = require('../models');
+const { config } = require('../config');
 const { runWorkflow } = require('../services/docupipe');
 const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
 const { badRequest, notFound } = require('../utils/errors');
@@ -141,14 +144,31 @@ function extractDocupipeSummary(result) {
 
   const schema = firstStringCandidate(docupipe.schema, source.schema, source.schemaName, source.schema_id);
   const catalogueKey = firstStringCandidate(docupipe.catalogueKey, source.catalogue?.key, source.catalogue?.id);
+  const standardizationId = firstStringCandidate(
+    docupipe.standardizationId,
+    source.standardizationId,
+    source.standardisationId,
+    docupipe.documentId,
+    source.documentId,
+    source.id
+  );
+  const uploadJobId = firstStringCandidate(
+    docupipe.standardizationJobId,
+    docupipe.uploadJobId,
+    docupipe.jobId
+  );
 
   return {
-    documentId: firstStringCandidate(docupipe.documentId, source.documentId, source.id),
-    jobId: firstStringCandidate(docupipe.jobId),
+    documentId: standardizationId || null,
+    jobId: uploadJobId || null,
+    uploadJobId: firstStringCandidate(docupipe.uploadJobId, docupipe.jobId),
+    standardizationJobId: firstStringCandidate(docupipe.standardizationJobId),
+    standardizationId,
     classification: classification || null,
     documentType: documentType || null,
     schema: schema || null,
     catalogueKey: catalogueKey || null,
+    status: docupipe.status || null,
   };
 }
 
@@ -212,15 +232,34 @@ function detectDocType(result, { payload, typeHint, docupipe } = {}) {
   return null;
 }
 
+function normaliseDocupipeStatus(status, { hasStandardizationJob } = {}) {
+  if (!status) {
+    return hasStandardizationJob ? 'running' : 'completed';
+  }
+  const lower = String(status).toLowerCase();
+  if (['completed', 'complete', 'succeeded', 'success'].includes(lower)) return 'completed';
+  if (['failed', 'error'].includes(lower)) return 'failed';
+  if (['running', 'processing', 'in_progress'].includes(lower)) return 'running';
+  if (['queued', 'pending'].includes(lower)) return 'queued';
+  return hasStandardizationJob ? 'running' : 'completed';
+}
+
 function formatDocupipe(doc) {
   const info = doc?.docupipe || {};
+  const jobId = info.standardizationJobId || info.uploadJobId || info.jobId || null;
+  const documentId = info.standardizationId || info.documentId || null;
   return {
-    documentId: info.documentId || null,
-    jobId: info.jobId || null,
+    documentResultId: info.documentResultId || null,
+    documentId,
+    jobId,
+    uploadJobId: info.uploadJobId || null,
+    standardizationJobId: info.standardizationJobId || null,
+    standardizationId: info.standardizationId || null,
     documentType: info.documentType || null,
     classification: info.classification || null,
     schema: info.schema || null,
     catalogueKey: info.catalogueKey || null,
+    status: info.status || null,
   };
 }
 
@@ -356,6 +395,18 @@ function buildDashboardKey({ userId, fileId, originalName }) {
   return `users/${userId}/dashboard/${timestamp}/${fileId}/${safeName}`;
 }
 
+function buildDocumentResultFileUrl(key) {
+  if (!key) return null;
+  if (config.r2?.publicHost) {
+    const base = config.r2.publicHost.replace(/\/$/, '');
+    return `${base}/${key}`;
+  }
+  if (config.r2?.bucket) {
+    return `s3://${config.r2.bucket}/${key}`;
+  }
+  return key;
+}
+
 function formatPayslipResponse(doc) {
   return {
     fileId: doc.fileId,
@@ -449,17 +500,23 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
     const fileId = randomUUID();
     r2Key = buildDashboardKey({ userId, fileId, originalName: originalname });
     await writeBuffer(r2Key, buffer, mimetype || 'application/pdf');
+    const presignedUrl = await createPresignedGet({ key: r2Key, expiresIn: 60 * 15 });
     const typeHint = req.body?.typeHint ? String(req.body.typeHint) : undefined;
     let workflowResult;
     try {
-      workflowResult = await runWorkflow({ buffer, filename: originalname, typeHint });
+      workflowResult = await runWorkflow({ fileUrl: presignedUrl, filename: originalname, typeHint, poll: true });
     } catch (error) {
       await deleteObject(r2Key).catch(() => {});
       throw error;
     }
+
     const payload = extractDocumentPayload(workflowResult);
-    const docupipeInfo = extractDocupipeSummary(workflowResult);
-    const docType = detectDocType(workflowResult, { payload, typeHint, docupipe: docupipeInfo });
+    const initialDocupipeSummary = extractDocupipeSummary(workflowResult);
+    const docType = detectDocType(workflowResult, {
+      payload,
+      typeHint,
+      docupipe: initialDocupipeSummary,
+    });
     if (!docType) {
       await deleteObject(r2Key).catch(() => {});
       throw badRequest('Docupipe did not return a supported document type');
@@ -472,6 +529,49 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       await deleteObject(r2Key).catch(() => {});
       throw error;
     }
+
+    const rawDocupipeStatus =
+      workflowResult?.docupipe?.status
+      || workflowResult?.finalJob?.status
+      || workflowResult?.finalJob?.data?.status
+      || null;
+    const docupipeStatus = normaliseDocupipeStatus(rawDocupipeStatus, {
+      hasStandardizationJob: Boolean(initialDocupipeSummary.standardizationJobId),
+    });
+    const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+      ? new mongoose.Types.ObjectId(userId)
+      : undefined;
+    const finalJobPayload = workflowResult.finalJob
+      || (workflowResult.data ? { result: workflowResult.data } : null);
+
+    const documentResult = await DocumentResult.create({
+      userId: userObjectId,
+      fileUrl: buildDocumentResultFileUrl(r2Key),
+      filename: originalname,
+      uploadJobId: initialDocupipeSummary.uploadJobId || workflowResult?.docupipe?.uploadJobId || null,
+      standardizationJobId:
+        initialDocupipeSummary.standardizationJobId || workflowResult?.docupipe?.standardizationJobId || null,
+      standardizationId: initialDocupipeSummary.standardizationId || workflowResult?.docupipe?.standardizationId || null,
+      initialResponse: workflowResult.initialResponse,
+      finalJob: finalJobPayload,
+      status: docupipeStatus,
+    });
+
+    const docupipeInfo = {
+      ...workflowResult.docupipe,
+      ...initialDocupipeSummary,
+      documentResultId: documentResult._id,
+      status: documentResult.status,
+      fileUrl: documentResult.fileUrl,
+    };
+    docupipeInfo.uploadJobId = documentResult.uploadJobId || docupipeInfo.uploadJobId || null;
+    docupipeInfo.standardizationJobId =
+      documentResult.standardizationJobId || docupipeInfo.standardizationJobId || null;
+    docupipeInfo.standardizationId = documentResult.standardizationId || docupipeInfo.standardizationId || null;
+    docupipeInfo.jobId = docupipeInfo.standardizationJobId || docupipeInfo.uploadJobId || docupipeInfo.jobId || null;
+    docupipeInfo.documentId = docupipeInfo.standardizationId || docupipeInfo.documentId || null;
+    workflowResult.docupipe = docupipeInfo;
+
     const record = await UploadedDocument.findOneAndUpdate(
       { userId, contentHash },
       {
@@ -491,7 +591,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         analytics: parsed.analytics,
         transactions: parsed.transactions || [],
         docupipe: docupipeInfo,
-        raw: workflowResult,
+        raw: { documentResultId: documentResult._id },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
@@ -562,6 +662,45 @@ router.get('/documents/:fileId/json', async (req, res, next) => {
       throw notFound('Document not found');
     }
 
+    const docResultId = document.docupipe?.documentResultId || document.raw?.documentResultId || null;
+    let docResult = null;
+    if (docResultId) {
+      const query = { _id: docResultId };
+      if (mongoose.Types.ObjectId.isValid(userId)) {
+        query.userId = new mongoose.Types.ObjectId(userId);
+      }
+      docResult = await DocumentResult.findOne(query).lean();
+    }
+
+    let jsonPayload = null;
+    if (docResult) {
+      const finalCandidate =
+        docResult.finalJob?.result
+        || docResult.finalJob?.data
+        || docResult.finalJob?.output
+        || docResult.finalJob;
+      if (finalCandidate && typeof finalCandidate === 'object') {
+        jsonPayload = finalCandidate;
+      } else if (docResult.initialResponse && typeof docResult.initialResponse === 'object') {
+        jsonPayload = docResult.initialResponse;
+      }
+    }
+    if (!jsonPayload) {
+      jsonPayload = document.raw && Object.keys(document.raw || {}).length ? document.raw : null;
+    }
+
+    const docupipeResult = docResult
+      ? {
+          id: docResult._id,
+          status: docResult.status,
+          uploadJobId: docResult.uploadJobId,
+          standardizationJobId: docResult.standardizationJobId,
+          standardizationId: docResult.standardizationId,
+          createdAt: docResult.createdAt,
+          updatedAt: docResult.updatedAt,
+        }
+      : null;
+
     return res.json({
       fileId: document.fileId,
       docType: document.docType,
@@ -574,7 +713,9 @@ router.get('/documents/:fileId/json', async (req, res, next) => {
       metadata: document.metadata || {},
       analytics: document.analytics || {},
       transactions: document.transactions || [],
-      raw: document.raw || null,
+      json: jsonPayload,
+      raw: jsonPayload,
+      docupipeResult,
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
     });

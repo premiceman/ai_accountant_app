@@ -1,33 +1,16 @@
 const { config } = require('../config');
-const { docupipeUrl } = require('../../config/docupipe');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('docupipe');
 
-function buildSubmissionDocument({ buffer, filename, typeHint }) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
-    throw new Error('Docupipe requires a non-empty document buffer');
-  }
-
-  const document = {
-    file: {
-      contents: buffer.toString('base64'),
-      filename: filename || 'document.pdf',
-    },
-  };
-
-  if (typeHint) {
-    document.typeHint = typeHint;
-  }
-
-  return document;
+function docupipeUrl(path) {
+  return new URL(path, config.docupipe.baseUrl).toString();
 }
 
-async function docupipeRequest(path, { method = 'GET', body, timeoutMs } = {}) {
+async function requestJson(method, path, body, { timeoutMs, context } = {}) {
   const url = docupipeUrl(path);
+  const payload = body !== undefined ? JSON.stringify(body) : undefined;
   const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
-
-  const payload = body ? JSON.stringify(body) : undefined;
 
   const response = await fetch(url, {
     method,
@@ -42,9 +25,15 @@ async function docupipeRequest(path, { method = 'GET', body, timeoutMs } = {}) {
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    const message = text || `Docupipe request failed (${response.status})`;
+    const message = text
+      ? `DocuPipe upload failed (${response.status}): ${text}`
+      : `DocuPipe upload failed (${response.status})`;
+    if (context) {
+      logger.error(message, { ...context, status: response.status });
+    }
     const error = new Error(message);
     error.status = response.status;
+    error.responseText = text;
     throw error;
   }
 
@@ -58,102 +47,115 @@ async function docupipeRequest(path, { method = 'GET', body, timeoutMs } = {}) {
   try {
     return JSON.parse(text);
   } catch (error) {
-    logger.warn('Failed to parse Docupipe JSON response', { path, error: error.message });
+    logger.warn('Failed to parse DocuPipe JSON response', { path, error: error.message });
     throw error;
   }
 }
 
-async function submitDocument({ buffer, filename, typeHint }) {
-  const document = buildSubmissionDocument({ buffer, filename, typeHint });
-
+function buildDocumentPayload({ fileUrl, buffer, filename, dataset = 'invoices', typeHint }) {
   const payload = {
+    document: {},
+    dataset,
     workflowId: config.docupipe.workflowId,
-    document,
   };
 
-  if (config.docupipe.dataset) {
-    payload.dataset = config.docupipe.dataset;
+  if (fileUrl) {
+    payload.document.url = fileUrl;
+  } else if (buffer) {
+    payload.document.file = {
+      contents: Buffer.isBuffer(buffer) ? buffer.toString('base64') : String(buffer),
+      filename: filename || 'document.pdf',
+    };
+  } else {
+    throw new Error('DocuPipe requires a fileUrl or buffer');
   }
 
-  logger.info('Submitting document to Docupipe workflow', {
-    filename: document.file.filename,
-    workflowId: config.docupipe.workflowId,
-    ...(payload.dataset ? { dataset: payload.dataset } : {}),
-  });
-
-  const result = await docupipeRequest(
-    `/v2/workflows/${encodeURIComponent(config.docupipe.workflowId)}/documents`,
-    {
-      method: 'POST',
-      body: payload,
-      timeoutMs: config.docupipe.connectTimeoutMs,
-    }
-  );
-
-  if (!result?.documentId) {
-    throw new Error('Docupipe submission response missing documentId');
-  }
-
-  return result;
-}
-
-async function waitForWorkflowJob(jobId) {
-  const start = Date.now();
-  let attempt = 0;
-
-  for (;;) {
-    const result = await docupipeRequest(`/v2/workflows/jobs/${encodeURIComponent(jobId)}`, {
-      method: 'GET',
-      timeoutMs: config.docupipe.connectTimeoutMs,
-    });
-
-    if (!result) {
-      throw new Error('Docupipe job response was empty');
-    }
-
-    const status = result.status;
-    if (status === 'completed' || status === 'failed') {
-      return result;
-    }
-
-    const elapsed = Date.now() - start;
-    if (elapsed >= config.docupipe.pollTimeoutMs) {
-      const timeoutError = new Error('Docupipe workflow timeout');
-      timeoutError.code = 'DOCUPIPE_TIMEOUT';
-      throw timeoutError;
-    }
-
-    attempt += 1;
-    const delay = Math.min(
-      config.docupipe.pollIntervalMs * Math.max(1, attempt),
-      Math.max(config.docupipe.pollIntervalMs * 4, 8000)
-    );
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-}
-
-async function fetchStandardization(documentId) {
-  const payload = await docupipeRequest(
-    `/v2/workflows/documents/${encodeURIComponent(documentId)}`,
-    {
-      method: 'GET',
-      timeoutMs: config.docupipe.connectTimeoutMs,
-    }
-  );
-
-  if (!payload) {
-    throw new Error('Docupipe standardization response was empty');
-  }
-
-  if (payload.data !== undefined) {
-    return payload;
-  }
-
-  if (Array.isArray(payload.standardizations) && payload.standardizations.length) {
-    return payload.standardizations[0];
+  if (typeHint) {
+    payload.typeHint = typeHint;
   }
 
   return payload;
+}
+
+async function submitWorkflow({ fileUrl, buffer, filename, dataset, typeHint }) {
+  const payload = buildDocumentPayload({
+    fileUrl,
+    buffer,
+    filename,
+    dataset: dataset || config.docupipe.dataset || 'invoices',
+    typeHint,
+  });
+
+  try {
+    const response = await requestJson('POST', '/document', payload, {
+      timeoutMs: config.docupipe.connectTimeoutMs,
+      context: {
+        workflowId: config.docupipe.workflowId,
+        fileUrl: fileUrl || null,
+        hasBuffer: Boolean(buffer),
+      },
+    });
+    if (!response?.jobId) {
+      const err = new Error('DocuPipe /document response missing jobId');
+      err.response = response;
+      throw err;
+    }
+    return response;
+  } catch (error) {
+    logger.error('DocuPipe upload failed', {
+      workflowId: config.docupipe.workflowId,
+      fileUrl: fileUrl || null,
+      hasBuffer: Boolean(buffer),
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+async function getJob(jobId) {
+  return requestJson('GET', `/job/${encodeURIComponent(jobId)}`);
+}
+
+async function pollJob(jobId, { intervalMs = config.docupipe.pollIntervalMs || 1500, timeoutMs = config.docupipe.pollTimeoutMs || 120000 } = {}) {
+  const start = Date.now();
+  for (;;) {
+    const job = await getJob(jobId);
+    const status = job?.status || job?.data?.status;
+    if (status === 'completed') {
+      return job;
+    }
+    if (status === 'failed') {
+      const error = new Error(`DocuPipe job failed: ${jobId}`);
+      error.job = job;
+      throw error;
+    }
+    if (Date.now() - start > timeoutMs) {
+      const error = new Error(`DocuPipe job timeout: ${jobId}`);
+      error.job = job;
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+async function getStandardization(standardizationId) {
+  return requestJson('GET', `/standardization/${encodeURIComponent(standardizationId)}`);
+}
+
+function extractStandardizationFromJob(job) {
+  if (!job || typeof job !== 'object') return null;
+  if (job.result) return job.result;
+  if (job.data?.result) return job.data.result;
+  if (job.data?.output) return job.data.output;
+  if (job.output) return job.output;
+  if (Array.isArray(job.standardizations) && job.standardizations.length) {
+    return job.standardizations[0];
+  }
+  if (Array.isArray(job.data?.standardizations) && job.data.standardizations.length) {
+    return job.data.standardizations[0];
+  }
+  if (job.data) return job.data;
+  return null;
 }
 
 function resolveDocupipeString(...values) {
@@ -170,7 +172,14 @@ function resolveDocupipeString(...values) {
       return String(value);
     }
     if (typeof value === 'object') {
-      const nested = resolveDocupipeString(value.name, value.label, value.key, value.value, value.normalizedValue, value.normalisedValue);
+      const nested = resolveDocupipeString(
+        value.name,
+        value.label,
+        value.key,
+        value.value,
+        value.normalizedValue,
+        value.normalisedValue
+      );
       if (nested) {
         return nested;
       }
@@ -184,7 +193,11 @@ function summariseDocupipeResult(result) {
     return {};
   }
 
-  const primarySource = result.data || result.document || (Array.isArray(result.documents) ? result.documents[0] : null) || result;
+  const primarySource =
+    result.data
+    || result.document
+    || (Array.isArray(result.documents) ? result.documents[0] : null)
+    || result;
 
   const documentType = resolveDocupipeString(
     result.documentType,
@@ -239,41 +252,80 @@ function summariseDocupipeResult(result) {
   return summary;
 }
 
-async function runWorkflow({ buffer, filename, typeHint }) {
-  const submission = await submitDocument({ buffer, filename, typeHint });
+async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll = true }) {
+  const submission = await submitWorkflow({ fileUrl, buffer, filename, dataset, typeHint });
+  const uploadJobId = submission.jobId || null;
+  const workflowResponse = submission.workflowResponse || {};
+  const standardizeStep =
+    workflowResponse.standardizeStep
+    || workflowResponse.standardiseStep
+    || {};
+  const standardizationJobIds = standardizeStep.standardizationJobIds || standardizeStep.standardisationJobIds;
+  const standardizationIds = standardizeStep.standardizationIds || standardizeStep.standardisationIds;
 
-  if (submission.jobId) {
-    const job = await waitForWorkflowJob(submission.jobId);
-    if (job.status === 'failed') {
-      const error = new Error(job.error || 'Docupipe job failed');
-      error.details = job;
-      throw error;
+  const stdJobId = Array.isArray(standardizationJobIds)
+    ? standardizationJobIds[0]
+    : standardizeStep.standardizationJobId || standardizeStep.standardisationJobId || null;
+  const stdId = Array.isArray(standardizationIds)
+    ? standardizationIds[0]
+    : standardizeStep.standardizationId || standardizeStep.standardisationId || null;
+
+  let finalJob = null;
+  let standardization = null;
+  let status = null;
+
+  if (poll) {
+    const jobToPoll = stdJobId || uploadJobId;
+    if (jobToPoll) {
+      finalJob = await pollJob(jobToPoll);
+      status = finalJob?.status || finalJob?.data?.status || null;
+      standardization = extractStandardizationFromJob(finalJob);
     }
   }
 
-  const standardization = await fetchStandardization(submission.documentId);
-  const summary = summariseDocupipeResult(standardization);
+  if (!standardization && stdId) {
+    try {
+      const standardizationResponse = await getStandardization(stdId);
+      if (standardizationResponse) {
+        standardization =
+          standardizationResponse.data
+          || standardizationResponse.document
+          || standardizationResponse;
+        status = status || standardizationResponse.status || standardizationResponse.data?.status || null;
+      }
+    } catch (error) {
+      logger.warn('Failed to fetch DocuPipe standardization by id', {
+        standardizationId: stdId,
+        error: error.message,
+      });
+    }
+  }
 
-  logger.info('Docupipe workflow completed', {
-    filename: filename || 'document.pdf',
-    documentId: submission.documentId,
+  const summary = summariseDocupipeResult(standardization);
+  const resolvedStatus = status || (stdJobId ? 'running' : 'completed');
+
+  const docupipeInfo = {
+    documentId: submission.documentId || null,
+    uploadJobId,
+    standardizationJobId: stdJobId || null,
+    standardizationId: stdId || null,
+    status: resolvedStatus,
     ...(summary.documentType ? { documentType: summary.documentType } : {}),
     ...(summary.classification ? { classification: summary.classification } : {}),
     ...(summary.schema ? { schema: summary.schema } : {}),
     ...(summary.catalogueKey ? { catalogueKey: summary.catalogueKey } : {}),
-  });
+  };
 
   return {
-    ...standardization,
-    docupipe: {
-      documentId: submission.documentId,
-      jobId: submission.jobId || null,
-      ...(summary.documentType ? { documentType: summary.documentType } : {}),
-      ...(summary.classification ? { classification: summary.classification } : {}),
-      ...(summary.schema ? { schema: summary.schema } : {}),
-      ...(summary.catalogueKey ? { catalogueKey: summary.catalogueKey } : {}),
-    },
+    data: standardization || null,
+    docupipe: docupipeInfo,
+    initialResponse: submission,
+    finalJob,
   };
 }
 
-module.exports = { runWorkflow };
+module.exports = {
+  runWorkflow,
+  pollJob,
+  getJob,
+};
