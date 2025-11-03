@@ -4,8 +4,8 @@ const UploadedDocumentSchema = new mongoose.Schema(
   {
     userId: { type: String, required: true, index: true },
     fileId: { type: String, required: true },
-    docType: { type: String, enum: ['payslip', 'statement'], required: true },
-    month: { type: String, required: true, index: true },
+    docType: { type: String, enum: ['payslip', 'statement', 'unknown'], required: true },
+    month: { type: String, default: null, index: true },
     periodStart: { type: String, default: null },
     periodEnd: { type: String, default: null },
     payDate: { type: String, default: null },

@@ -41,6 +41,10 @@ const config = {
     workflowId: docupipeBaseConfig?.docupipe?.workflowId || DOCUPIPE_WORKFLOW_ID,
     dataset: optionalEnv('DOCUPIPE_DATASET'),
     apiKey: docupipeBaseConfig?.docupipe?.apiKey || requireEnv('DOCUPIPE_API_KEY'),
+    payslipSchemaId:
+      docupipeBaseConfig?.docupipe?.payslipSchemaId || requireEnv('PAYSLIP_SCHEMA_ID'),
+    bankStatementSchemaId:
+      docupipeBaseConfig?.docupipe?.bankStatementSchemaId || requireEnv('BANK_STATEMENT_SCHEMA_ID'),
     connectTimeoutMs:
       docupipeBaseConfig?.docupipe?.connectTimeoutMs
       || Number(optionalEnv('DOCUPIPE_CONNECT_TIMEOUT_MS', '30000')),
