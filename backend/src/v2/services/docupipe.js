@@ -3,8 +3,45 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('docupipe');
 
+let cachedBaseUrl = null;
+let baseUrlWarningLogged = false;
+
+function getDocupipeBaseUrl() {
+  if (cachedBaseUrl) return cachedBaseUrl;
+
+  const rawBase = config.docupipe.baseUrl || 'https://app.docupipe.ai';
+
+  try {
+    const parsed = new URL(rawBase);
+    const hasPath = parsed.pathname && parsed.pathname !== '/';
+    const hasQuery = Boolean(parsed.search);
+    const hasHash = Boolean(parsed.hash);
+
+    if ((hasPath || hasQuery || hasHash) && !baseUrlWarningLogged) {
+      logger.warn('DocuPipe baseUrl contained extra path/query; normalizing to origin', {
+        baseUrl: rawBase,
+        origin: parsed.origin,
+      });
+      baseUrlWarningLogged = true;
+    }
+
+    cachedBaseUrl = parsed.origin;
+  } catch (error) {
+    if (!baseUrlWarningLogged) {
+      logger.warn('DocuPipe baseUrl invalid, defaulting to https://app.docupipe.ai', {
+        baseUrl: rawBase,
+        error: error.message,
+      });
+      baseUrlWarningLogged = true;
+    }
+    cachedBaseUrl = 'https://app.docupipe.ai';
+  }
+
+  return cachedBaseUrl;
+}
+
 function docupipeUrl(path) {
-  return new URL(path, config.docupipe.baseUrl).toString();
+  return new URL(path, getDocupipeBaseUrl()).toString();
 }
 
 async function requestJson(method, path, body, { timeoutMs, context } = {}) {
@@ -115,28 +152,18 @@ async function postDocumentWithWorkflow({
       throw err;
     }
 
-    const workflowResponse = response.workflowResponse || {};
-    const standardizeStep =
-      workflowResponse.standardizeStep
-      || workflowResponse.standardiseStep
-      || {};
-    const standardizationJobIds =
-      standardizeStep.standardizationJobIds
-      || standardizeStep.standardisationJobIds;
-    const standardizationIds =
-      standardizeStep.standardizationIds
-      || standardizeStep.standardisationIds;
+    const candidates = extractStandardizationCandidates(response);
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      logger.error('DocuPipe did not return standardization ids', { response });
+      const err = new Error('DocuPipe did not return standardization ids');
+      err.response = response;
+      err.status = 502;
+      throw err;
+    }
 
-    const stdJobId = Array.isArray(standardizationJobIds)
-      ? standardizationJobIds[0]
-      : standardizeStep.standardizationJobId
-        || standardizeStep.standardisationJobId
-        || null;
-    const stdId = Array.isArray(standardizationIds)
-      ? standardizationIds[0]
-      : standardizeStep.standardizationId
-        || standardizeStep.standardisationId
-        || null;
+    const primaryCandidate = candidates[0] || {};
+    const stdJobId = primaryCandidate.standardizationJobId || null;
+    const stdId = primaryCandidate.standardizationId || null;
 
     const uploadJobId = response.jobId || null;
 
@@ -151,6 +178,7 @@ async function postDocumentWithWorkflow({
       uploadJobId,
       stdJobId,
       stdId,
+      candidates,
     };
   } catch (error) {
     logger.error('DocuPipe upload failed', {
@@ -194,6 +222,50 @@ async function pollJob(
 
 async function getStandardization(standardizationId) {
   return requestJson('GET', `/standardization/${encodeURIComponent(standardizationId)}`);
+}
+
+function extractStandardizationCandidates(resp) {
+  const wf = resp?.workflowResponse;
+  if (!wf || typeof wf !== 'object') return [];
+
+  const std = wf.standardizeStep;
+  if (std?.standardizationIds?.length && std?.standardizationJobIds?.length) {
+    return std.standardizationIds.map((id, i) => ({
+      standardizationId: id,
+      standardizationJobId: std.standardizationJobIds[i],
+      source: 'standardizeStep',
+    }));
+  }
+
+  const cls = wf.classifyStandardizeStep;
+  if (cls?.classToStandardizationIds && cls?.classToStandardizationJobIds) {
+    const out = [];
+    for (const key of Object.keys(cls.classToStandardizationIds)) {
+      out.push({
+        classKey: key,
+        standardizationId: cls.classToStandardizationIds[key],
+        standardizationJobId: cls.classToStandardizationJobIds[key],
+        classificationJobId: cls.classificationJobId,
+        source: 'classifyStandardizeStep',
+      });
+    }
+    return out;
+  }
+
+  const out = [];
+  for (const step of Object.values(wf)) {
+    if (step?.standardizationIds && step?.standardizationJobIds) {
+      step.standardizationIds.forEach((id, index) => {
+        out.push({
+          standardizationId: id,
+          standardizationJobId: step.standardizationJobIds[index],
+          source: 'genericStep',
+        });
+      });
+    }
+  }
+
+  return out;
 }
 
 function extractStandardizationFromJob(job) {
@@ -378,4 +450,5 @@ module.exports = {
   pollJob,
   getJob,
   getStandardization,
+  extractStandardizationCandidates,
 };
