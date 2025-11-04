@@ -201,7 +201,22 @@ async function pollJob(
 ) {
   const start = Date.now();
   for (;;) {
-    const job = await getJob(jobId);
+    let job;
+    try {
+      job = await getJob(jobId);
+    } catch (error) {
+      if (error?.status === 404) {
+        logger.debug('DocuPipe job not yet available; retrying', { jobId });
+        if (Date.now() - start > timeoutMs) {
+          const timeoutError = new Error(`DocuPipe job timeout: ${jobId}`);
+          timeoutError.job = null;
+          throw timeoutError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
+      }
+      throw error;
+    }
     const status = (job?.status || job?.data?.status || '').toLowerCase();
     if (status === 'completed' || status === 'complete' || status === 'succeeded' || status === 'success') {
       return job;
