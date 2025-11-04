@@ -6,7 +6,12 @@ const UploadedDocument = require('../models/UploadedDocument');
 const DocumentResult = require('../models/DocumentResult');
 const { mongoose } = require('../models');
 const { config } = require('../config');
-const { postDocumentWithWorkflow, pollJob, getStandardization } = require('../services/docupipe');
+const {
+  postDocumentWithWorkflow,
+  pollJob,
+  getStandardization,
+  extractStandardizationCandidates,
+} = require('../services/docupipe');
 const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
 const { badRequest, notFound } = require('../utils/errors');
 const { sha256 } = require('../utils/hashing');
@@ -619,43 +624,124 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       throw error;
     }
 
-    const { initial, uploadJobId, stdJobId, stdId } = submission;
-    if (!stdId) {
+    const { initial, uploadJobId } = submission;
+    console.log('[docupipe] submitted', {
+      uploadJobId: initial?.jobId || null,
+      workflowId: initial?.workflowResponse?.workflowId || null,
+      steps: Object.keys(initial?.workflowResponse || {}),
+    });
+
+    const candidates = Array.isArray(submission.candidates)
+      ? submission.candidates
+      : extractStandardizationCandidates(initial);
+    if (!Array.isArray(candidates) || candidates.length === 0) {
       await deleteObject(r2Key).catch(() => {});
-      const stdError = new Error('DocuPipe did not return a standardization id');
+      logger.error('DocuPipe did not return standardization ids', { response: initial });
+      const stdError = new Error('DocuPipe did not return standardization ids');
       stdError.status = 502;
       throw stdError;
     }
 
-    let jobResult = null;
-    const jobToPoll = stdJobId || uploadJobId;
-    if (jobToPoll) {
+    const orderedCandidates = candidates.filter((candidate) => candidate?.standardizationId);
+    if (!orderedCandidates.length) {
+      await deleteObject(r2Key).catch(() => {});
+      logger.error('DocuPipe did not return standardization ids', { response: initial });
+      const stdError = new Error('DocuPipe did not return standardization ids');
+      stdError.status = 502;
+      throw stdError;
+    }
+
+    let selectedCandidate = null;
+    let selectedStdJson = null;
+    let selectedJobResult = null;
+    let selectedDocType = 'unknown';
+    let fallbackCandidate = null;
+    let fallbackStdJson = null;
+    let fallbackJobResult = null;
+    let uploadJobPolled = false;
+
+    for (const candidate of orderedCandidates) {
+      if (!candidate?.standardizationId) {
+        continue;
+      }
+
+      let candidateJobResult = null;
+      const jobId = candidate.standardizationJobId || null;
+      if (jobId) {
+        try {
+          candidateJobResult = await pollJob(jobId);
+        } catch (error) {
+          await deleteObject(r2Key).catch(() => {});
+          throw error;
+        }
+      } else if (uploadJobId && !uploadJobPolled) {
+        try {
+          candidateJobResult = await pollJob(uploadJobId);
+          uploadJobPolled = true;
+        } catch (error) {
+          await deleteObject(r2Key).catch(() => {});
+          throw error;
+        }
+      }
+
+      let stdJson;
       try {
-        jobResult = await pollJob(jobToPoll);
+        stdJson = await getStandardization(candidate.standardizationId);
       } catch (error) {
         await deleteObject(r2Key).catch(() => {});
         throw error;
       }
+
+      if (!stdJson || typeof stdJson !== 'object') {
+        await deleteObject(r2Key).catch(() => {});
+        const emptyError = new Error('DocuPipe standardization payload was empty');
+        emptyError.status = 502;
+        throw emptyError;
+      }
+
+      if (!fallbackCandidate) {
+        fallbackCandidate = candidate;
+        fallbackStdJson = stdJson;
+        fallbackJobResult = candidateJobResult;
+      }
+
+      const docTypeCandidate = resolveDocTypeFromSchema(stdJson);
+      if (docTypeCandidate !== 'unknown') {
+        selectedCandidate = candidate;
+        selectedStdJson = stdJson;
+        selectedJobResult = candidateJobResult;
+        selectedDocType = docTypeCandidate;
+        break;
+      }
     }
 
-    let standardizationJson;
-    try {
-      standardizationJson = await getStandardization(stdId);
-    } catch (error) {
-      await deleteObject(r2Key).catch(() => {});
-      throw error;
+    if (!selectedCandidate && fallbackCandidate) {
+      selectedCandidate = fallbackCandidate;
+      selectedStdJson = fallbackStdJson;
+      selectedJobResult = fallbackJobResult;
+      selectedDocType = resolveDocTypeFromSchema(fallbackStdJson) || 'unknown';
     }
 
-    if (!standardizationJson || typeof standardizationJson !== 'object') {
+    if (!selectedCandidate || !selectedStdJson) {
       await deleteObject(r2Key).catch(() => {});
       const emptyError = new Error('DocuPipe standardization payload was empty');
       emptyError.status = 502;
       throw emptyError;
     }
 
-    const metadata = extractStandardizationMetadata(standardizationJson);
-    const docType = resolveDocTypeFromSchema(standardizationJson);
-    const payload = extractDocumentPayload(standardizationJson);
+    const metadata = extractStandardizationMetadata(selectedStdJson);
+    const docType = selectedDocType || resolveDocTypeFromSchema(selectedStdJson) || 'unknown';
+    const payload = extractDocumentPayload(selectedStdJson);
+
+    console.log('[docupipe] selected', {
+      standardizationJobId: selectedCandidate.standardizationJobId || null,
+      standardizationId: metadata.standardizationId || selectedCandidate.standardizationId || null,
+      schemaId: metadata.schemaId || null,
+      schemaName: metadata.schemaName || null,
+      type: docType,
+    });
+
+    const jobResult = selectedJobResult || null;
 
     let parsed = null;
     if (docType === 'payslip' || docType === 'statement') {
@@ -665,7 +751,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         logger.warn('Failed to parse DocuPipe standardization payload', {
           error: error.message,
           docType,
-          standardizationId: metadata.standardizationId || stdId,
+          standardizationId: metadata.standardizationId || selectedCandidate.standardizationId,
         });
         parsed = null;
       }
@@ -677,7 +763,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       || jobResult?.data?.status
       || null;
     const docupipeStatus = normaliseDocupipeStatus(rawDocupipeStatus, {
-      hasStandardizationJob: Boolean(stdJobId),
+      hasStandardizationJob: Boolean(selectedCandidate.standardizationJobId),
     });
 
     const userObjectId = mongoose.Types.ObjectId.isValid(userId)
@@ -689,23 +775,33 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       fileUrl: buildDocumentResultFileUrl(r2Key),
       filename: originalname,
       uploadJobId: uploadJobId || null,
-      standardizationJobId: stdJobId || null,
-      standardizationId: metadata.standardizationId || stdId || null,
+      standardizationJobId: selectedCandidate.standardizationJobId || null,
+      standardizationId:
+        metadata.standardizationId
+        || selectedCandidate.standardizationId
+        || null,
       documentId: metadata.documentId || null,
       schemaId: metadata.schemaId || null,
       schemaName: metadata.schemaName || null,
       type: docType,
       initialResponse: initial,
       finalJob: jobResult,
-      standardization: standardizationJson,
+      standardization: selectedStdJson,
       status: docupipeStatus,
     });
 
     const docupipeInfo = {
       documentResultId: documentResult._id,
       uploadJobId: documentResult.uploadJobId || uploadJobId || null,
-      standardizationJobId: documentResult.standardizationJobId || stdJobId || null,
-      standardizationId: documentResult.standardizationId || metadata.standardizationId || stdId || null,
+      standardizationJobId:
+        documentResult.standardizationJobId
+        || selectedCandidate.standardizationJobId
+        || null,
+      standardizationId:
+        documentResult.standardizationId
+        || metadata.standardizationId
+        || selectedCandidate.standardizationId
+        || null,
       documentId: documentResult.documentId || metadata.documentId || null,
       schemaId: documentResult.schemaId || metadata.schemaId || null,
       schemaName: documentResult.schemaName || metadata.schemaName || null,
@@ -713,6 +809,15 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       status: documentResult.status,
       fileUrl: documentResult.fileUrl,
     };
+    if (selectedCandidate.classificationJobId) {
+      docupipeInfo.classificationJobId = selectedCandidate.classificationJobId;
+    }
+    if (selectedCandidate.classKey) {
+      docupipeInfo.classKey = selectedCandidate.classKey;
+    }
+    if (selectedCandidate.source) {
+      docupipeInfo.source = selectedCandidate.source;
+    }
     docupipeInfo.schema = docupipeInfo.schemaName;
     docupipeInfo.jobId =
       docupipeInfo.standardizationJobId
@@ -744,7 +849,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
           documentId: docupipeInfo.documentId || null,
           schemaId: docupipeInfo.schemaId || null,
           schemaName: docupipeInfo.schemaName || null,
-          standardization: standardizationJson,
+          standardization: selectedStdJson,
         },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
