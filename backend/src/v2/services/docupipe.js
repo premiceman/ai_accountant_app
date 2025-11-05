@@ -3,7 +3,8 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('docupipe');
 
-const missingJobLogCache = new Set();
+const SKIPPED_JOB_LOG_THROTTLE_MS = 60000;
+const skippedJobLogCache = new Map();
 const missingStandardizationLogCache = new Set();
 
 let cachedBaseUrl = null;
@@ -625,6 +626,7 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
         if (!criticalCandidate && (isNotFound || isTimeout)) {
           skippedPoll = true;
           pollError = error;
+          shouldWaitForStandardization = true;
           logger.warn('Skipping non-critical DocuPipe job after polling failure', {
             jobId: candidate.standardizationJobId,
             step: candidateStep,
@@ -647,24 +649,12 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
       }
     }
 
-    if (skippedPoll) {
-      standardizationResults.push({
-        ...candidate,
-        data: null,
-        status: 'skipped',
-        job: null,
-        skipped: true,
-        pollError: pollError?.message || null,
-      });
-      continue;
-    }
-
     if (!candidateData) {
       const fetched = await fetchStandardizationById(candidate, candidateStatus, {
-        wait: shouldWaitForStandardization,
+        wait: shouldWaitForStandardization || skippedPoll,
       });
       candidateData = fetched.data;
-      candidateStatus = fetched.status;
+      candidateStatus = fetched.status || candidateStatus || (skippedPoll ? 'skipped' : null);
     }
 
     standardizationResults.push({
@@ -672,6 +662,8 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
       data: candidateData,
       status: candidateStatus,
       job: candidateJob,
+      skipped: skippedPoll || undefined,
+      pollError: skippedPoll ? pollError?.message || null : undefined,
     });
   }
 
