@@ -10,6 +10,10 @@ function createRouter() {
       stack.push({ route: { path, stack: [{ handle: handler }] } });
       return this;
     },
+    get(path, handler) {
+      stack.push({ route: { path, stack: [{ handle: handler }] } });
+      return this;
+    },
     post(path, ...handlers) {
       stack.push({ route: { path, stack: handlers.map((handle) => ({ handle })) } });
       return this;

@@ -483,6 +483,19 @@ function buildDocumentResultFileUrl(key) {
   return key;
 }
 
+function extractHttpStatus(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  if (typeof error.status === 'number') {
+    return error.status;
+  }
+  if (error.cause) {
+    return extractHttpStatus(error.cause);
+  }
+  return null;
+}
+
 function formatPayslipResponse(doc) {
   return {
     fileId: doc.fileId,
@@ -659,6 +672,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
     let fallbackStdJson = null;
     let fallbackJobResult = null;
     let uploadJobPolled = false;
+    let uploadJobResult = null;
 
     for (const candidate of orderedCandidates) {
       if (!candidate?.standardizationId) {
@@ -671,16 +685,43 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         try {
           candidateJobResult = await pollJob(jobId);
         } catch (error) {
-          await deleteObject(r2Key).catch(() => {});
-          throw error;
+          const status = extractHttpStatus(error);
+          if (status !== 404) {
+            await deleteObject(r2Key).catch(() => {});
+            throw error;
+          }
         }
       } else if (uploadJobId && !uploadJobPolled) {
         try {
-          candidateJobResult = await pollJob(uploadJobId);
-          uploadJobPolled = true;
+          uploadJobResult = await pollJob(uploadJobId);
+          candidateJobResult = uploadJobResult;
         } catch (error) {
-          await deleteObject(r2Key).catch(() => {});
-          throw error;
+          const status = extractHttpStatus(error);
+          if (status !== 404) {
+            await deleteObject(r2Key).catch(() => {});
+            throw error;
+          }
+          uploadJobResult = null;
+        }
+        uploadJobPolled = true;
+      }
+
+      if (!candidateJobResult && uploadJobId) {
+        if (!uploadJobPolled) {
+          try {
+            uploadJobResult = await pollJob(uploadJobId);
+          } catch (error) {
+            const status = extractHttpStatus(error);
+            if (status !== 404) {
+              await deleteObject(r2Key).catch(() => {});
+              throw error;
+            }
+            uploadJobResult = null;
+          }
+          uploadJobPolled = true;
+        }
+        if (uploadJobResult) {
+          candidateJobResult = uploadJobResult;
         }
       }
 
