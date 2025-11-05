@@ -588,11 +588,27 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
 
   let finalJob = null;
 
-  for (const candidate of standardizationJobs) {
+  const isCriticalCandidate = (candidate, index) => {
+    if (!candidate) return false;
+    if (candidate.standardizationJobId && stdJobId && candidate.standardizationJobId === stdJobId) {
+      return true;
+    }
+    if (index === 0) return true;
+    if ((candidate.source || '').toLowerCase() === 'standardizestep') return true;
+    return false;
+  };
+
+  for (const [candidateIndex, candidate] of standardizationJobs.entries()) {
     let candidateJob = null;
     let candidateStatus = null;
     let candidateData = null;
     let shouldWaitForStandardization = !poll || !candidate.standardizationJobId;
+
+    const candidateSource = candidate?.source || null;
+    const candidateStep = typeof candidateSource === 'string' ? candidateSource : null;
+    const criticalCandidate = isCriticalCandidate(candidate, candidateIndex);
+    let skippedPoll = false;
+    let pollError = null;
 
     if (poll && candidate.standardizationJobId) {
       try {
@@ -601,21 +617,46 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
         candidateData = extractStandardizationFromJob(candidateJob);
         completedJobs.push({ type: 'standardization', job: candidateJob, candidate });
         finalJob = candidateJob;
-        shouldWaitForStandardization = shouldWaitForStandardization || !candidateData;
       } catch (error) {
-        const timeout = error?.message?.startsWith('DocuPipe job timeout');
-        const missing = error?.status === 404 || error?.cause?.status === 404;
-        if (timeout || missing) {
-          logger.warn('DocuPipe standardization job polling incomplete', {
-            standardizationJobId: candidate.standardizationJobId,
-            standardizationId: candidate.standardizationId || null,
+        const causeStatus = error?.status || error?.cause?.status || null;
+        const isNotFound = causeStatus === 404;
+        const isTimeout = typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout');
+
+        if (!criticalCandidate && (isNotFound || isTimeout)) {
+          skippedPoll = true;
+          pollError = error;
+          logger.warn('Skipping non-critical DocuPipe job after polling failure', {
+            jobId: candidate.standardizationJobId,
+            step: candidateStep,
+            classKey: candidate.classKey || null,
+            reason: isNotFound ? 'not_found' : 'timeout',
             error: error.message,
           });
-          shouldWaitForStandardization = true;
+          completedJobs.push({
+            type: 'standardization',
+            job: null,
+            candidate,
+            skipped: true,
+            error: error.message,
+            jobId: candidate.standardizationJobId || null,
+            step: candidateStep,
+          });
         } else {
           throw error;
         }
       }
+    }
+
+    if (skippedPoll) {
+      standardizationResults.push({
+        ...candidate,
+        data: null,
+        status: 'skipped',
+        job: null,
+        skipped: true,
+        pollError: pollError?.message || null,
+      });
+      continue;
     }
 
     if (!candidateData) {
