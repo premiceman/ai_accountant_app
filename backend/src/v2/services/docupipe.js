@@ -4,6 +4,7 @@ const { createLogger } = require('../utils/logger');
 const logger = createLogger('docupipe');
 
 const missingJobLogCache = new Set();
+const missingStandardizationLogCache = new Set();
 
 let cachedBaseUrl = null;
 let baseUrlWarningLogged = false;
@@ -263,6 +264,50 @@ async function getStandardization(standardizationId) {
   return requestJson('GET', `/standardization/${encodeURIComponent(standardizationId)}`);
 }
 
+async function waitForStandardization(
+  standardizationId,
+  {
+    intervalMs = config.docupipe.pollIntervalMs || 1500,
+    timeoutMs = config.docupipe.pollTimeoutMs || 120000,
+  } = {}
+) {
+  if (!standardizationId) {
+    throw new Error('DocuPipe standardizationId is required');
+  }
+
+  const start = Date.now();
+
+  for (;;) {
+    try {
+      const result = await getStandardization(standardizationId);
+      if (missingStandardizationLogCache.has(standardizationId)) {
+        missingStandardizationLogCache.delete(standardizationId);
+      }
+      return result;
+    } catch (error) {
+      if (error?.status === 404) {
+        if (!missingStandardizationLogCache.has(standardizationId)) {
+          logger.error('DocuPipe standardization not found yet', { standardizationId });
+          missingStandardizationLogCache.add(standardizationId);
+        }
+
+        if (Date.now() - start > timeoutMs) {
+          const timeoutError = new Error(
+            `DocuPipe standardization timeout: ${standardizationId}`
+          );
+          timeoutError.cause = error;
+          throw timeoutError;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
+      }
+
+      throw error;
+    }
+  }
+}
+
 function extractStandardizationCandidates(resp) {
   const wf = resp?.workflowResponse;
   if (!wf || typeof wf !== 'object') return [];
@@ -436,10 +481,12 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
 
   const normaliseStatus = (job) => (job?.status || job?.data?.status || '').toLowerCase() || null;
 
-  const fetchStandardizationById = async (candidate, contextStatus) => {
+  const fetchStandardizationById = async (candidate, contextStatus, { wait } = {}) => {
     if (!candidate.standardizationId) return { data: null, status: contextStatus };
     try {
-      const standardizationResponse = await getStandardization(candidate.standardizationId);
+      const standardizationResponse = await (wait
+        ? waitForStandardization(candidate.standardizationId)
+        : getStandardization(candidate.standardizationId));
       if (standardizationResponse) {
         const responseStatus =
           standardizationResponse.status
@@ -478,17 +525,36 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
     let candidateJob = null;
     let candidateStatus = null;
     let candidateData = null;
+    let shouldWaitForStandardization = !poll || !candidate.standardizationJobId;
 
     if (poll && candidate.standardizationJobId) {
-      candidateJob = await pollJob(candidate.standardizationJobId);
-      candidateStatus = normaliseStatus(candidateJob) || candidateJob?.status || null;
-      candidateData = extractStandardizationFromJob(candidateJob);
-      completedJobs.push({ type: 'standardization', job: candidateJob, candidate });
-      finalJob = candidateJob;
+      try {
+        candidateJob = await pollJob(candidate.standardizationJobId);
+        candidateStatus = normaliseStatus(candidateJob) || candidateJob?.status || null;
+        candidateData = extractStandardizationFromJob(candidateJob);
+        completedJobs.push({ type: 'standardization', job: candidateJob, candidate });
+        finalJob = candidateJob;
+        shouldWaitForStandardization = shouldWaitForStandardization || !candidateData;
+      } catch (error) {
+        const timeout = error?.message?.startsWith('DocuPipe job timeout');
+        const missing = error?.status === 404 || error?.cause?.status === 404;
+        if (timeout || missing) {
+          logger.warn('DocuPipe standardization job polling incomplete', {
+            standardizationJobId: candidate.standardizationJobId,
+            standardizationId: candidate.standardizationId || null,
+            error: error.message,
+          });
+          shouldWaitForStandardization = true;
+        } else {
+          throw error;
+        }
+      }
     }
 
     if (!candidateData) {
-      const fetched = await fetchStandardizationById(candidate, candidateStatus);
+      const fetched = await fetchStandardizationById(candidate, candidateStatus, {
+        wait: shouldWaitForStandardization,
+      });
       candidateData = fetched.data;
       candidateStatus = fetched.status;
     }
@@ -542,5 +608,6 @@ module.exports = {
   pollJob,
   getJob,
   getStandardization,
+  waitForStandardization,
   extractStandardizationCandidates,
 };
