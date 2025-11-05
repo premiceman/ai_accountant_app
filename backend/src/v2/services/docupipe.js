@@ -9,6 +9,56 @@ const missingStandardizationLogCache = new Set();
 let cachedBaseUrl = null;
 let baseUrlWarningLogged = false;
 
+function buildCandidateLogMetadata(candidate) {
+  if (!candidate || typeof candidate !== 'object') {
+    return null;
+  }
+
+  return {
+    classKey: candidate.classKey || null,
+    standardizationJobId: candidate.standardizationJobId || null,
+    standardizationId: candidate.standardizationId || null,
+    classificationJobId: candidate.classificationJobId || null,
+    source: candidate.source || null,
+  };
+}
+
+function skippedJobLogKey(jobId, reason) {
+  return `${jobId}:${reason}`;
+}
+
+function clearSkippedJobLogs(jobId) {
+  if (!jobId) return;
+  skippedJobLogCache.delete(skippedJobLogKey(jobId, 'not_found'));
+  skippedJobLogCache.delete(skippedJobLogKey(jobId, 'timeout'));
+}
+
+function logSkippedJob(jobId, reason, { candidate, jobType, elapsedMs, intervalMs } = {}) {
+  if (!jobId || !reason) return;
+  const key = skippedJobLogKey(jobId, reason);
+  const now = Date.now();
+  const last = skippedJobLogCache.get(key) || 0;
+  if (now - last < SKIPPED_JOB_LOG_THROTTLE_MS) {
+    return;
+  }
+  skippedJobLogCache.set(key, now);
+
+  const meta = {
+    jobId,
+    reason,
+    ...(jobType ? { jobType } : {}),
+    ...(typeof elapsedMs === 'number' ? { elapsedMs } : {}),
+    ...(typeof intervalMs === 'number' ? { intervalMs } : {}),
+  };
+
+  const candidateMeta = buildCandidateLogMetadata(candidate);
+  if (candidateMeta) {
+    meta.candidate = candidateMeta;
+  }
+
+  logger.warn('DocuPipe job skipped', meta);
+}
+
 function getDocupipeBaseUrl() {
   if (cachedBaseUrl) return cachedBaseUrl;
 
@@ -216,23 +266,34 @@ async function getJob(jobId) {
 
 async function pollJob(
   jobId,
-  { intervalMs = config.docupipe.pollIntervalMs || 1500, timeoutMs = config.docupipe.pollTimeoutMs || 120000 } = {}
+  {
+    intervalMs = config.docupipe.pollIntervalMs || 1500,
+    timeoutMs = config.docupipe.pollTimeoutMs || 120000,
+    candidate = null,
+    jobType = null,
+  } = {}
 ) {
   const start = Date.now();
   for (;;) {
     let job;
     try {
       job = await getJob(jobId);
-      if (missingJobLogCache.has(jobId)) {
-        missingJobLogCache.delete(jobId);
-      }
+      clearSkippedJobLogs(jobId);
     } catch (error) {
       if (error?.status === 404) {
-        if (!missingJobLogCache.has(jobId)) {
-          logger.error('DocuPipe job not found yet', { jobId });
-          missingJobLogCache.add(jobId);
-        }
+        logSkippedJob(jobId, 'not_found', {
+          candidate,
+          jobType,
+          elapsedMs: Date.now() - start,
+          intervalMs,
+        });
         if (Date.now() - start > timeoutMs) {
+          logSkippedJob(jobId, 'timeout', {
+            candidate,
+            jobType,
+            elapsedMs: Date.now() - start,
+            intervalMs,
+          });
           const timeoutError = new Error(`DocuPipe job timeout: ${jobId}`);
           timeoutError.cause = error;
           throw timeoutError;
@@ -252,6 +313,12 @@ async function pollJob(
       throw error;
     }
     if (Date.now() - start > timeoutMs) {
+      logSkippedJob(jobId, 'timeout', {
+        candidate,
+        jobType,
+        elapsedMs: Date.now() - start,
+        intervalMs,
+      });
       const error = new Error(`DocuPipe job timeout: ${jobId}`);
       error.job = job;
       throw error;
@@ -510,12 +577,12 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
   };
 
   if (poll && uploadJobId) {
-    const uploadJob = await pollJob(uploadJobId);
+    const uploadJob = await pollJob(uploadJobId, { jobType: 'upload' });
     completedJobs.push({ type: 'upload', job: uploadJob });
   }
 
   if (poll && classificationJobId) {
-    const classificationJob = await pollJob(classificationJobId);
+    const classificationJob = await pollJob(classificationJobId, { jobType: 'classification' });
     completedJobs.push({ type: 'classification', job: classificationJob });
   }
 
