@@ -3,6 +3,8 @@ const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('docupipe');
 
+const missingJobLogCache = new Set();
+
 let cachedBaseUrl = null;
 let baseUrlWarningLogged = false;
 
@@ -166,11 +168,25 @@ async function postDocumentWithWorkflow({
     const stdId = primaryCandidate.standardizationId || null;
 
     const uploadJobId = response.jobId || null;
+    const classificationJobId =
+      response?.workflowResponse?.classifyStandardizeStep?.classificationJobId || null;
+
+    const standardizationJobs = candidates.map((candidate) => ({
+      classKey: candidate.classKey || null,
+      standardizationJobId: candidate.standardizationJobId || null,
+      standardizationId: candidate.standardizationId || null,
+      classificationJobId: candidate.classificationJobId || classificationJobId || null,
+      source: candidate.source || null,
+    }));
 
     logger.info('DocuPipe workflow submitted', {
       uploadJobId,
+      classificationJobId,
       standardizationJobId: stdJobId,
       standardizationId: stdId,
+      standardizationJobIds: standardizationJobs
+        .map((job) => job.standardizationJobId)
+        .filter(Boolean),
     });
 
     return {
@@ -179,6 +195,8 @@ async function postDocumentWithWorkflow({
       stdJobId,
       stdId,
       candidates,
+      classificationJobId,
+      standardizationJobs,
     };
   } catch (error) {
     logger.error('DocuPipe upload failed', {
@@ -201,7 +219,28 @@ async function pollJob(
 ) {
   const start = Date.now();
   for (;;) {
-    const job = await getJob(jobId);
+    let job;
+    try {
+      job = await getJob(jobId);
+      if (missingJobLogCache.has(jobId)) {
+        missingJobLogCache.delete(jobId);
+      }
+    } catch (error) {
+      if (error?.status === 404) {
+        if (!missingJobLogCache.has(jobId)) {
+          logger.error('DocuPipe job not found yet', { jobId });
+          missingJobLogCache.add(jobId);
+        }
+        if (Date.now() - start > timeoutMs) {
+          const timeoutError = new Error(`DocuPipe job timeout: ${jobId}`);
+          timeoutError.cause = error;
+          throw timeoutError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        continue;
+      }
+      throw error;
+    }
     const status = (job?.status || job?.data?.status || '').toLowerCase();
     if (status === 'completed' || status === 'complete' || status === 'succeeded' || status === 'success') {
       return job;
@@ -387,49 +426,100 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
     typeHint,
   });
   const uploadJobId = submission.uploadJobId || null;
+  const classificationJobId = submission.classificationJobId || null;
   const stdJobId = submission.stdJobId || null;
   const stdId = submission.stdId || null;
+  const standardizationJobs = submission.standardizationJobs || submission.candidates || [];
 
-  let finalJob = null;
-  let standardization = null;
-  let status = null;
+  const completedJobs = [];
+  const standardizationResults = [];
 
-  if (poll) {
-    const jobToPoll = stdJobId || uploadJobId;
-    if (jobToPoll) {
-      finalJob = await pollJob(jobToPoll);
-      status = finalJob?.status || finalJob?.data?.status || null;
-      standardization = extractStandardizationFromJob(finalJob);
-    }
-  }
+  const normaliseStatus = (job) => (job?.status || job?.data?.status || '').toLowerCase() || null;
 
-  if (!standardization && stdId) {
+  const fetchStandardizationById = async (candidate, contextStatus) => {
+    if (!candidate.standardizationId) return { data: null, status: contextStatus };
     try {
-      const standardizationResponse = await getStandardization(stdId);
+      const standardizationResponse = await getStandardization(candidate.standardizationId);
       if (standardizationResponse) {
-        standardization =
+        const responseStatus =
+          standardizationResponse.status
+          || standardizationResponse.data?.status
+          || contextStatus
+          || null;
+        const payload =
           standardizationResponse.data
           || standardizationResponse.document
           || standardizationResponse;
-        status = status || standardizationResponse.status || standardizationResponse.data?.status || null;
+        return { data: payload, status: responseStatus };
       }
     } catch (error) {
       logger.warn('Failed to fetch DocuPipe standardization by id', {
-        standardizationId: stdId,
+        standardizationId: candidate.standardizationId,
+        jobId: candidate.standardizationJobId || null,
         error: error.message,
       });
     }
+    return { data: null, status: contextStatus };
+  };
+
+  if (poll && uploadJobId) {
+    const uploadJob = await pollJob(uploadJobId);
+    completedJobs.push({ type: 'upload', job: uploadJob });
   }
 
+  if (poll && classificationJobId) {
+    const classificationJob = await pollJob(classificationJobId);
+    completedJobs.push({ type: 'classification', job: classificationJob });
+  }
+
+  let finalJob = null;
+
+  for (const candidate of standardizationJobs) {
+    let candidateJob = null;
+    let candidateStatus = null;
+    let candidateData = null;
+
+    if (poll && candidate.standardizationJobId) {
+      candidateJob = await pollJob(candidate.standardizationJobId);
+      candidateStatus = normaliseStatus(candidateJob) || candidateJob?.status || null;
+      candidateData = extractStandardizationFromJob(candidateJob);
+      completedJobs.push({ type: 'standardization', job: candidateJob, candidate });
+      finalJob = candidateJob;
+    }
+
+    if (!candidateData) {
+      const fetched = await fetchStandardizationById(candidate, candidateStatus);
+      candidateData = fetched.data;
+      candidateStatus = fetched.status;
+    }
+
+    standardizationResults.push({
+      ...candidate,
+      data: candidateData,
+      status: candidateStatus,
+      job: candidateJob,
+    });
+  }
+
+  const primaryResult = standardizationResults[0] || null;
+  const standardization = primaryResult?.data || null;
+  const status = primaryResult?.status || normaliseStatus(finalJob) || (stdJobId ? 'running' : 'completed');
+
   const summary = summariseDocupipeResult(standardization);
-  const resolvedStatus = status || (stdJobId ? 'running' : 'completed');
 
   const docupipeInfo = {
     documentId: submission.initial?.documentId || null,
     uploadJobId,
+    classificationJobId: classificationJobId || null,
     standardizationJobId: stdJobId || null,
     standardizationId: stdId || null,
-    status: resolvedStatus,
+    standardizationJobs: standardizationResults.map((result) => ({
+      classKey: result.classKey || null,
+      standardizationJobId: result.standardizationJobId || null,
+      standardizationId: result.standardizationId || null,
+      status: result.status || null,
+    })),
+    status,
     ...(summary.documentType ? { documentType: summary.documentType } : {}),
     ...(summary.classification ? { classification: summary.classification } : {}),
     ...(summary.schema ? { schema: summary.schema } : {}),
@@ -441,6 +531,8 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
     docupipe: docupipeInfo,
     initialResponse: submission.initial,
     finalJob,
+    standardizations: standardizationResults,
+    jobs: completedJobs,
   };
 }
 
