@@ -10,6 +10,7 @@ const {
   postDocumentWithWorkflow,
   pollJob,
   getStandardization,
+  waitForStandardization,
   extractStandardizationCandidates,
 } = require('../services/docupipe');
 const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
@@ -680,54 +681,66 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       }
 
       let candidateJobResult = null;
+      let shouldWaitForStd = !candidate.standardizationJobId;
       const jobId = candidate.standardizationJobId || null;
+
       if (jobId) {
         try {
           candidateJobResult = await pollJob(jobId);
         } catch (error) {
           const status = extractHttpStatus(error);
-          if (status !== 404) {
+          const isTimeout = typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout');
+          if (status === 404 || isTimeout) {
+            shouldWaitForStd = true;
+            logger.warn('DocuPipe candidate job unavailable; waiting on standardization payload', {
+              jobId,
+              standardizationId: candidate.standardizationId,
+              reason: status === 404 ? 'not_found' : 'timeout',
+            });
+          } else {
             await deleteObject(r2Key).catch(() => {});
             throw error;
           }
         }
-      } else if (uploadJobId && !uploadJobPolled) {
-        try {
-          uploadJobResult = await pollJob(uploadJobId);
-          candidateJobResult = uploadJobResult;
-        } catch (error) {
-          const status = extractHttpStatus(error);
-          if (status !== 404) {
-            await deleteObject(r2Key).catch(() => {});
-            throw error;
-          }
-          uploadJobResult = null;
-        }
-        uploadJobPolled = true;
       }
 
-      if (!candidateJobResult && uploadJobId) {
+      if ((!candidateJobResult || shouldWaitForStd) && uploadJobId) {
         if (!uploadJobPolled) {
           try {
             uploadJobResult = await pollJob(uploadJobId);
           } catch (error) {
             const status = extractHttpStatus(error);
-            if (status !== 404) {
+            const isTimeout = typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout');
+            if (status === 404 || isTimeout) {
+              shouldWaitForStd = true;
+              logger.warn('DocuPipe upload job unavailable during dashboard processing', {
+                uploadJobId,
+                standardizationId: candidate.standardizationId,
+                reason: status === 404 ? 'not_found' : 'timeout',
+              });
+              uploadJobResult = null;
+            } else {
               await deleteObject(r2Key).catch(() => {});
               throw error;
             }
-            uploadJobResult = null;
           }
           uploadJobPolled = true;
         }
+
         if (uploadJobResult) {
           candidateJobResult = uploadJobResult;
         }
       }
 
+      if (!candidateJobResult) {
+        shouldWaitForStd = true;
+      }
+
       let stdJson;
       try {
-        stdJson = await getStandardization(candidate.standardizationId);
+        stdJson = await (shouldWaitForStd
+          ? waitForStandardization(candidate.standardizationId)
+          : getStandardization(candidate.standardizationId));
       } catch (error) {
         await deleteObject(r2Key).catch(() => {});
         throw error;
