@@ -474,17 +474,74 @@ async function runWorkflow({ fileUrl, buffer, filename, dataset, typeHint, poll 
 
   let finalJob = null;
 
-  for (const candidate of standardizationJobs) {
+  const isCriticalCandidate = (candidate, index) => {
+    if (!candidate) return false;
+    if (candidate.standardizationJobId && stdJobId && candidate.standardizationJobId === stdJobId) {
+      return true;
+    }
+    if (index === 0) return true;
+    if ((candidate.source || '').toLowerCase() === 'standardizestep') return true;
+    return false;
+  };
+
+  for (const [candidateIndex, candidate] of standardizationJobs.entries()) {
     let candidateJob = null;
     let candidateStatus = null;
     let candidateData = null;
 
+    const candidateSource = candidate?.source || null;
+    const candidateStep = typeof candidateSource === 'string' ? candidateSource : null;
+    const criticalCandidate = isCriticalCandidate(candidate, candidateIndex);
+    let skippedPoll = false;
+    let pollError = null;
+
     if (poll && candidate.standardizationJobId) {
-      candidateJob = await pollJob(candidate.standardizationJobId);
-      candidateStatus = normaliseStatus(candidateJob) || candidateJob?.status || null;
-      candidateData = extractStandardizationFromJob(candidateJob);
-      completedJobs.push({ type: 'standardization', job: candidateJob, candidate });
-      finalJob = candidateJob;
+      try {
+        candidateJob = await pollJob(candidate.standardizationJobId);
+        candidateStatus = normaliseStatus(candidateJob) || candidateJob?.status || null;
+        candidateData = extractStandardizationFromJob(candidateJob);
+        completedJobs.push({ type: 'standardization', job: candidateJob, candidate });
+        finalJob = candidateJob;
+      } catch (error) {
+        const causeStatus = error?.status || error?.cause?.status || null;
+        const isNotFound = causeStatus === 404;
+        const isTimeout = typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout');
+
+        if (!criticalCandidate && (isNotFound || isTimeout)) {
+          skippedPoll = true;
+          pollError = error;
+          logger.warn('Skipping non-critical DocuPipe job after polling failure', {
+            jobId: candidate.standardizationJobId,
+            step: candidateStep,
+            classKey: candidate.classKey || null,
+            reason: isNotFound ? 'not_found' : 'timeout',
+            error: error.message,
+          });
+          completedJobs.push({
+            type: 'standardization',
+            job: null,
+            candidate,
+            skipped: true,
+            error: error.message,
+            jobId: candidate.standardizationJobId || null,
+            step: candidateStep,
+          });
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (skippedPoll) {
+      standardizationResults.push({
+        ...candidate,
+        data: null,
+        status: 'skipped',
+        job: null,
+        skipped: true,
+        pollError: pollError?.message || null,
+      });
+      continue;
     }
 
     if (!candidateData) {
