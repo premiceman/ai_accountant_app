@@ -8,10 +8,10 @@ const { mongoose } = require('../models');
 const { config } = require('../config');
 const {
   postDocumentWithWorkflow,
-  pollJob,
-  getStandardization,
-  waitForStandardization,
   extractStandardizationCandidates,
+  pollJobResilient,
+  getStandardizationWithRetry,
+  getDocupipeRequestConfig,
 } = require('../services/docupipe');
 const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
 const { badRequest, notFound } = require('../utils/errors');
@@ -484,19 +484,6 @@ function buildDocumentResultFileUrl(key) {
   return key;
 }
 
-function extractHttpStatus(error) {
-  if (!error || typeof error !== 'object') {
-    return null;
-  }
-  if (typeof error.status === 'number') {
-    return error.status;
-  }
-  if (error.cause) {
-    return extractHttpStatus(error.cause);
-  }
-  return null;
-}
-
 function formatPayslipResponse(doc) {
   return {
     fileId: doc.fileId,
@@ -645,10 +632,24 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       steps: Object.keys(initial?.workflowResponse || {}),
     });
 
-    const candidates = Array.isArray(submission.candidates)
+    const candidateList = Array.isArray(submission.candidates)
       ? submission.candidates
       : extractStandardizationCandidates(initial);
-    if (!Array.isArray(candidates) || candidates.length === 0) {
+
+    const candidates = Array.isArray(candidateList)
+      ? candidateList.filter((candidate) => candidate?.standardizationId)
+      : [];
+
+    console.log(
+      '[docupipe] candidates',
+      candidates.map((c) => ({
+        src: c.source || null,
+        job: c.standardizationJobId || null,
+        id: c.standardizationId || null,
+      }))
+    );
+
+    if (!candidates.length) {
       await deleteObject(r2Key).catch(() => {});
       logger.error('DocuPipe did not return standardization ids', { response: initial });
       const stdError = new Error('DocuPipe did not return standardization ids');
@@ -656,140 +657,92 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       throw stdError;
     }
 
-    const orderedCandidates = candidates.filter((candidate) => candidate?.standardizationId);
-    if (!orderedCandidates.length) {
-      await deleteObject(r2Key).catch(() => {});
-      logger.error('DocuPipe did not return standardization ids', { response: initial });
-      const stdError = new Error('DocuPipe did not return standardization ids');
-      stdError.status = 502;
-      throw stdError;
-    }
-
+    const { headers, baseUrl } = getDocupipeRequestConfig();
     let selectedCandidate = null;
     let selectedStdJson = null;
     let selectedJobResult = null;
-    let selectedDocType = 'unknown';
-    let fallbackCandidate = null;
-    let fallbackStdJson = null;
-    let fallbackJobResult = null;
-    let uploadJobPolled = false;
-    let uploadJobResult = null;
 
-    for (const candidate of orderedCandidates) {
+    for (const candidate of candidates) {
       if (!candidate?.standardizationId) {
         continue;
       }
 
-      let candidateJobResult = null;
-      let shouldWaitForStd = !candidate.standardizationJobId;
-      const jobId = candidate.standardizationJobId || null;
+      let jobResult = null;
+      let pollError = null;
 
-      if (jobId) {
+      if (candidate.standardizationJobId) {
         try {
-          candidateJobResult = await pollJob(jobId);
+          jobResult = await pollJobResilient(candidate.standardizationJobId, {
+            headers,
+            baseUrl,
+          });
         } catch (error) {
-          const status = extractHttpStatus(error);
-          const isTimeout = typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout');
-          if (status === 404 || isTimeout) {
-            shouldWaitForStd = true;
-            logger.warn('DocuPipe candidate job unavailable; waiting on standardization payload', {
-              jobId,
-              standardizationId: candidate.standardizationId,
-              reason: status === 404 ? 'not_found' : 'timeout',
-            });
-          } else {
-            await deleteObject(r2Key).catch(() => {});
-            throw error;
-          }
+          pollError = error;
+          console.warn('[docupipe] candidate failed', {
+            jobId: candidate.standardizationJobId || null,
+            id: candidate.standardizationId || null,
+            phase: 'poll',
+            err: String(error),
+          });
         }
       }
 
-      if ((!candidateJobResult || shouldWaitForStd) && uploadJobId) {
-        if (!uploadJobPolled) {
-          try {
-            uploadJobResult = await pollJob(uploadJobId);
-          } catch (error) {
-            const status = extractHttpStatus(error);
-            const isTimeout = typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout');
-            if (status === 404 || isTimeout) {
-              shouldWaitForStd = true;
-              logger.warn('DocuPipe upload job unavailable during dashboard processing', {
-                uploadJobId,
-                standardizationId: candidate.standardizationId,
-                reason: status === 404 ? 'not_found' : 'timeout',
-              });
-              uploadJobResult = null;
-            } else {
-              await deleteObject(r2Key).catch(() => {});
-              throw error;
-            }
-          }
-          uploadJobPolled = true;
-        }
-
-        if (uploadJobResult) {
-          candidateJobResult = uploadJobResult;
-        }
-      }
-
-      if (!candidateJobResult) {
-        shouldWaitForStd = true;
-      }
-
-      let stdJson;
+      let stdJson = null;
       try {
-        stdJson = await (shouldWaitForStd
-          ? waitForStandardization(candidate.standardizationId)
-          : getStandardization(candidate.standardizationId));
+        stdJson = await getStandardizationWithRetry(candidate.standardizationId, {
+          headers,
+          baseUrl,
+        });
       } catch (error) {
-        await deleteObject(r2Key).catch(() => {});
-        throw error;
+        console.warn('[docupipe] candidate failed', {
+          jobId: candidate.standardizationJobId || null,
+          id: candidate.standardizationId || null,
+          phase: 'standardization',
+          err: String(error),
+        });
+        continue;
       }
 
       if (!stdJson || typeof stdJson !== 'object') {
-        await deleteObject(r2Key).catch(() => {});
-        const emptyError = new Error('DocuPipe standardization payload was empty');
-        emptyError.status = 502;
-        throw emptyError;
+        console.warn('[docupipe] candidate failed', {
+          jobId: candidate.standardizationJobId || null,
+          id: candidate.standardizationId || null,
+          phase: 'standardization',
+          err: 'DocuPipe standardization payload was empty',
+        });
+        continue;
       }
 
-      if (!fallbackCandidate) {
-        fallbackCandidate = candidate;
-        fallbackStdJson = stdJson;
-        fallbackJobResult = candidateJobResult;
-      }
+      const type = resolveDocTypeFromSchema(stdJson) || 'unknown';
+      const isPreferred = type === 'payslip' || type === 'statement';
 
-      const docTypeCandidate = resolveDocTypeFromSchema(stdJson);
-      if (docTypeCandidate !== 'unknown') {
-        selectedCandidate = candidate;
+      if (isPreferred || !selectedCandidate) {
+        selectedCandidate = { ...candidate, type };
         selectedStdJson = stdJson;
-        selectedJobResult = candidateJobResult;
-        selectedDocType = docTypeCandidate;
-        break;
+        selectedJobResult = pollError ? null : jobResult;
+        if (isPreferred) {
+          break;
+        }
       }
-    }
-
-    if (!selectedCandidate && fallbackCandidate) {
-      selectedCandidate = fallbackCandidate;
-      selectedStdJson = fallbackStdJson;
-      selectedJobResult = fallbackJobResult;
-      selectedDocType = resolveDocTypeFromSchema(fallbackStdJson) || 'unknown';
     }
 
     if (!selectedCandidate || !selectedStdJson) {
       await deleteObject(r2Key).catch(() => {});
-      const emptyError = new Error('DocuPipe standardization payload was empty');
+      const emptyError = new Error('DocuPipe candidates exhausted without a completed standardization');
       emptyError.status = 502;
       throw emptyError;
     }
 
     const metadata = extractStandardizationMetadata(selectedStdJson);
-    const docType = selectedDocType || resolveDocTypeFromSchema(selectedStdJson) || 'unknown';
+    const docType = selectedCandidate.type || resolveDocTypeFromSchema(selectedStdJson) || 'unknown';
     const payload = extractDocumentPayload(selectedStdJson);
 
     console.log('[docupipe] selected', {
-      standardizationJobId: selectedCandidate.standardizationJobId || null,
-      standardizationId: metadata.standardizationId || selectedCandidate.standardizationId || null,
+      jobId: selectedCandidate.standardizationJobId || null,
+      id:
+        metadata.standardizationId
+        || selectedCandidate.standardizationId
+        || null,
       schemaId: metadata.schemaId || null,
       schemaName: metadata.schemaName || null,
       type: docType,
@@ -815,7 +768,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       metadata.status
       || jobResult?.status
       || jobResult?.data?.status
-      || null;
+      || (selectedStdJson ? 'completed' : null);
     const docupipeStatus = normaliseDocupipeStatus(rawDocupipeStatus, {
       hasStandardizationJob: Boolean(selectedCandidate.standardizationJobId),
     });
