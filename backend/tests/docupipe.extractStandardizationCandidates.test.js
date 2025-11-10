@@ -17,69 +17,9 @@ const {
   extractStandardizationCandidates,
 } = require('../src/v2/services/docupipe');
 
-(function shouldPrioritiseReviewStep() {
+(function shouldPrioritiseClassifyStep() {
   const response = {
     workflowResponse: {
-      standardizeStep: {
-        standardizationIds: ['std-initial'],
-        standardizationJobIds: ['job-initial'],
-      },
-      splitStandardizeStep: {
-        standardizationIds: ['std-split'],
-        standardizationJobIds: ['job-split'],
-      },
-      standardizeReviewStep: {
-        standardizationIds: ['std-final'],
-        standardizationJobIds: ['job-final'],
-      },
-    },
-  };
-
-  const candidates = extractStandardizationCandidates(response);
-  assert.equal(candidates[0].standardizationId, 'std-final');
-  assert.equal(candidates[0].standardizationJobId, 'job-final');
-  assert.ok(
-    candidates.some(
-      (candidate) =>
-        candidate.standardizationId === 'std-split' &&
-        candidate.standardizationJobId === 'job-split'
-    )
-  );
-  assert.ok(
-    candidates.some(
-      (candidate) =>
-        candidate.standardizationId === 'std-initial' &&
-        candidate.standardizationJobId === 'job-initial'
-    )
-  );
-})();
-
-(function shouldMergeDuplicateStandardizationIds() {
-  const response = {
-    workflowResponse: {
-      standardizeReviewStep: {
-        standardizationIds: ['std-shared'],
-      },
-      splitStandardizeStep: {
-        standardizationIds: ['std-shared'],
-        standardizationJobIds: ['job-shared'],
-      },
-    },
-  };
-
-  const candidates = extractStandardizationCandidates(response);
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].standardizationId, 'std-shared');
-  assert.equal(candidates[0].standardizationJobId, 'job-shared');
-})();
-
-(function shouldIncludeClassifiedCandidates() {
-  const response = {
-    workflowResponse: {
-      standardizeReviewStep: {
-        standardizationIds: ['std-primary'],
-        standardizationJobIds: ['job-primary'],
-      },
       classifyStandardizeStep: {
         classToStandardizationIds: {
           payslip: 'std-class-1',
@@ -91,19 +31,61 @@ const {
         },
         classificationJobId: 'job-classifier',
       },
+      standardizeStep: {
+        standardizationIds: ['std-fallback'],
+        standardizationJobIds: ['job-fallback'],
+      },
     },
   };
 
   const candidates = extractStandardizationCandidates(response);
-  const classIds = new Map(
-    candidates
-      .filter((candidate) => candidate.classKey)
-      .map((candidate) => [candidate.classKey, candidate])
+  assert.equal(candidates[0].source, 'classifyStandardizeStep');
+  assert.equal(candidates[0].standardizationJobId, 'job-class-1');
+  assert.equal(candidates[0].classificationJobId, 'job-classifier');
+  assert.equal(candidates[1].standardizationJobId, 'job-class-2');
+  assert.ok(
+    candidates.some(
+      (candidate) =>
+        candidate.standardizationId === 'std-fallback' &&
+        candidate.standardizationJobId === 'job-fallback'
+    )
   );
+})();
 
-  assert.equal(classIds.get('payslip').standardizationJobId, 'job-class-1');
-  assert.equal(classIds.get('invoice').standardizationJobId, 'job-class-2');
-  assert.equal(classIds.get('payslip').classificationJobId, 'job-classifier');
+(function shouldFallbackToStandardizeStep() {
+  const response = {
+    workflowResponse: {
+      standardizeStep: {
+        standardizationIds: ['std-only'],
+        standardizationJobIds: ['job-only'],
+      },
+    },
+  };
+
+  const candidates = extractStandardizationCandidates(response);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].standardizationId, 'std-only');
+  assert.equal(candidates[0].standardizationJobId, 'job-only');
+})();
+
+(function shouldDeduplicateByJobAndId() {
+  const response = {
+    workflowResponse: {
+      classifyStandardizeStep: {
+        classToStandardizationIds: { payslip: 'std-dup' },
+        classToStandardizationJobIds: { payslip: 'job-dup' },
+      },
+      anotherStep: {
+        standardizationIds: ['std-dup'],
+        standardizationJobIds: ['job-dup'],
+      },
+    },
+  };
+
+  const candidates = extractStandardizationCandidates(response);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].standardizationId, 'std-dup');
+  assert.equal(candidates[0].standardizationJobId, 'job-dup');
 })();
 
 console.log('docupipe.extractStandardizationCandidates tests passed');

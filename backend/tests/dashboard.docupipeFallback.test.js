@@ -156,7 +156,34 @@ async function run() {
         }
         throw new Error(`Unexpected jobId ${jobId}`);
       },
+      async pollJobResilient(jobId) {
+        pollJobCalls.push(jobId);
+        if (jobId === 'job-candidate-1') {
+          const error = new Error(`DocuPipe job timeout: ${jobId}`);
+          throw error;
+        }
+        if (jobId === 'job-upload-1') {
+          return { jobId, status: 'completed', data: { status: 'completed' } };
+        }
+        throw new Error(`Unexpected jobId ${jobId}`);
+      },
       async getStandardization(standardizationId) {
+        return {
+          schemaId: process.env.PAYSLIP_SCHEMA_ID,
+          schemaName: 'Payslip (v1)',
+          standardizationId,
+          document: {
+            schemaId: process.env.PAYSLIP_SCHEMA_ID,
+            schemaName: 'Payslip (v1)',
+            id: 'doc-789',
+            payDate: '2024-01-31',
+            period: { start: '2024-01-01', end: '2024-01-31' },
+            gross: '1000',
+            net: '800',
+          },
+        };
+      },
+      async getStandardizationWithRetry(standardizationId) {
         return {
           schemaId: process.env.PAYSLIP_SCHEMA_ID,
           schemaName: 'Payslip (v1)',
@@ -174,6 +201,16 @@ async function run() {
       },
       extractStandardizationCandidates() {
         return [];
+      },
+      getDocupipeRequestConfig() {
+        return {
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-API-Key': process.env.DOCUPIPE_API_KEY,
+          },
+          baseUrl: process.env.DOCUPIPE_BASE_URL,
+        };
       },
     },
   };
@@ -227,10 +264,10 @@ async function run() {
       schemaName: 'Payslip (v1)',
     });
 
-    assert.deepEqual(pollJobCalls, ['job-candidate-1', 'job-upload-1']);
+    assert.deepEqual(pollJobCalls, ['job-candidate-1']);
     assert.equal(deleteCalls, 0);
     assert.ok(documentResultPayload, 'expected document result payload to be created');
-    assert.equal(documentResultPayload.finalJob.jobId, 'job-upload-1');
+    assert.equal(documentResultPayload.finalJob, null);
     assert.equal(documentResultPayload.status, 'completed');
   } finally {
     Module._resolveFilename = originalResolve;

@@ -98,18 +98,55 @@ function docupipeUrl(path) {
   return new URL(path, getDocupipeBaseUrl()).toString();
 }
 
-async function requestJson(method, path, body, { timeoutMs, context } = {}) {
-  const url = docupipeUrl(path);
-  const payload = body !== undefined ? JSON.stringify(body) : undefined;
-  const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
-
-  const response = await fetch(url, {
-    method,
+function getDocupipeRequestConfig() {
+  return {
+    baseUrl: getDocupipeBaseUrl(),
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
       'X-API-Key': config.docupipe.apiKey,
     },
+  };
+}
+
+async function parseDocupipeJson(response) {
+  if (!response || typeof response !== 'object') {
+    return {};
+  }
+
+  if (typeof response.json === 'function') {
+    try {
+      return await response.json();
+    } catch (error) {
+      logger.warn('Failed to parse DocuPipe JSON via response.json()', { error: error.message });
+    }
+  }
+
+  if (typeof response.text === 'function') {
+    const text = await response.text().catch(() => '');
+    if (!text) {
+      return {};
+    }
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      logger.warn('Failed to parse DocuPipe JSON via response.text()', { error: error.message });
+    }
+  }
+
+  return {};
+}
+
+async function requestJson(method, path, body, { timeoutMs, context } = {}) {
+  const url = docupipeUrl(path);
+  const payload = body !== undefined ? JSON.stringify(body) : undefined;
+  const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+
+  const { headers } = getDocupipeRequestConfig();
+
+  const response = await fetch(url, {
+    method,
+    headers,
     body: payload,
     signal,
   });
@@ -171,6 +208,129 @@ function buildDocumentPayload({ fileUrl, fileBase64, buffer, filename, dataset =
   }
 
   return payload;
+}
+
+async function pollJobResilient(
+  jobId,
+  {
+    initialDelayMs = 800,
+    intervalMs = 1500,
+    maxIntervalMs = 8000,
+    notFoundGraceMs = 30000,
+    timeoutMs = 180000,
+    headers,
+    baseUrl,
+  } = {}
+) {
+  if (!jobId) {
+    throw new Error('DocuPipe jobId is required');
+  }
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const start = Date.now();
+  let first404At = null;
+  let backoff = intervalMs;
+
+  await sleep(initialDelayMs);
+
+  for (;;) {
+    const elapsed = Date.now() - start;
+    if (elapsed > timeoutMs) {
+      const timeoutError = new Error(`DocuPipe job timeout: ${jobId}`);
+      timeoutError.code = 'DOCUPIPE_TIMEOUT';
+      timeoutError.age = elapsed;
+      throw timeoutError;
+    }
+
+    let res;
+    let json = null;
+
+    try {
+      const url = new URL(`/job/${encodeURIComponent(jobId)}`, baseUrl || getDocupipeBaseUrl());
+      res = await fetch(url, { method: 'GET', headers: headers || getDocupipeRequestConfig().headers });
+      json = await parseDocupipeJson(res);
+    } catch (error) {
+      await sleep(backoff);
+      backoff = Math.min(backoff * 1.6, maxIntervalMs);
+      continue;
+    }
+
+    if (res.ok) {
+      const status = (json?.status || json?.data?.status || '').toLowerCase();
+      if (status === 'completed' || status === 'complete' || status === 'succeeded' || status === 'success') {
+        return json;
+      }
+      if (status === 'failed' || status === 'error' || status === 'errored') {
+        const err = new Error(`DocuPipe job failed: ${jobId}`);
+        err.job = json;
+        throw err;
+      }
+    } else if (res.status === 404) {
+      if (!first404At) first404At = Date.now();
+      const age = Date.now() - first404At;
+      if (age < notFoundGraceMs) {
+        await sleep(backoff);
+        backoff = Math.min(backoff * 1.6, maxIntervalMs);
+        continue;
+      }
+      const err = new Error(`DocuPipe job not found after ${age}ms: ${jobId}`);
+      err.status = 404;
+      err.response = json;
+      err.age = age;
+      throw err;
+    } else if (res.status === 429) {
+      const retryAfter = Number(res.headers.get('retry-after')) || backoff;
+      await sleep(retryAfter);
+      backoff = Math.min(backoff * 1.6, maxIntervalMs);
+      continue;
+    } else if (res.status >= 500 && res.status < 600) {
+      await sleep(backoff);
+      backoff = Math.min(backoff * 1.6, maxIntervalMs);
+      continue;
+    }
+
+    await sleep(backoff);
+    backoff = Math.min(backoff * 1.3, maxIntervalMs);
+  }
+}
+
+async function getStandardizationWithRetry(
+  standardizationId,
+  { headers, baseUrl, attempts = 8, delayMs = 800 } = {}
+) {
+  if (!standardizationId) {
+    throw new Error('DocuPipe standardizationId is required');
+  }
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  for (let i = 0; i < attempts; i += 1) {
+    const url = new URL(
+      `/standardization/${encodeURIComponent(standardizationId)}`,
+      baseUrl || getDocupipeBaseUrl()
+    );
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: headers || getDocupipeRequestConfig().headers,
+    });
+
+    if (response.ok) {
+      return parseDocupipeJson(response);
+    }
+
+    if (response.status !== 404) {
+      const text = typeof response.text === 'function' ? await response.text() : '';
+      throw new Error(
+        `GET /standardization/${standardizationId} failed: ${response.status} ${text}`
+      );
+    }
+
+    await sleep(delayMs);
+  }
+
+  const error = new Error(`DocuPipe standardization still not found: ${standardizationId}`);
+  error.status = 404;
+  throw error;
 }
 
 async function postDocumentWithWorkflow({
@@ -274,57 +434,35 @@ async function pollJob(
     jobType = null,
   } = {}
 ) {
-  const start = Date.now();
-  for (;;) {
-    let job;
-    try {
-      job = await getJob(jobId);
-      clearSkippedJobLogs(jobId);
-    } catch (error) {
-      if (error?.status === 404) {
-        logSkippedJob(jobId, 'not_found', {
-          candidate,
-          jobType,
-          elapsedMs: Date.now() - start,
-          intervalMs,
-        });
-        if (Date.now() - start > timeoutMs) {
-          logSkippedJob(jobId, 'timeout', {
-            candidate,
-            jobType,
-            elapsedMs: Date.now() - start,
-            intervalMs,
-          });
-          const timeoutError = new Error(`DocuPipe job timeout: ${jobId}`);
-          timeoutError.cause = error;
-          throw timeoutError;
-        }
-        await new Promise((resolve) => setTimeout(resolve, intervalMs));
-        continue;
-      }
-      throw error;
+  try {
+    const { headers, baseUrl } = getDocupipeRequestConfig();
+    const job = await pollJobResilient(jobId, {
+      intervalMs,
+      timeoutMs,
+      headers,
+      baseUrl,
+    });
+    clearSkippedJobLogs(jobId);
+    return job;
+  } catch (error) {
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('not found')) {
+      logSkippedJob(jobId, 'not_found', {
+        candidate,
+        jobType,
+        elapsedMs: typeof error?.age === 'number' ? error.age : undefined,
+        intervalMs,
+      });
     }
-    const status = (job?.status || job?.data?.status || '').toLowerCase();
-    if (status === 'completed' || status === 'complete' || status === 'succeeded' || status === 'success') {
-      return job;
-    }
-    if (status === 'failed' || status === 'error' || status === 'errored') {
-      const error = new Error(`DocuPipe job failed: ${jobId}`);
-      error.job = job;
-      throw error;
-    }
-    if (Date.now() - start > timeoutMs) {
+    if (message.includes('timeout')) {
       logSkippedJob(jobId, 'timeout', {
         candidate,
         jobType,
-        elapsedMs: Date.now() - start,
+        elapsedMs: typeof error?.age === 'number' ? error.age : undefined,
         intervalMs,
       });
-      const error = new Error(`DocuPipe job timeout: ${jobId}`);
-      error.job = job;
-      throw error;
     }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    throw error;
   }
 }
 
@@ -377,132 +515,62 @@ async function waitForStandardization(
 }
 
 function extractStandardizationCandidates(resp) {
-  const wf = resp?.workflowResponse;
-  if (!wf || typeof wf !== 'object') return [];
+  const wf = resp?.workflowResponse || {};
+  const out = [];
 
-  const seen = new Set();
-  const orderedCandidates = [];
-  const candidateIndexByKey = new Map();
-  const processedSteps = new Set();
-
-  const addCandidate = (candidate) => {
-    if (!candidate || !candidate.standardizationId) return;
-
-    const key = `${candidate.standardizationId || ''}::${candidate.classKey || ''}`;
-    if (candidateIndexByKey.has(key)) {
-      const existingIndex = candidateIndexByKey.get(key);
-      const existing = orderedCandidates[existingIndex];
-      if (!existing.standardizationJobId && candidate.standardizationJobId) {
-        existing.standardizationJobId = candidate.standardizationJobId;
+  const cls = wf.classifyStandardizeStep;
+  if (cls?.classToStandardizationIds && cls?.classToStandardizationJobIds) {
+    for (const k of Object.keys(cls.classToStandardizationIds)) {
+      const stdId = cls.classToStandardizationIds[k];
+      const stdJobId = cls.classToStandardizationJobIds[k];
+      if (stdId && stdJobId) {
+        out.push({
+          source: 'classifyStandardizeStep',
+          classKey: k,
+          standardizationId: stdId,
+          standardizationJobId: stdJobId,
+          classificationJobId: cls.classificationJobId || null,
+        });
       }
-      if (!existing.classificationJobId && candidate.classificationJobId) {
-        existing.classificationJobId = candidate.classificationJobId;
-      }
-      if (!existing.source && candidate.source) {
-        existing.source = candidate.source;
-      }
-      return;
-    }
-
-    const entry = {
-      standardizationId: candidate.standardizationId,
-      standardizationJobId: candidate.standardizationJobId || null,
-      classKey: candidate.classKey || null,
-      classificationJobId: candidate.classificationJobId || null,
-      source: candidate.source || null,
-    };
-
-    orderedCandidates.push(entry);
-    candidateIndexByKey.set(key, orderedCandidates.length - 1);
-  };
-
-  const addFromIndexedStep = (step, source) => {
-    if (!step || typeof step !== 'object') return;
-
-    const ids = Array.isArray(step.standardizationIds)
-      ? step.standardizationIds
-      : step.standardizationIds
-      ? [step.standardizationIds]
-      : [];
-    const jobIds = Array.isArray(step.standardizationJobIds)
-      ? step.standardizationJobIds
-      : step.standardizationJobIds
-      ? [step.standardizationJobIds]
-      : [];
-    const classKeys = Array.isArray(step.classKeys) ? step.classKeys : [];
-
-    ids.forEach((id, index) => {
-      addCandidate({
-        standardizationId: id,
-        standardizationJobId: jobIds[index] || jobIds[0] || null,
-        classKey: classKeys[index] || step.classKey || null,
-        classificationJobId: step.classificationJobId || null,
-        source,
-      });
-    });
-
-    if (!ids.length && step.standardizationId) {
-      addCandidate({
-        standardizationId: step.standardizationId,
-        standardizationJobId: step.standardizationJobId || jobIds[0] || null,
-        classKey: step.classKey || null,
-        classificationJobId: step.classificationJobId || null,
-        source,
-      });
-    }
-  };
-
-  const addFromClassMapStep = (step, source) => {
-    if (!step || typeof step !== 'object') return;
-
-    const idMap = step.classToStandardizationIds || {};
-    const jobMap = step.classToStandardizationJobIds || {};
-    for (const key of Object.keys(idMap)) {
-      addCandidate({
-        classKey: key,
-        standardizationId: idMap[key],
-        standardizationJobId: jobMap[key] || null,
-        classificationJobId: step.classificationJobId || null,
-        source,
-      });
-    }
-
-    if (step.standardizationId) {
-      addCandidate({
-        standardizationId: step.standardizationId,
-        standardizationJobId: step.standardizationJobId || null,
-        classificationJobId: step.classificationJobId || null,
-        source,
-      });
-    }
-  };
-
-  const registerStep = (name, extractor) => {
-    if (!wf[name]) return;
-    processedSteps.add(name);
-    extractor(wf[name], name);
-  };
-
-  registerStep('standardizeReviewStep', addFromIndexedStep);
-  registerStep('classifyStandardizeStep', addFromClassMapStep);
-  registerStep('splitClassifyStandardizeStep', addFromClassMapStep);
-  registerStep('splitStandardizeStep', addFromIndexedStep);
-  registerStep('standardizeStep', addFromIndexedStep);
-
-  for (const [name, step] of Object.entries(wf)) {
-    if (processedSteps.has(name)) continue;
-
-    if (step?.classToStandardizationIds && step?.classToStandardizationJobIds) {
-      addFromClassMapStep(step, name);
-      continue;
-    }
-
-    if (step?.standardizationIds || step?.standardizationId) {
-      addFromIndexedStep(step, name);
     }
   }
 
-  return orderedCandidates;
+  const std = wf.standardizeStep;
+  if (std?.standardizationIds?.length && std?.standardizationJobIds?.length) {
+    std.standardizationIds.forEach((id, i) => {
+      const jobId = std.standardizationJobIds[i];
+      if (id && jobId) {
+        out.push({
+          source: 'standardizeStep',
+          standardizationId: id,
+          standardizationJobId: jobId,
+        });
+      }
+    });
+  }
+
+  for (const step of Object.values(wf)) {
+    if (step?.standardizationIds && step?.standardizationJobIds) {
+      step.standardizationIds.forEach((id, i) => {
+        const jobId = step.standardizationJobIds[i];
+        if (id && jobId) {
+          out.push({
+            source: 'genericStep',
+            standardizationId: id,
+            standardizationJobId: jobId,
+          });
+        }
+      });
+    }
+  }
+
+  const seen = new Set();
+  return out.filter((c) => {
+    const key = `${c.standardizationJobId}|${c.standardizationId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function extractStandardizationFromJob(job) {
@@ -791,8 +859,11 @@ module.exports = {
   postDocumentWithWorkflow,
   runWorkflow,
   pollJob,
+  pollJobResilient,
   getJob,
   getStandardization,
+  getStandardizationWithRetry,
   waitForStandardization,
   extractStandardizationCandidates,
+  getDocupipeRequestConfig,
 };
