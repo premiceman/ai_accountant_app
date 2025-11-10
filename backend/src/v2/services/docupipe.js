@@ -380,44 +380,129 @@ function extractStandardizationCandidates(resp) {
   const wf = resp?.workflowResponse;
   if (!wf || typeof wf !== 'object') return [];
 
-  const std = wf.standardizeStep;
-  if (std?.standardizationIds?.length && std?.standardizationJobIds?.length) {
-    return std.standardizationIds.map((id, i) => ({
-      standardizationId: id,
-      standardizationJobId: std.standardizationJobIds[i],
-      source: 'standardizeStep',
-    }));
-  }
+  const seen = new Set();
+  const orderedCandidates = [];
+  const candidateIndexByKey = new Map();
+  const processedSteps = new Set();
 
-  const cls = wf.classifyStandardizeStep;
-  if (cls?.classToStandardizationIds && cls?.classToStandardizationJobIds) {
-    const out = [];
-    for (const key of Object.keys(cls.classToStandardizationIds)) {
-      out.push({
+  const addCandidate = (candidate) => {
+    if (!candidate || !candidate.standardizationId) return;
+
+    const key = `${candidate.standardizationId || ''}::${candidate.classKey || ''}`;
+    if (candidateIndexByKey.has(key)) {
+      const existingIndex = candidateIndexByKey.get(key);
+      const existing = orderedCandidates[existingIndex];
+      if (!existing.standardizationJobId && candidate.standardizationJobId) {
+        existing.standardizationJobId = candidate.standardizationJobId;
+      }
+      if (!existing.classificationJobId && candidate.classificationJobId) {
+        existing.classificationJobId = candidate.classificationJobId;
+      }
+      if (!existing.source && candidate.source) {
+        existing.source = candidate.source;
+      }
+      return;
+    }
+
+    const entry = {
+      standardizationId: candidate.standardizationId,
+      standardizationJobId: candidate.standardizationJobId || null,
+      classKey: candidate.classKey || null,
+      classificationJobId: candidate.classificationJobId || null,
+      source: candidate.source || null,
+    };
+
+    orderedCandidates.push(entry);
+    candidateIndexByKey.set(key, orderedCandidates.length - 1);
+  };
+
+  const addFromIndexedStep = (step, source) => {
+    if (!step || typeof step !== 'object') return;
+
+    const ids = Array.isArray(step.standardizationIds)
+      ? step.standardizationIds
+      : step.standardizationIds
+      ? [step.standardizationIds]
+      : [];
+    const jobIds = Array.isArray(step.standardizationJobIds)
+      ? step.standardizationJobIds
+      : step.standardizationJobIds
+      ? [step.standardizationJobIds]
+      : [];
+    const classKeys = Array.isArray(step.classKeys) ? step.classKeys : [];
+
+    ids.forEach((id, index) => {
+      addCandidate({
+        standardizationId: id,
+        standardizationJobId: jobIds[index] || jobIds[0] || null,
+        classKey: classKeys[index] || step.classKey || null,
+        classificationJobId: step.classificationJobId || null,
+        source,
+      });
+    });
+
+    if (!ids.length && step.standardizationId) {
+      addCandidate({
+        standardizationId: step.standardizationId,
+        standardizationJobId: step.standardizationJobId || jobIds[0] || null,
+        classKey: step.classKey || null,
+        classificationJobId: step.classificationJobId || null,
+        source,
+      });
+    }
+  };
+
+  const addFromClassMapStep = (step, source) => {
+    if (!step || typeof step !== 'object') return;
+
+    const idMap = step.classToStandardizationIds || {};
+    const jobMap = step.classToStandardizationJobIds || {};
+    for (const key of Object.keys(idMap)) {
+      addCandidate({
         classKey: key,
-        standardizationId: cls.classToStandardizationIds[key],
-        standardizationJobId: cls.classToStandardizationJobIds[key],
-        classificationJobId: cls.classificationJobId,
-        source: 'classifyStandardizeStep',
+        standardizationId: idMap[key],
+        standardizationJobId: jobMap[key] || null,
+        classificationJobId: step.classificationJobId || null,
+        source,
       });
     }
-    return out;
-  }
 
-  const out = [];
-  for (const step of Object.values(wf)) {
-    if (step?.standardizationIds && step?.standardizationJobIds) {
-      step.standardizationIds.forEach((id, index) => {
-        out.push({
-          standardizationId: id,
-          standardizationJobId: step.standardizationJobIds[index],
-          source: 'genericStep',
-        });
+    if (step.standardizationId) {
+      addCandidate({
+        standardizationId: step.standardizationId,
+        standardizationJobId: step.standardizationJobId || null,
+        classificationJobId: step.classificationJobId || null,
+        source,
       });
+    }
+  };
+
+  const registerStep = (name, extractor) => {
+    if (!wf[name]) return;
+    processedSteps.add(name);
+    extractor(wf[name], name);
+  };
+
+  registerStep('standardizeReviewStep', addFromIndexedStep);
+  registerStep('classifyStandardizeStep', addFromClassMapStep);
+  registerStep('splitClassifyStandardizeStep', addFromClassMapStep);
+  registerStep('splitStandardizeStep', addFromIndexedStep);
+  registerStep('standardizeStep', addFromIndexedStep);
+
+  for (const [name, step] of Object.entries(wf)) {
+    if (processedSteps.has(name)) continue;
+
+    if (step?.classToStandardizationIds && step?.classToStandardizationJobIds) {
+      addFromClassMapStep(step, name);
+      continue;
+    }
+
+    if (step?.standardizationIds || step?.standardizationId) {
+      addFromIndexedStep(step, name);
     }
   }
 
-  return out;
+  return orderedCandidates;
 }
 
 function extractStandardizationFromJob(job) {
