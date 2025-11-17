@@ -1,6 +1,7 @@
 (function () {
   const state = {
     insights: null,
+    charts: {},
   };
 
   function formatCurrency(value, currency = 'GBP', { invert = false } = {}) {
@@ -96,6 +97,285 @@
     if (!container.children.length) {
       empty.hidden = false;
     }
+  }
+
+  function destroyChart(key) {
+    if (state.charts[key]) {
+      state.charts[key].destroy();
+      state.charts[key] = null;
+    }
+  }
+
+  function buildSeriesMonths(series = {}) {
+    const months = new Set();
+    ['income', 'spend', 'cashflow', 'netWorth'].forEach((key) => {
+      (series[key] || []).forEach((item) => months.add(item.month));
+    });
+    return Array.from(months).sort();
+  }
+
+  function renderCashflowChart(series = {}) {
+    const ctx = document.getElementById('cashflow-chart');
+    const empty = document.getElementById('cashflow-chart-empty');
+    destroyChart('cashflow');
+
+    const months = buildSeriesMonths(series);
+    if (!ctx || !months.length || typeof Chart === 'undefined') {
+      if (empty) empty.hidden = false;
+      return;
+    }
+
+    const labels = months.map((month) => formatMonthLabel(month));
+    const incomeSeries = months.map((month) => series.income?.find((item) => item.month === month)?.amount || 0);
+    const spendSeries = months.map((month) => series.spend?.find((item) => item.month === month)?.amount || 0);
+    const cashflowSeries = months.map((month) => series.cashflow?.find((item) => item.month === month)?.amount || 0);
+
+    if (empty) empty.hidden = true;
+    state.charts.cashflow = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Income',
+            data: incomeSeries,
+            borderColor: '#22c55e',
+            backgroundColor: 'rgba(34, 197, 94, 0.15)',
+            tension: 0.35,
+            fill: false,
+            pointRadius: 3,
+          },
+          {
+            label: 'Outgoings',
+            data: spendSeries.map((value) => (value ? -Math.abs(value) : 0)),
+            borderColor: '#ef4444',
+            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+            tension: 0.35,
+            fill: false,
+            pointRadius: 3,
+          },
+          {
+            label: 'Net cashflow',
+            data: cashflowSeries,
+            borderColor: '#38bdf8',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            borderDash: [6, 6],
+            tension: 0.25,
+            fill: false,
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            ticks: { color: '#e2e8f0' },
+            grid: { color: 'rgba(148, 163, 184, 0.15)' },
+          },
+          y: {
+            ticks: {
+              callback: (value) => formatCurrency(value),
+              color: '#e2e8f0',
+            },
+            grid: { color: 'rgba(148, 163, 184, 0.15)' },
+          },
+        },
+        plugins: {
+          legend: { labels: { color: '#e2e8f0' } },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y)}`,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function renderNetWorthChart(series = {}) {
+    const ctx = document.getElementById('networth-chart');
+    const empty = document.getElementById('networth-chart-empty');
+    destroyChart('networth');
+
+    const entries = series.netWorth || [];
+    if (!ctx || !entries.length || typeof Chart === 'undefined') {
+      if (empty) empty.hidden = false;
+      return;
+    }
+
+    const labels = entries.map((item) => formatMonthLabel(item.month));
+    const values = entries.map((item) => item.amount || 0);
+    if (empty) empty.hidden = true;
+
+    state.charts.networth = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Net worth',
+            data: values,
+            borderColor: '#a855f7',
+            backgroundColor: 'rgba(168, 85, 247, 0.12)',
+            tension: 0.35,
+            fill: true,
+            pointRadius: 3,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => `Net worth: ${formatCurrency(context.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          y: {
+            ticks: {
+              callback: (value) => formatCurrency(value),
+              color: '#e2e8f0',
+            },
+            grid: { color: 'rgba(148, 163, 184, 0.12)' },
+          },
+          x: { ticks: { color: '#e2e8f0' }, grid: { display: false } },
+        },
+      },
+    });
+  }
+
+  function renderCategoryChart(categories = []) {
+    const ctx = document.getElementById('category-chart');
+    const empty = document.getElementById('category-chart-empty');
+    destroyChart('categories');
+
+    const labels = categories.map((cat) => cat.category || 'Other');
+    const values = categories.map((cat) => Math.abs(cat.amount || 0));
+
+    if (!ctx || !values.length || typeof Chart === 'undefined') {
+      if (empty) empty.hidden = false;
+      return;
+    }
+
+    if (empty) empty.hidden = true;
+    state.charts.categories = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [
+          {
+            data: values,
+            backgroundColor: ['#22c55e', '#ef4444', '#38bdf8', '#f59e0b', '#a855f7', '#10b981', '#f97316', '#94a3b8'],
+            borderWidth: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#e2e8f0' } },
+          tooltip: {
+            callbacks: {
+              label: (context) => `${context.label}: ${formatCurrency(context.parsed)}`,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function renderPayrollHistogram(payroll = {}) {
+    const ctx = document.getElementById('payroll-chart');
+    const empty = document.getElementById('payroll-chart-empty');
+    destroyChart('payroll');
+
+    const bins = payroll.histogram?.net?.bins || [];
+    if (!ctx || !bins.length || typeof Chart === 'undefined') {
+      if (empty) empty.hidden = false;
+      return;
+    }
+
+    const labels = bins.map((bin) => `${formatCurrency(bin.min)} – ${formatCurrency(bin.max)}`);
+    const values = bins.map((bin) => bin.count || 0);
+
+    if (empty) empty.hidden = true;
+    state.charts.payroll = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Net pay frequency',
+            data: values,
+            backgroundColor: 'rgba(56, 189, 248, 0.35)',
+            borderColor: '#38bdf8',
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#e2e8f0' },
+            grid: { color: 'rgba(148, 163, 184, 0.12)' },
+          },
+          y: {
+            ticks: { color: '#e2e8f0', precision: 0 },
+            beginAtZero: true,
+            grid: { color: 'rgba(148, 163, 184, 0.12)' },
+          },
+        },
+      },
+    });
+  }
+
+  function renderNetWorthHero(summary) {
+    const hero = document.getElementById('networth-hero');
+    const change = document.getElementById('networth-change');
+    if (!hero) return;
+
+    const latest = summary?.netWorth?.latest;
+    const previous = summary?.netWorth?.previous;
+    hero.textContent = latest !== null && latest !== undefined ? formatCurrency(latest) : '—';
+
+    if (change) {
+      if (latest !== null && previous !== null && latest !== undefined && previous !== undefined) {
+        const delta = latest - previous;
+        const direction = delta > 0 ? '▲' : delta < 0 ? '▼' : '→';
+        change.textContent = `${direction} ${formatCurrency(delta)} vs previous month`;
+        change.hidden = false;
+      } else {
+        change.hidden = true;
+      }
+    }
+  }
+
+  function renderRunRate(summary) {
+    const incomeEl = document.getElementById('runrate-income');
+    const spendEl = document.getElementById('runrate-spend');
+    const savingsEl = document.getElementById('runrate-savings');
+    if (!incomeEl || !spendEl || !savingsEl || !summary?.months?.count) return;
+
+    const months = summary.months.count || 0;
+    const avgIncome = months ? (summary.totals.income || 0) / months : null;
+    const avgSpend = months ? (summary.totals.spend || 0) / months : null;
+    const savingsRate = summary.totals.income ? summary.totals.cashflow / summary.totals.income : null;
+
+    incomeEl.textContent = avgIncome !== null ? formatCurrency(avgIncome) : '—';
+    spendEl.textContent = avgSpend !== null ? formatCurrency(avgSpend, 'GBP', { invert: true }) : '—';
+    savingsEl.textContent = savingsRate !== null ? formatPercent(savingsRate) : '—';
   }
 
   function renderCashflow(series = {}) {
@@ -236,9 +516,15 @@
       const data = await App.Api.getDashboardInsights();
       state.insights = data;
       renderSummary(data.summary);
+      renderNetWorthHero(data.summary);
+      renderRunRate(data.summary);
       renderCashflow(data.series || {});
+      renderCashflowChart(data.series || {});
       renderNetWorth(data.series || {});
+      renderNetWorthChart(data.series || {});
       renderCategories(data.categories?.top || [], data.categories?.totalSpend || 0);
+      renderCategoryChart(data.categories?.top || []);
+      renderPayrollHistogram(data.payroll || {});
       renderInsights(data.aiInsights);
     } catch (error) {
       console.error('Failed to load dashboard insights', error);

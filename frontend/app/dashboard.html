@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dashboard · AI Accountant</title>
-  <link rel="stylesheet" href="/app/css/app.css" />
-  <script defer src="/app/js/app.js"></script>
-  <script defer src="/app/js/dashboard.js"></script>
-</head>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard · AI Accountant</title>
+    <link rel="stylesheet" href="/app/css/app.css" />
+    <script defer src="/app/js/app.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script defer src="/app/js/dashboard.js"></script>
+  </head>
 <body>
   <div class="app-shell">
     <nav>
@@ -45,12 +46,55 @@
       </section>
 
       <div class="card-grid">
+        <section class="card highlight-card">
+          <div class="panel-header">
+            <div>
+              <h3>Net worth snapshot</h3>
+              <p class="subtitle">Latest combined balances across all uploaded statements.</p>
+            </div>
+          </div>
+          <div class="hero-metric">
+            <p class="metric-label">Aggregated net worth</p>
+            <p class="hero-value" id="networth-hero">—</p>
+            <p class="metric-subtext" id="networth-change" hidden></p>
+          </div>
+        </section>
+
+        <section class="card highlight-card">
+          <div class="panel-header">
+            <div>
+              <h3>Run rate &amp; savings</h3>
+              <p class="subtitle">Average monthly inflows, outflows, and surplus based on uploaded data.</p>
+            </div>
+          </div>
+          <div class="runrate-grid" id="runrate-grid">
+            <div class="metric-block">
+              <p class="metric-label">Avg monthly income</p>
+              <p class="metric-value" id="runrate-income">—</p>
+            </div>
+            <div class="metric-block">
+              <p class="metric-label">Avg monthly spend</p>
+              <p class="metric-value" id="runrate-spend">—</p>
+            </div>
+            <div class="metric-block">
+              <p class="metric-label">Savings rate</p>
+              <p class="metric-value" id="runrate-savings">—</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="card-grid">
         <section class="card">
           <div class="panel-header">
             <div>
               <h3>Cashflow over time</h3>
               <p class="subtitle">Income, spend, and net cashflow by month.</p>
             </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="cashflow-chart" role="img" aria-label="Cashflow line chart"></canvas>
+            <p class="empty-indicator" id="cashflow-chart-empty" hidden>No chart data yet.</p>
           </div>
           <div class="table-wrapper">
             <table class="table" id="cashflow-table">
@@ -75,6 +119,10 @@
               <p class="subtitle">Total closing balances across all statements per month.</p>
             </div>
           </div>
+          <div class="chart-container">
+            <canvas id="networth-chart" role="img" aria-label="Net worth line chart"></canvas>
+            <p class="empty-indicator" id="networth-chart-empty" hidden>No net worth data yet.</p>
+          </div>
           <div class="table-wrapper">
             <table class="table" id="networth-table">
               <thead>
@@ -97,6 +145,10 @@
               <h3>Top spending categories</h3>
               <p class="subtitle">Largest outgoings grouped by category across all months.</p>
             </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="category-chart" role="img" aria-label="Spending by category"></canvas>
+            <p class="empty-indicator" id="category-chart-empty" hidden>No category chart available yet.</p>
           </div>
           <div class="table-wrapper">
             <table class="table" id="category-table">
@@ -122,6 +174,19 @@
           </div>
           <div class="insights-body" id="insights-body">
             <p class="empty-indicator">Insights will appear here once analytics are available.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="panel-header">
+            <div>
+              <h3>Payslip distribution</h3>
+              <p class="subtitle">Histogram of net pay values across uploaded payslips.</p>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="payroll-chart" role="img" aria-label="Payslip histogram"></canvas>
+            <p class="empty-indicator" id="payroll-chart-empty" hidden>No payslip data yet.</p>
           </div>
         </section>
       </div>

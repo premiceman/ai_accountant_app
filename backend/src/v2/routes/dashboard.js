@@ -375,6 +375,92 @@ function safeRound(value) {
   return Math.round(num * 100) / 100;
 }
 
+function buildHistogram(values = [], { bins = 6 } = {}) {
+  const numeric = values.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+  if (!numeric.length) {
+    return { bins: [], min: null, max: null, total: 0 };
+  }
+
+  const min = Math.min(...numeric);
+  const max = Math.max(...numeric);
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    return { bins: [], min: null, max: null, total: 0 };
+  }
+
+  if (min === max) {
+    return {
+      bins: [
+        {
+          min,
+          max,
+          count: numeric.length,
+          label: `${safeRound(min)} – ${safeRound(max)}`,
+        },
+      ],
+      min,
+      max,
+      total: numeric.length,
+    };
+  }
+
+  const span = max - min || 1;
+  const binSize = span / bins;
+  const ranges = Array.from({ length: bins }, (_, index) => {
+    const start = min + index * binSize;
+    const end = index === bins - 1 ? max : start + binSize;
+    return {
+      min: safeRound(start),
+      max: safeRound(end),
+      label: `${safeRound(start)} – ${safeRound(end)}`,
+      count: 0,
+    };
+  });
+
+  numeric.forEach((value) => {
+    const clampedIndex = Math.min(Math.floor((value - min) / binSize), bins - 1);
+    ranges[clampedIndex].count += 1;
+  });
+
+  return { bins: ranges, min: safeRound(min), max: safeRound(max), total: numeric.length };
+}
+
+function buildPayrollSummary(payrollSamples, months, monthBuckets) {
+  const payrollHistogram = {
+    net: buildHistogram(payrollSamples.map((item) => item.net).filter((value) => value !== null)),
+    gross: buildHistogram(payrollSamples.map((item) => item.gross).filter((value) => value !== null)),
+  };
+
+  const payrollMonthly = months
+    .map((month) => {
+      const bucket = monthBuckets.get(month);
+      const payslips = bucket?.payroll || [];
+      const net = safeRound(payslips.reduce((acc, item) => acc + (item.net || 0), 0));
+      const gross = safeRound(payslips.reduce((acc, item) => acc + (item.gross || 0), 0));
+      const count = payslips.length;
+      return { month, net, gross, count };
+    })
+    .filter((entry) => entry.net || entry.gross || entry.count);
+
+  const employerMap = new Map();
+  payrollSamples.forEach((item) => {
+    const employer = item.employer || 'Employer';
+    if (!employerMap.has(employer)) {
+      employerMap.set(employer, { employer, net: 0, gross: 0, count: 0 });
+    }
+    const entry = employerMap.get(employer);
+    if (item.net !== null) entry.net += item.net;
+    if (item.gross !== null) entry.gross += item.gross;
+    entry.count += 1;
+  });
+
+  const employers = Array.from(employerMap.values())
+    .map((entry) => ({ ...entry, net: safeRound(entry.net), gross: safeRound(entry.gross) }))
+    .sort((a, b) => (b.net || 0) - (a.net || 0));
+
+  return { histogram: payrollHistogram, monthly: payrollMonthly, employers };
+}
+
 function parsePayslip(payload) {
   const payDate = normaliseDate(payload.payDate);
   const periodStart = normaliseDate(payload.period?.start);
@@ -1258,12 +1344,14 @@ router.get('/insights', async (req, res, next) => {
         summary: null,
         series: { income: [], spend: [], cashflow: [], netWorth: [] },
         categories: { top: [], totalSpend: 0 },
+        payroll: { histogram: { net: { bins: [] }, gross: { bins: [] } }, monthly: [], employers: [] },
         aiInsights: null,
       });
     }
 
     const monthBuckets = new Map();
     const categoryTotals = new Map();
+    const payrollSamples = [];
 
     for (const doc of documents) {
       const month = determineMonthFromDocument(doc);
@@ -1315,11 +1403,13 @@ router.get('/insights', async (req, res, next) => {
         const gross = normaliseAmount(doc.analytics?.gross);
         if (net !== null) bucket.income += Math.max(0, net);
         if (gross !== null || net !== null) {
-          bucket.payroll.push({
+          const payrollEntry = {
             gross: normaliseAmount(gross),
             net: normaliseAmount(net),
             employer: doc.metadata?.employerName || 'Employer',
-          });
+          };
+          bucket.payroll.push(payrollEntry);
+          payrollSamples.push({ ...payrollEntry, month });
         }
       }
     }
@@ -1353,6 +1443,8 @@ router.get('/insights', async (req, res, next) => {
         amount: safeRound(amount),
         share: totalSpend ? safeRound(amount / totalSpend) : null,
       }));
+
+    const payroll = buildPayrollSummary(payrollSamples, months, monthBuckets);
 
     const summary = {
       months: { count: months.length, start: months[0], end: months[months.length - 1] },
@@ -1400,7 +1492,14 @@ router.get('/insights', async (req, res, next) => {
       aiInsights = { summary: null, highlights: [], risks: [], error: error.message };
     }
 
-    return res.json({ months, summary, series, categories: { top: topCategories, totalSpend: safeRound(totalSpend) }, aiInsights });
+    return res.json({
+      months,
+      summary,
+      series,
+      categories: { top: topCategories, totalSpend: safeRound(totalSpend) },
+      payroll,
+      aiInsights,
+    });
   } catch (error) {
     return next(error);
   }
