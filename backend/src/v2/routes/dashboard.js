@@ -9,6 +9,7 @@ const TransactionV2 = require('../models/TransactionV2');
 const PayslipMetricsV2 = require('../models/PayslipMetricsV2');
 const { mongoose } = require('../models');
 const { config } = require('../config');
+const { parseCompletenessToken } = require('../services/documents/completeness');
 const {
   postDocumentWithWorkflow,
   extractStandardizationCandidates,
@@ -767,6 +768,7 @@ async function buildOpenAiInsights(payload, signal) {
 
 router.post('/documents', upload.single('document'), async (req, res, next) => {
   const userId = req.user.id;
+  const completenessContext = parseCompletenessToken(req.body?.completenessToken, userId);
   if (!req.file) {
     return next(badRequest('Please attach a document file'));
   }
@@ -1051,6 +1053,11 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       || docupipeInfo.uploadJobId
       || null;
 
+    const metadata = { ...(parsed?.metadata || {}) };
+    if (completenessContext) {
+      metadata.completeness = completenessContext;
+    }
+
     await UploadedDocument.findOneAndUpdate(
       { userId, contentHash },
       {
@@ -1066,7 +1073,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         originalName: originalname,
         contentType: mimetype,
         size,
-        metadata: parsed?.metadata || {},
+        metadata,
         analytics: parsed?.analytics || {},
         transactions: parsed?.transactions || [],
         docupipe: docupipeInfo,

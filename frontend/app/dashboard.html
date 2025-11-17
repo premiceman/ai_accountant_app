@@ -27,6 +27,24 @@
         </div>
       </div>
 
+      <section class="card">
+        <div class="panel-header">
+          <div>
+            <h3>Document completeness</h3>
+            <p class="subtitle">See which employers or banks are missing documents for this month.</p>
+          </div>
+          <div>
+            <span class="badge" id="completeness-month">—</span>
+          </div>
+        </div>
+        <div class="analytics-loading" id="completeness-loading" hidden>
+          <span class="loading-spinner" aria-hidden="true"></span>
+          <span>Checking for missing documents…</span>
+        </div>
+        <div id="completeness-body" class="gap-list"></div>
+        <p class="empty-indicator" id="completeness-empty">Upload a payslip or bank statement to start tracking completeness.</p>
+      </section>
+
       <section class="card analytics-card">
         <div class="panel-header">
           <div>
