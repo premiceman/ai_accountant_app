@@ -172,6 +172,10 @@ const UserSchema = new mongoose.Schema({
     }
   },
 
+  featureLicenses: {
+    procurement: { type: Boolean, default: false },
+  },
+
   workos: {
     userId:        { type: String, default: null },
     profileId:     { type: String, default: null },

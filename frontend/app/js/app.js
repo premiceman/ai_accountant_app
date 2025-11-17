@@ -34,6 +34,20 @@ const App = (() => {
       const query = month ? `?month=${encodeURIComponent(month)}` : '';
       return request(`/api/v2/dashboard/analytics${query}`);
     },
+    getProcurementVendors: () => request('/api/v2/procurement/vendors'),
+    createVendor: (payload) => request('/api/v2/procurement/vendors', { method: 'POST', body: JSON.stringify(payload) }),
+    createObjective: (vendorId, payload) =>
+      request(`/api/v2/procurement/vendors/${encodeURIComponent(vendorId)}/objectives`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    createTouchpoint: (vendorId, payload) =>
+      request(`/api/v2/procurement/vendors/${encodeURIComponent(vendorId)}/updates`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    generateProcurementBrief: (vendorId) =>
+      request(`/api/v2/procurement/vendors/${encodeURIComponent(vendorId)}/brief`, { method: 'POST' }),
   };
 
   async function signOut() {
@@ -68,6 +82,14 @@ const App = (() => {
     });
   }
 
+  function applyFeatureVisibility(profile) {
+    const licenses = profile?.featureLicenses || {};
+    document.querySelectorAll('[data-feature]').forEach((el) => {
+      const key = el.dataset.feature;
+      el.hidden = !licenses[key];
+    });
+  }
+
   async function bootstrap(activeNavId) {
     highlightNav(activeNavId);
     bindSignOut();
@@ -82,6 +104,7 @@ const App = (() => {
         const name = [first, last].filter(Boolean).join(' ').trim();
         nameEl.textContent = name || 'Welcome back';
       }
+      applyFeatureVisibility(me.profile);
       return me;
     } catch (error) {
       console.error('Failed to load user profile', error);

@@ -219,6 +219,274 @@ main {
   background: rgba(248, 113, 113, 0.12);
 }
 
+.procurement-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.procurement-layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.vendor-list-card {
+  height: 100%;
+}
+
+.vendor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vendor-pill {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vendor-pill.active {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.vendor-meta {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.vendor-pill-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chip-low, .chip-on_track, .chip-general, .chip-neutral {
+  background: rgba(34, 197, 94, 0.12);
+  color: #34d399;
+}
+
+.chip-medium {
+  background: rgba(250, 204, 21, 0.12);
+  color: #facc15;
+}
+
+.chip-high, .chip-at_risk, .chip-risk {
+  background: rgba(251, 146, 60, 0.12);
+  color: #fb923c;
+}
+
+.chip-critical, .chip-off_track {
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+}
+
+.chip-success {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+}
+
+.chip-not_started, .chip-meeting, .chip-action {
+  background: rgba(148, 163, 184, 0.15);
+  color: #e2e8f0;
+}
+
+.vendor-detail-card {
+  min-height: 600px;
+}
+
+.vendor-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-label {
+  color: var(--text-muted);
+  margin: 0 0 4px;
+}
+
+.summary-value {
+  margin: 0;
+  font-weight: 600;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.brief-box {
+  min-height: 120px;
+  border-radius: 14px;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  padding: 14px;
+  white-space: pre-line;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.objective-list,
+.update-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.objective-item, .update-item {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.objective-title {
+  margin: 0 0 6px;
+  font-weight: 700;
+}
+
+.objective-meta {
+  margin: 2px 0;
+  color: var(--text-muted);
+}
+
+.objective-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.objective-progress {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.stacked-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-row input,
+.form-row textarea,
+.form-row select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+}
+
+.form-row textarea {
+  resize: vertical;
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.update-summary {
+  margin: 6px 0;
+}
+
+.update-meta {
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.update-actions {
+  color: var(--text-muted);
+  margin: 4px 0 0;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-value {
+  font-size: 1.8rem;
+  margin: 0;
+}
+
+.stat-label, .stat-footnote {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.bullet-list {
+  margin: 8px 0 0 18px;
+  color: var(--text);
+}
+
+.unauthorized {
+  padding: 120px 48px;
+  text-align: center;
+}
+
 .table tr:last-child td {
   border-bottom: none;
 }

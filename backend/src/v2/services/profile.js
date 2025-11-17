@@ -13,6 +13,7 @@ async function getProfile(userId) {
     country: user.country,
     profileInterests: user.profileInterests,
     licenseTier: user.licenseTier,
+    featureLicenses: user.featureLicenses || {},
   };
 }
 

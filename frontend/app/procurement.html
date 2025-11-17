@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Procurement · AI Accountant</title>
+  <link rel="stylesheet" href="/app/css/app.css" />
+  <script defer src="/app/js/app.js"></script>
+  <script defer src="/app/js/procurement.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <nav>
+      <h1>AI ACCOUNTANT</h1>
+      <a data-nav="dashboard" href="/app/dashboard">Dashboard</a>
+      <a data-nav="procurement" data-feature="procurement" href="/app/procurement" hidden>Procurement</a>
+      <a data-nav="profile" href="/app/profile">Profile</a>
+      <button class="signout" type="button" data-action="signout">Sign out</button>
+    </nav>
+    <main>
+      <div class="page-header">
+        <div>
+          <span class="badge">Procurement workspace</span>
+          <h2>Vendor relationships</h2>
+          <p class="subtitle">Track suppliers, renewals, objectives, and touchpoints in one place.</p>
+        </div>
+        <div class="procurement-actions">
+          <button class="button" type="button" id="open-vendor-form">+ New vendor</button>
+        </div>
+      </div>
+
+      <section class="card-grid" id="procurement-stats">
+        <div class="card stat-card">
+          <p class="stat-label">Total vendors</p>
+          <p class="stat-value" data-stat="total">0</p>
+          <p class="stat-footnote">Across all categories</p>
+        </div>
+        <div class="card stat-card">
+          <p class="stat-label">Active relationships</p>
+          <p class="stat-value" data-stat="active">0</p>
+          <p class="stat-footnote">With health monitored</p>
+        </div>
+        <div class="card stat-card">
+          <p class="stat-label">At risk</p>
+          <p class="stat-value" data-stat="atRisk">0</p>
+          <p class="stat-footnote">Risk level high or critical</p>
+        </div>
+        <div class="card stat-card">
+          <p class="stat-label">Renewals (90d)</p>
+          <p class="stat-value" data-stat="renewalsNextQuarter">0</p>
+          <p class="stat-footnote">Review before renewal</p>
+        </div>
+        <div class="card stat-card">
+          <p class="stat-label">Total annual value</p>
+          <p class="stat-value" data-stat="totalAnnualValue">—</p>
+          <p class="stat-footnote">Sum of planned spend</p>
+        </div>
+      </section>
+
+      <div class="procurement-layout">
+        <section class="card vendor-list-card">
+          <div class="panel-header">
+            <div>
+              <h3>Vendors</h3>
+              <p class="subtitle">Select a vendor to view objectives, risks, and touchpoints.</p>
+            </div>
+            <div class="filters">
+              <label for="stage-filter">Stage</label>
+              <select id="stage-filter">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="trial">Trial</option>
+                <option value="prospect">Prospect</option>
+                <option value="sunset">Sunset</option>
+                <option value="offboarded">Offboarded</option>
+              </select>
+            </div>
+          </div>
+          <div class="vendor-list" id="vendor-list" aria-live="polite"></div>
+        </section>
+
+        <section class="card vendor-detail-card" aria-live="polite">
+          <div class="panel-header">
+            <div>
+              <h3 id="vendor-name">Select a vendor</h3>
+              <p class="subtitle" id="vendor-subtitle">Create or select a vendor to see details.</p>
+            </div>
+            <div class="vendor-tags" id="vendor-tags"></div>
+          </div>
+
+          <div id="vendor-empty" class="empty-indicator">No vendor selected.</div>
+
+          <div id="vendor-content" hidden>
+            <div class="vendor-summary">
+              <div>
+                <p class="summary-label">Stage</p>
+                <p class="summary-value" data-field="stage">—</p>
+              </div>
+              <div>
+                <p class="summary-label">Owner</p>
+                <p class="summary-value" data-field="owner">—</p>
+              </div>
+              <div>
+                <p class="summary-label">Annual value</p>
+                <p class="summary-value" data-field="annualValue">—</p>
+              </div>
+              <div>
+                <p class="summary-label">Renewal</p>
+                <p class="summary-value" data-field="renewalDate">—</p>
+              </div>
+              <div>
+                <p class="summary-label">Risk</p>
+                <p class="summary-value" data-field="riskLevel">—</p>
+              </div>
+            </div>
+
+            <div class="info-grid">
+              <div>
+                <h4>Relationship brief</h4>
+                <p class="subtitle">Use AI to align on objectives and quick wins.</p>
+                <div class="brief-box" id="brief-box">No brief generated yet.</div>
+                <div class="button-row">
+                  <button class="button button--ghost" type="button" id="generate-brief">Generate AI brief</button>
+                </div>
+              </div>
+              <div>
+                <h4>Objectives</h4>
+                <p class="subtitle">Track success criteria, status, and owners.</p>
+                <ul class="objective-list" id="objective-list"></ul>
+                <form id="objective-form" class="stacked-form">
+                  <div class="form-row">
+                    <label for="objective-title">Objective</label>
+                    <input id="objective-title" type="text" required placeholder="Stabilise onboarding experience" />
+                  </div>
+                  <div class="form-row two-col">
+                    <div>
+                      <label for="objective-owner">Owner</label>
+                      <input id="objective-owner" type="text" placeholder="Procurement owner" />
+                    </div>
+                    <div>
+                      <label for="objective-due">Due date</label>
+                      <input id="objective-due" type="date" />
+                    </div>
+                  </div>
+                  <div class="form-row two-col">
+                    <div>
+                      <label for="objective-metric">Metric</label>
+                      <input id="objective-metric" type="text" placeholder="Uptime, CSAT, SLA" />
+                    </div>
+                    <div>
+                      <label for="objective-target">Target</label>
+                      <input id="objective-target" type="text" placeholder="99.9%, NPS 60" />
+                    </div>
+                  </div>
+                  <div class="form-row two-col">
+                    <div>
+                      <label for="objective-status">Status</label>
+                      <select id="objective-status">
+                        <option value="not_started">Not started</option>
+                        <option value="on_track">On track</option>
+                        <option value="at_risk">At risk</option>
+                        <option value="off_track">Off track</option>
+                        <option value="completed">Completed</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="objective-progress">Progress (%)</label>
+                      <input id="objective-progress" type="number" min="0" max="100" value="0" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <label for="objective-criteria">Success criteria</label>
+                    <textarea id="objective-criteria" rows="2" placeholder="Deployment completed, SLA met, training delivered"></textarea>
+                  </div>
+                  <button class="button" type="submit">Add objective</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="info-grid">
+              <div>
+                <h4>Recent touchpoints</h4>
+                <p class="subtitle">Capture meetings, risks, and actions.</p>
+                <ul class="update-list" id="update-list"></ul>
+                <form id="update-form" class="stacked-form">
+                  <div class="form-row">
+                    <label for="update-summary">Summary</label>
+                    <textarea id="update-summary" rows="2" required placeholder="Quarterly business review notes"></textarea>
+                  </div>
+                  <div class="form-row two-col">
+                    <div>
+                      <label for="update-category">Category</label>
+                      <select id="update-category">
+                        <option value="general">General</option>
+                        <option value="meeting">Meeting</option>
+                        <option value="risk">Risk</option>
+                        <option value="action">Action</option>
+                        <option value="success">Success</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="update-owner">Recorded by</label>
+                      <input id="update-owner" type="text" placeholder="You" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <label for="update-actions">Action items (comma separated)</label>
+                    <input id="update-actions" type="text" placeholder="Send MSA, confirm rollout plan" />
+                  </div>
+                  <button class="button" type="submit">Log touchpoint</button>
+                </form>
+              </div>
+              <div>
+                <h4>Key dates & risks</h4>
+                <p class="subtitle">Track renewals, payments, and blockers.</p>
+                <div class="detail-grid">
+                  <div>
+                    <p class="summary-label">Payment terms</p>
+                    <p class="summary-value" data-field="paymentTerms">—</p>
+                  </div>
+                  <div>
+                    <p class="summary-label">Relationship health</p>
+                    <p class="summary-value" data-field="relationshipHealth">—</p>
+                  </div>
+                  <div>
+                    <p class="summary-label">Next review</p>
+                    <p class="summary-value" data-field="nextReviewAt">—</p>
+                  </div>
+                  <div>
+                    <p class="summary-label">Last touchpoint</p>
+                    <p class="summary-value" data-field="lastTouchpointAt">—</p>
+                  </div>
+                </div>
+                <div class="brief-box" id="risk-box">No risks captured yet.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <dialog id="vendor-modal">
+        <form id="vendor-form" class="stacked-form" method="dialog">
+          <h3>Create vendor</h3>
+          <div class="form-row">
+            <label for="vendor-name">Vendor name</label>
+            <input id="vendor-name" name="vendor-name" type="text" required placeholder="Acme Platform" />
+          </div>
+          <div class="form-row two-col">
+            <div>
+              <label for="vendor-category">Category</label>
+              <input id="vendor-category" name="vendor-category" type="text" placeholder="Data, CRM, Payroll" />
+            </div>
+            <div>
+              <label for="vendor-stage">Stage</label>
+              <select id="vendor-stage" name="vendor-stage">
+                <option value="prospect">Prospect</option>
+                <option value="trial">Trial</option>
+                <option value="active">Active</option>
+                <option value="sunset">Sunset</option>
+                <option value="offboarded">Offboarded</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row two-col">
+            <div>
+              <label for="vendor-owner">Owner</label>
+              <input id="vendor-owner" name="vendor-owner" type="text" placeholder="Procurement lead" />
+            </div>
+            <div>
+              <label for="vendor-risk">Risk level</label>
+              <select id="vendor-risk" name="vendor-risk">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row two-col">
+            <div>
+              <label for="vendor-value">Annual value</label>
+              <input id="vendor-value" name="vendor-value" type="number" min="0" step="0.01" placeholder="50000" />
+            </div>
+            <div>
+              <label for="vendor-renewal">Renewal date</label>
+              <input id="vendor-renewal" name="vendor-renewal" type="date" />
+            </div>
+          </div>
+          <div class="form-row">
+            <label for="vendor-payment">Payment terms</label>
+            <input id="vendor-payment" name="vendor-payment" type="text" placeholder="Net 30" />
+          </div>
+          <menu class="dialog-actions">
+            <button type="reset" class="button button--ghost" id="cancel-vendor">Cancel</button>
+            <button type="submit" class="button">Save vendor</button>
+          </menu>
+        </form>
+      </dialog>
+    </main>
+  </div>
+</body>
+</html>
