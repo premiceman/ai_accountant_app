@@ -38,6 +38,8 @@ const config = {
     uri: requireEnv('MONGODB_URI'),
     serverSelectionTimeoutMS:
       Number(optionalEnv('MONGODB_SERVER_SELECTION_TIMEOUT_MS', '5000')),
+    connectRetries: Number(optionalEnv('MONGODB_CONNECT_RETRIES', '5')),
+    connectRetryDelayMs: Number(optionalEnv('MONGODB_CONNECT_RETRY_DELAY_MS', '5000')),
     tls: optionalBooleanEnv('MONGODB_TLS'),
     tlsAllowInvalidCertificates: optionalBooleanEnv('MONGODB_TLS_INSECURE', false),
     tlsAllowInvalidHostnames: optionalBooleanEnv('MONGODB_TLS_ALLOW_INVALID_HOSTNAMES', false),
