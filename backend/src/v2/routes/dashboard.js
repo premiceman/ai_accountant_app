@@ -35,6 +35,18 @@ const upload = multer({
 const logger = createLogger('dashboard:documents');
 const analyticsLogger = createLogger('dashboard:analytics');
 
+function normaliseMonth(value) {
+  if (!value) return null;
+  const str = String(value);
+  const match = str.match(/(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function formatMonthLabel(month) {
+  const parsed = dayjs(`${month}-01`);
+  return parsed.isValid() ? parsed.format('MMM YYYY') : month;
+}
+
 function resolveTaxYear(isoDate) {
   const parsed = dayjs(isoDate);
   if (!parsed.isValid()) return null;
@@ -123,6 +135,36 @@ function deriveMonth(dateValue) {
   const parsed = dayjs(dateValue);
   if (!parsed.isValid()) return null;
   return parsed.format('YYYY-MM');
+}
+
+function bankLabel(metadata = {}) {
+  const candidates = [metadata.bankName, metadata.institutionName, metadata.accountName, metadata.provider];
+  const label = candidates.find((value) => value && String(value).trim());
+  return label ? String(label).trim() : 'Bank statement';
+}
+
+function employerLabel(metadata = {}, analytics = {}) {
+  const candidates = [metadata.employerName, analytics.employer, metadata.companyName];
+  const label = candidates.find((value) => value && String(value).trim());
+  return label ? String(label).trim() : 'Payslip';
+}
+
+function buildVaultUrl({ keys = [], month = null, label = null }) {
+  const search = new URLSearchParams();
+  if (keys.length) search.set('catalogueKey', keys.join(','));
+  if (month) search.set('month', month);
+  if (label) search.set('label', label);
+  const query = search.toString();
+  return `/app/document-vault${query ? `?${query}` : ''}`;
+}
+
+function recentMonths(count = 6) {
+  const months = [];
+  const now = dayjs();
+  for (let i = 0; i < count; i += 1) {
+    months.push(now.subtract(i, 'month').format('YYYY-MM'));
+  }
+  return months;
 }
 
 function extractDocumentPayload(result) {
@@ -1500,6 +1542,88 @@ router.get('/insights', async (req, res, next) => {
       payroll,
       aiInsights,
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/completeness', async (req, res, next) => {
+  const userId = req.user.id;
+
+  try {
+    const documents = await UploadedDocument.find({ userId }).sort({ month: -1, createdAt: -1 }).lean();
+
+    const monthsSet = new Set(recentMonths(6));
+    const monthBanks = new Map();
+    const monthEmployers = new Map();
+    const bankUniverse = new Set();
+    const employerUniverse = new Set();
+
+    documents.forEach((doc) => {
+      const month = normaliseMonth(doc.month) || deriveMonth(doc.periodEnd) || deriveMonth(doc.payDate);
+      if (!month) return;
+      monthsSet.add(month);
+
+      if (doc.docType === 'statement') {
+        const label = bankLabel(doc.metadata || {});
+        bankUniverse.add(label);
+        const set = monthBanks.get(month) || new Set();
+        set.add(label);
+        monthBanks.set(month, set);
+      }
+
+      if (doc.docType === 'payslip') {
+        const label = employerLabel(doc.metadata || {}, doc.analytics || {});
+        employerUniverse.add(label);
+        const set = monthEmployers.get(month) || new Set();
+        set.add(label);
+        monthEmployers.set(month, set);
+      }
+    });
+
+    const months = Array.from(monthsSet).sort((a, b) => b.localeCompare(a));
+
+    const payload = months
+      .map((month) => {
+        const missing = [];
+        const presentBanks = monthBanks.get(month) || new Set();
+        const presentEmployers = monthEmployers.get(month) || new Set();
+
+        bankUniverse.forEach((bank) => {
+          if (!presentBanks.has(bank)) {
+            missing.push({
+              type: 'statement',
+              label: bank,
+              catalogueKey: 'current_account_statement',
+              uploadUrl: buildVaultUrl({ keys: ['current_account_statement'], month, label: bank }),
+            });
+          }
+        });
+
+        employerUniverse.forEach((employer) => {
+          if (!presentEmployers.has(employer)) {
+            missing.push({
+              type: 'payslip',
+              label: employer,
+              catalogueKey: 'payslip',
+              uploadUrl: buildVaultUrl({ keys: ['payslip'], month, label: employer }),
+            });
+          }
+        });
+
+        const resolveKeys = Array.from(new Set(missing.map((item) => item.catalogueKey).filter(Boolean)));
+        const resolveUrl = resolveKeys.length ? buildVaultUrl({ keys: resolveKeys, month }) : null;
+
+        return {
+          month,
+          label: formatMonthLabel(month),
+          missing,
+          resolveUrl,
+        };
+      })
+      .filter((entry) => entry.missing.length);
+
+    return res.json({ months: payload });
   } catch (error) {
     return next(error);
   }

@@ -45,6 +45,23 @@
         <p class="empty-indicator" id="dashboard-empty" hidden>No analytics are available yet. Upload documents to unlock the dashboard.</p>
       </section>
 
+      <section class="card" id="missing-docs-card">
+        <div class="panel-header">
+          <div>
+            <h3>Missing documents</h3>
+            <p class="subtitle">Identify gaps by month and jump straight to the Vault to upload what’s missing.</p>
+          </div>
+          <div class="missing-docs-controls">
+            <label class="sr-only" for="missing-docs-month">Filter by month</label>
+            <select id="missing-docs-month" aria-label="Filter missing documents by month"></select>
+            <a class="btn" id="missing-docs-resolve" href="/app/document-vault">Resolve all</a>
+          </div>
+        </div>
+        <div class="missing-docs-body" id="missing-docs-body">
+          <p class="empty-indicator" id="missing-docs-empty">No missing documents detected.</p>
+        </div>
+      </section>
+
       <div class="card-grid">
         <section class="card highlight-card">
           <div class="panel-header">

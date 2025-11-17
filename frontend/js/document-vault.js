@@ -70,6 +70,7 @@
     updatedAt: null
   };
   let activeDocKey = null;
+  const preferredCatalogueKeys = parsePreferredCatalogueKeys();
   let processingByKey = {};
   const pendingUploads = [];
 
@@ -96,6 +97,30 @@
       if (typeof c === 'string' && c.trim()) return c;
     }
     return '';
+  }
+
+  function parsePreferredCatalogueKeys() {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const raw = params.get('catalogueKey') || params.get('catalogue');
+      if (!raw) return [];
+      return raw
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+    } catch (err) {
+      console.warn('Unable to parse catalogueKey query param', err);
+      return [];
+    }
+  }
+
+  function ensurePreferredSelection() {
+    if (!preferredCatalogueKeys.length) return;
+    if (activeDocKey && preferredCatalogueKeys.includes(activeDocKey)) return;
+    const candidate = preferredCatalogueKeys.find((key) => catalogueByKey.has(key));
+    if (candidate) {
+      activeDocKey = candidate;
+    }
   }
   function escapeHtml(s) {
     return String(s ?? '')
@@ -352,6 +377,7 @@
   }
 
   function renderCatalogue() {
+    ensurePreferredSelection();
     updateCatalogueProgressDisplay();
     if (!elCatalogueTableBody) return;
 
@@ -371,6 +397,7 @@
       const details = document.createElement('details');
       details.dataset.key = item.key;
       if (activeDocKey && activeDocKey === item.key) details.setAttribute('open', 'open');
+      if (preferredCatalogueKeys.includes(item.key)) details.classList.add('preferred-doc');
 
       const summary = document.createElement('summary');
       summary.innerHTML = `
