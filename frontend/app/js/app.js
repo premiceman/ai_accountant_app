@@ -32,6 +32,9 @@ const App = (() => {
       request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/json`),
     getDashboardDocumentDownload: (fileId) =>
       request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/download`),
+    getDocumentSources: () => request('/api/v2/dashboard/sources'),
+    createDocumentSource: (payload) =>
+      request('/api/v2/dashboard/sources', { method: 'POST', body: JSON.stringify(payload || {}) }),
     deleteDashboardDocument: (fileId) =>
       request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
     getDashboardAnalytics: (month) => {

@@ -61,6 +61,83 @@
         <div class="upload-feedback" id="upload-feedback" role="status"></div>
       </section>
 
+      <section class="card source-card" aria-live="polite">
+        <div class="panel-header source-header">
+          <div>
+            <h3>Document sources</h3>
+            <p class="subtitle">Grouped by employer and bank/building society so you can spot missing periods.</p>
+          </div>
+          <div class="source-header__actions">
+            <button type="button" class="button button--ghost" id="add-employer-btn">+ Add employer</button>
+            <button type="button" class="button" id="add-bank-btn">+ Add bank</button>
+          </div>
+        </div>
+
+        <div class="source-form" id="source-form-card" hidden>
+          <div class="source-form__header">
+            <div>
+              <p class="badge">New source</p>
+              <h4 id="source-form-title">Add employer</h4>
+              <p class="subtitle">Save source metadata so uploads stay organised.</p>
+            </div>
+            <button class="button button--ghost" type="button" id="source-cancel" data-cancel-source="true" aria-label="Close add source form">Cancel</button>
+          </div>
+          <form id="source-form" class="source-form__body">
+            <div class="form-grid">
+              <label>
+                <span class="label">Type</span>
+                <select id="source-type" name="type">
+                  <option value="payslip">Payslip · Employer</option>
+                  <option value="statement">Statement · Bank or building society</option>
+                </select>
+              </label>
+              <label>
+                <span class="label">Name</span>
+                <input id="source-name" name="name" type="text" placeholder="e.g. ACME Ltd or NatWest" required />
+              </label>
+              <label>
+                <span class="label">Institution (optional)</span>
+                <input id="source-institution" name="institution" type="text" placeholder="Building society or bank" />
+              </label>
+              <label>
+                <span class="label">Account number (optional)</span>
+                <input id="source-account-number" name="accountNumber" type="text" inputmode="numeric" placeholder="••••" />
+              </label>
+            </div>
+            <p class="form-feedback" id="source-form-feedback"></p>
+            <div class="source-form__actions">
+              <button type="button" class="button button--ghost" data-cancel-source="true" aria-label="Cancel add source">Cancel</button>
+              <button type="submit" class="button">Save source</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="source-groups">
+          <div class="source-group">
+            <div class="source-group__header">
+              <div class="source-chip source-chip--payslip">🏢</div>
+              <div>
+                <h4>Payslip sources</h4>
+                <p class="subtitle">Employers providing payslips.</p>
+              </div>
+            </div>
+            <div class="source-grid" id="payslip-source-grid"></div>
+            <p class="empty-indicator" id="payslip-sources-empty">No employers added yet. Add one to start tracking coverage.</p>
+          </div>
+          <div class="source-group">
+            <div class="source-group__header">
+              <div class="source-chip source-chip--statement">🏦</div>
+              <div>
+                <h4>Bank &amp; building society sources</h4>
+                <p class="subtitle">Accounts you upload statements for.</p>
+              </div>
+            </div>
+            <div class="source-grid" id="statement-source-grid"></div>
+            <p class="empty-indicator" id="statement-sources-empty">Add your first bank or building society to track statements.</p>
+          </div>
+        </div>
+      </section>
+
       <section class="card document-preview-card" aria-live="polite">
         <div class="panel-header">
           <div>
