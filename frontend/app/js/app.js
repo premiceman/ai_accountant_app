@@ -39,6 +39,10 @@ const App = (() => {
       return request(`/api/v2/dashboard/analytics${query}`);
     },
     getDashboardInsights: () => request('/api/v2/dashboard/insights'),
+    getDocumentCompleteness: (month) => {
+      const query = month ? `?month=${encodeURIComponent(month)}` : '';
+      return request(`/api/v2/documents/completeness${query}`);
+    },
   };
 
   async function signOut() {

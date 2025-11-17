@@ -2,6 +2,7 @@
   const state = {
     insights: null,
     charts: {},
+    completeness: null,
   };
 
   function formatCurrency(value, currency = 'GBP', { invert = false } = {}) {
@@ -29,12 +30,50 @@
     return new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric' }).format(date);
   }
 
+  function getCurrentMonth() {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${now.getFullYear()}-${month}`;
+  }
+
+  function setCompletenessLoading(isLoading) {
+    const loading = document.getElementById('completeness-loading');
+    const body = document.getElementById('completeness-body');
+    if (loading) loading.hidden = !isLoading;
+    if (body) body.ariaBusy = isLoading ? 'true' : 'false';
+  }
+
+  function setCompletenessError(message) {
+    const empty = document.getElementById('completeness-empty');
+    const body = document.getElementById('completeness-body');
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = message;
+    }
+    if (body) {
+      body.innerHTML = '';
+    }
+  }
+
   function setLoading(isLoading) {
     const loading = document.getElementById('dashboard-loading');
     const summary = document.getElementById('dashboard-summary');
     if (!loading || !summary) return;
     loading.hidden = !isLoading;
     summary.ariaBusy = isLoading ? 'true' : 'false';
+  }
+
+  function ensureUploadInput() {
+    let input = document.getElementById('completeness-upload');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+      input.id = 'completeness-upload';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+    }
+    return input;
   }
 
   function setMonthsBadge(summary) {
@@ -97,6 +136,108 @@
     if (!container.children.length) {
       empty.hidden = false;
     }
+  }
+
+  function renderMissingGroup(title, items, type) {
+    const group = document.createElement('div');
+    group.className = 'gap-group';
+    const heading = document.createElement('p');
+    heading.className = 'metric-label';
+    heading.textContent = title;
+    group.appendChild(heading);
+
+    items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'gap-item';
+
+      const meta = document.createElement('div');
+      meta.className = 'gap-meta';
+      const name = document.createElement('p');
+      name.className = 'gap-title';
+      name.textContent = item.label || item.name || item.accountName || 'Missing document';
+      const hint = document.createElement('p');
+      hint.className = 'subtitle';
+      hint.textContent = type === 'employer' ? 'Payslip missing' : 'Statement missing';
+      meta.append(name, hint);
+
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'gap-action';
+      action.textContent = 'Upload';
+      action.addEventListener('click', () => handleGapUpload(item));
+
+      row.append(meta, action);
+      group.appendChild(row);
+    });
+
+    return group;
+  }
+
+  async function handleGapUpload(gap) {
+    const input = ensureUploadInput();
+    input.onchange = async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('document', file);
+      if (gap.upload?.uploadToken) {
+        formData.append('completenessToken', gap.upload.uploadToken);
+      }
+      try {
+        setCompletenessLoading(true);
+        await App.Api.uploadDocument(formData);
+        await Promise.all([loadInsights(), loadCompleteness()]);
+      } catch (error) {
+        console.error('Failed to upload missing document', error);
+        setCompletenessError('Upload failed. Please try again.');
+      } finally {
+        input.value = '';
+        input.onchange = null;
+        setCompletenessLoading(false);
+      }
+    };
+    input.click();
+  }
+
+  function renderCompleteness(completeness) {
+    const body = document.getElementById('completeness-body');
+    const empty = document.getElementById('completeness-empty');
+    const badge = document.getElementById('completeness-month');
+    if (!body || !empty) return;
+
+    body.innerHTML = '';
+    empty.hidden = true;
+
+    const month = completeness?.month || getCurrentMonth();
+    if (badge) badge.textContent = formatMonthLabel(month);
+
+    const hasKnown = (completeness?.known?.employers?.length || 0) + (completeness?.known?.banks?.length || 0) > 0;
+    const missingEmployers = completeness?.missing?.employers || [];
+    const missingBanks = completeness?.missing?.banks || [];
+
+    if (!hasKnown) {
+      empty.hidden = false;
+      empty.textContent = 'Upload a payslip or bank statement to start tracking completeness.';
+      return;
+    }
+
+    if (!missingEmployers.length && !missingBanks.length) {
+      empty.hidden = false;
+      empty.textContent = `All expected uploads are present for ${formatMonthLabel(month)}.`;
+      return;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'gap-list';
+
+    if (missingEmployers.length) {
+      list.appendChild(renderMissingGroup('Employers', missingEmployers, 'employer'));
+    }
+    if (missingBanks.length) {
+      list.appendChild(renderMissingGroup('Banks', missingBanks, 'bank'));
+    }
+
+    body.appendChild(list);
   }
 
   function destroyChart(key) {
@@ -538,11 +679,26 @@
     }
   }
 
+  async function loadCompleteness() {
+    setCompletenessLoading(true);
+    try {
+      const month = getCurrentMonth();
+      const completeness = await App.Api.getDocumentCompleteness(month);
+      state.completeness = completeness;
+      renderCompleteness(completeness);
+    } catch (error) {
+      console.error('Failed to load document completeness', error);
+      setCompletenessError('Unable to load missing items right now.');
+    } finally {
+      setCompletenessLoading(false);
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     App.bootstrap('dashboard')
       .then((me) => {
         if (!me) return;
-        return loadInsights();
+        return Promise.all([loadInsights(), loadCompleteness()]);
       })
       .catch((error) => {
         console.error('Dashboard initialisation failed', error);
