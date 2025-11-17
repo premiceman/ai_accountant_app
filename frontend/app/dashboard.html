@@ -27,6 +27,24 @@
         </div>
       </div>
 
+      <section class="card">
+        <div class="panel-header">
+          <div>
+            <h3>Document completeness</h3>
+            <p class="subtitle">See which employers or banks are missing documents for this month.</p>
+          </div>
+          <div>
+            <span class="badge" id="completeness-month">—</span>
+          </div>
+        </div>
+        <div class="analytics-loading" id="completeness-loading" hidden>
+          <span class="loading-spinner" aria-hidden="true"></span>
+          <span>Checking for missing documents…</span>
+        </div>
+        <div id="completeness-body" class="gap-list"></div>
+        <p class="empty-indicator" id="completeness-empty">Upload a payslip or bank statement to start tracking completeness.</p>
+      </section>
+
       <section class="card analytics-card">
         <div class="panel-header">
           <div>
@@ -43,6 +61,23 @@
         </div>
         <div class="summary-grid" id="dashboard-summary"></div>
         <p class="empty-indicator" id="dashboard-empty" hidden>No analytics are available yet. Upload documents to unlock the dashboard.</p>
+      </section>
+
+      <section class="card" id="missing-docs-card">
+        <div class="panel-header">
+          <div>
+            <h3>Missing documents</h3>
+            <p class="subtitle">Identify gaps by month and jump straight to the Vault to upload what’s missing.</p>
+          </div>
+          <div class="missing-docs-controls">
+            <label class="sr-only" for="missing-docs-month">Filter by month</label>
+            <select id="missing-docs-month" aria-label="Filter missing documents by month"></select>
+            <a class="btn" id="missing-docs-resolve" href="/app/document-vault">Resolve all</a>
+          </div>
+        </div>
+        <div class="missing-docs-body" id="missing-docs-body">
+          <p class="empty-indicator" id="missing-docs-empty">No missing documents detected.</p>
+        </div>
       </section>
 
       <div class="card-grid">

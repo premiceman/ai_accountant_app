@@ -7,6 +7,8 @@
     statements: [],
     statementSelectedId: null,
     statementChart: null,
+    missingDocsMonths: [],
+    missingDocsSelected: null,
   };
 
   init().catch((error) => {
@@ -18,16 +20,17 @@
     const { me } = await Auth.requireAuth();
     Auth.setBannerTitle('Intelligence Dashboard');
 
-    const [insights, payslipDataset, statementDataset] = await Promise.all([
+    const [insights, payslipDataset, statementDataset, completeness] = await Promise.all([
       loadInsights().catch((error) => {
         console.warn('Proceeding without document insights', error);
         return {};
       }),
       loadPayslipDataset(),
       loadStatementDataset(),
+      loadCompleteness(),
     ]);
 
-    renderDashboard({ me, insights, payslipDataset, statementDataset });
+    renderDashboard({ me, insights, payslipDataset, statementDataset, completeness });
   }
 
   async function loadInsights() {
@@ -89,6 +92,22 @@
     }
   }
 
+  async function loadCompleteness() {
+    try {
+      const response = await Auth.fetch('/api/v2/dashboard/completeness', { cache: 'no-store' });
+      if (!response.ok) {
+        const text = await safeRead(response);
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const months = Array.isArray(payload?.months) ? payload.months : [];
+      return { months, error: null };
+    } catch (error) {
+      console.error('Failed to load document completeness', error);
+      return { months: [], error };
+    }
+  }
+
   async function safeRead(response) {
     try {
       const type = response.headers.get('content-type') || '';
@@ -106,7 +125,7 @@
     }
   }
 
-  function renderDashboard({ insights = {}, payslipDataset = { list: [] }, statementDataset = { list: [] }, me = null } = {}) {
+  function renderDashboard({ insights = {}, payslipDataset = { list: [] }, statementDataset = { list: [] }, completeness = { months: [] }, me = null } = {}) {
     if (me?.firstName) {
       const greeting = byId('greeting-name');
       if (greeting) greeting.textContent = me.firstName;
@@ -148,6 +167,115 @@
     renderStatementChart(selectedStatement);
     renderStatementCategories(selectedStatement);
     renderStatementJson(selectedStatement);
+
+    renderMissingDocsPanel(completeness);
+  }
+
+  function renderMissingDocsPanel(completeness = { months: [] }) {
+    const select = byId('missing-docs-month');
+    const body = byId('missing-docs-body');
+    const empty = byId('missing-docs-empty');
+    const resolveBtn = byId('missing-docs-resolve');
+    if (!select || !body || !empty) return;
+
+    const months = Array.isArray(completeness.months) ? completeness.months : [];
+    state.missingDocsMonths = months;
+
+    select.innerHTML = '';
+    if (!months.length) {
+      select.disabled = true;
+      empty.hidden = false;
+      if (resolveBtn) {
+        resolveBtn.classList.add('disabled');
+        resolveBtn.setAttribute('aria-disabled', 'true');
+      }
+      body.innerHTML = '';
+      body.appendChild(empty);
+      return;
+    }
+
+    months.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.month;
+      option.textContent = entry.label || entry.month;
+      select.appendChild(option);
+    });
+
+    const selected = state.missingDocsSelected || months[0]?.month || null;
+    select.value = selected || months[0]?.month || '';
+    state.missingDocsSelected = select.value || null;
+    select.disabled = false;
+
+    if (!select.dataset.bound) {
+      select.addEventListener('change', (event) => {
+        state.missingDocsSelected = event.target.value || null;
+        renderMissingDocsPanel({ months: state.missingDocsMonths });
+      });
+      select.dataset.bound = 'true';
+    }
+
+    const current = months.find((item) => item.month === state.missingDocsSelected) || months[0] || null;
+    const missing = Array.isArray(current?.missing) ? current.missing : [];
+
+    body.innerHTML = '';
+
+    if (!missing.length || !current) {
+      empty.hidden = false;
+      body.appendChild(empty);
+      if (resolveBtn) {
+        resolveBtn.classList.add('disabled');
+        resolveBtn.setAttribute('aria-disabled', 'true');
+      }
+      return;
+    }
+
+    empty.hidden = true;
+
+    const alert = document.createElement('div');
+    alert.className = 'missing-docs-alert';
+
+    const copy = document.createElement('div');
+    const title = document.createElement('h4');
+    title.textContent = current.label || current.month || 'Missing documents';
+    copy.appendChild(title);
+
+    const meta = document.createElement('p');
+    meta.className = 'missing-doc-meta';
+    const count = missing.length;
+    meta.textContent = count === 1
+      ? '1 document needs your attention.'
+      : `${count} documents need your attention.`;
+    copy.appendChild(meta);
+    alert.appendChild(copy);
+
+    const badgeWrap = document.createElement('div');
+    badgeWrap.className = 'missing-docs-badges';
+
+    missing.forEach((item) => {
+      const badge = document.createElement('a');
+      badge.className = 'missing-doc-badge';
+      badge.href = item.uploadUrl || '/app/document-vault';
+      badge.target = '_self';
+      const label = escapeHtml(item.label || item.type || 'Upload');
+      badge.innerHTML = `<span class="badge-dot" aria-hidden="true"></span><span>${label}</span>`;
+      badge.title = 'Open Vault upload';
+      badgeWrap.appendChild(badge);
+    });
+
+    alert.appendChild(badgeWrap);
+    body.appendChild(alert);
+
+    if (resolveBtn) {
+      if (current.resolveUrl) {
+        resolveBtn.classList.remove('disabled');
+        resolveBtn.removeAttribute('aria-disabled');
+        resolveBtn.href = current.resolveUrl;
+      } else {
+        resolveBtn.classList.add('disabled');
+        resolveBtn.setAttribute('aria-disabled', 'true');
+        resolveBtn.href = '/app/document-vault';
+      }
+    }
   }
 
   function renderPayslipSelector(payslips, selectedId) {
