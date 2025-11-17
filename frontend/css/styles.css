@@ -2196,3 +2196,8 @@ html[data-theme="dark"] .theme-toggle[data-theme-state="dark"] [data-theme-toggl
 .landing-footer .link-muted:focus {
   color: var(--bs-primary);
 }
+
+details.preferred-doc > summary {
+  border-color: rgba(103, 89, 255, 0.35);
+  background: rgba(103, 89, 255, 0.06);
+}
