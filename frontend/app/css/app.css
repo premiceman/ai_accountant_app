@@ -829,6 +829,30 @@ label {
   margin: 0;
 }
 
+.insights-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.insight-heading {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+
+.insight-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+}
+
+.insight-list li {
+  line-height: 1.4;
+}
+
 @media (max-width: 960px) {
   .document-preview-body {
     grid-template-columns: 1fr;

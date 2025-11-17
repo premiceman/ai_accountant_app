@@ -34,6 +34,7 @@ const App = (() => {
       const query = month ? `?month=${encodeURIComponent(month)}` : '';
       return request(`/api/v2/dashboard/analytics${query}`);
     },
+    getDashboardInsights: () => request('/api/v2/dashboard/insights'),
   };
 
   async function signOut() {
