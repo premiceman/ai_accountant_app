@@ -7,7 +7,9 @@
     selectedMonth: null,
     documents: [],
     selectedDocumentId: null,
+    sources: [],
   };
+  let pendingUploadSource = null;
   const documentDetailsCache = new Map();
   const documentPreviewCache = new Map();
   let jsonCopyResetTimer = null;
@@ -504,6 +506,83 @@
     }
   }
 
+  function renderSourceTile(source) {
+    const tile = document.createElement('article');
+    tile.className = 'source-tile';
+    tile.dataset.type = source.type || 'payslip';
+
+    const header = document.createElement('div');
+    header.className = 'source-tile__header';
+
+    const icon = document.createElement('div');
+    icon.className = 'source-tile__icon';
+    icon.textContent = source.type === 'statement' ? '🏦' : '🏢';
+
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'source-tile__title';
+    const name = document.createElement('div');
+    name.className = 'source-tile__name';
+    name.textContent = source.name || (source.type === 'statement' ? 'Bank' : 'Employer');
+    const subtitle = document.createElement('div');
+    subtitle.className = 'source-tile__meta';
+    const latestLabel = source.latestMonth
+      ? formatMonthLabel(source.latestMonth)
+      : 'No uploads yet';
+    const missingLabel = source.missingPeriods > 0
+      ? `${source.missingPeriods} missing period${source.missingPeriods === 1 ? '' : 's'}`
+      : 'Up to date';
+    subtitle.textContent = `Latest: ${latestLabel} · ${missingLabel}`;
+    titleBlock.append(name, subtitle);
+
+    const badge = document.createElement('span');
+    badge.className = 'source-tile__badge';
+    badge.textContent = missingLabel;
+    if (source.missingPeriods > 0) {
+      badge.classList.add('is-warning');
+    }
+
+    header.append(icon, titleBlock, badge);
+
+    const stats = document.createElement('div');
+    stats.className = 'source-tile__stats';
+    const months = document.createElement('span');
+    months.textContent = `${source.monthsCovered || 0} month${source.monthsCovered === 1 ? '' : 's'} on file`;
+    const docs = document.createElement('span');
+    docs.textContent = `${source.documentCount || 0} document${(source.documentCount || 0) === 1 ? '' : 's'}`;
+    stats.append(months, docs);
+
+    const actions = document.createElement('div');
+    actions.className = 'source-tile__actions';
+    const uploadBtn = document.createElement('button');
+    uploadBtn.type = 'button';
+    uploadBtn.className = 'button button--ghost source-upload-btn';
+    uploadBtn.textContent = source.missingPeriods > 0 ? 'Upload missing periods' : 'Upload next period';
+    uploadBtn.addEventListener('click', () => handleSourceUpload(source));
+    actions.appendChild(uploadBtn);
+
+    tile.append(header, stats, actions);
+    return tile;
+  }
+
+  function renderSourceGroup(type, containerId, emptyId) {
+    const container = document.getElementById(containerId);
+    const empty = document.getElementById(emptyId);
+    if (!container || !empty) return;
+    const sources = state.sources.filter((source) => source.type === type);
+    container.innerHTML = '';
+    if (!sources.length) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+    sources.forEach((source) => container.appendChild(renderSourceTile(source)));
+  }
+
+  function renderSources() {
+    renderSourceGroup('payslip', 'payslip-source-grid', 'payslip-sources-empty');
+    renderSourceGroup('statement', 'statement-source-grid', 'statement-sources-empty');
+  }
+
   function renderPayslips(payslips, currency) {
     const wrapper = document.querySelector('#payslip-panel .table-wrapper');
     const table = document.getElementById('payslip-table');
@@ -867,6 +946,49 @@
     }
   }
 
+  async function loadSources() {
+    const emptyStates = [
+      document.getElementById('payslip-sources-empty'),
+      document.getElementById('statement-sources-empty'),
+    ];
+    emptyStates.forEach((el) => {
+      if (el && !el.dataset.defaultText) {
+        el.dataset.defaultText = el.textContent || '';
+      }
+      if (el) {
+        el.hidden = false;
+        el.textContent = 'Loading sources…';
+      }
+    });
+
+    try {
+      const data = await App.Api.getDocumentSources();
+      state.sources = Array.isArray(data.sources) ? data.sources : [];
+      renderSources();
+      emptyStates.forEach((el) => {
+        if (el) el.textContent = el.dataset.defaultText || '';
+      });
+    } catch (error) {
+      state.sources = [];
+      renderSources();
+      emptyStates.forEach((el) => {
+        if (el) {
+          el.textContent = error.message || 'Unable to load sources.';
+          el.hidden = false;
+        }
+      });
+    }
+  }
+
+  function handleSourceUpload(source) {
+    pendingUploadSource = source;
+    const fileInput = document.getElementById('document-input');
+    setUploadFeedback(`Attach a PDF for ${source.name || 'your source'}.`, 'info');
+    if (fileInput) {
+      fileInput.click();
+    }
+  }
+
   async function handleUpload(file) {
     if (!file || isUploading) return;
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
@@ -892,6 +1014,19 @@
 
     const formData = new FormData();
     formData.append('document', file);
+    if (pendingUploadSource) {
+      formData.append('sourceType', pendingUploadSource.type || '');
+      formData.append('sourceName', pendingUploadSource.name || '');
+      if (pendingUploadSource.sourceId) {
+        formData.append('sourceId', pendingUploadSource.sourceId);
+      }
+      if (pendingUploadSource.institutionName) {
+        formData.append('sourceInstitution', pendingUploadSource.institutionName);
+      }
+      if (pendingUploadSource.accountNumber) {
+        formData.append('sourceAccountNumber', pendingUploadSource.accountNumber);
+      }
+    }
 
     try {
       const response = await App.Api.uploadDocument(formData);
@@ -905,6 +1040,7 @@
       setUploadFeedback(message, tone);
       await loadAnalytics(response.month || state.selectedMonth);
       await loadDocuments({ preserveSelection: false });
+      await loadSources();
     } catch (error) {
       clearTimeout(docupipeTimer);
       clearTimeout(analyticsTimer);
@@ -914,6 +1050,7 @@
       setUploadFeedback(error.message || 'We could not process this document.', 'error');
     } finally {
       isUploading = false;
+      pendingUploadSource = null;
     }
   }
 
@@ -972,15 +1109,116 @@
     select.dataset.bound = 'true';
   }
 
+  function hideSourceForm() {
+    const formCard = document.getElementById('source-form-card');
+    const feedback = document.getElementById('source-form-feedback');
+    if (formCard) {
+      formCard.hidden = true;
+    }
+    if (feedback) {
+      feedback.textContent = '';
+    }
+  }
+
+  function openSourceForm(type = 'payslip') {
+    const formCard = document.getElementById('source-form-card');
+    const form = document.getElementById('source-form');
+    const typeInput = document.getElementById('source-type');
+    const title = document.getElementById('source-form-title');
+    if (!formCard || !form || !typeInput) return;
+    form.reset();
+    typeInput.value = type;
+    if (title) {
+      title.textContent = type === 'statement' ? 'Add bank or building society' : 'Add employer';
+    }
+    formCard.hidden = false;
+    const nameInput = document.getElementById('source-name');
+    if (nameInput) {
+      nameInput.focus();
+    }
+  }
+
+  function bindSourceForm() {
+    const form = document.getElementById('source-form');
+    const cancelBtns = document.querySelectorAll('[data-cancel-source="true"]');
+    const addEmployerBtn = document.getElementById('add-employer-btn');
+    const addBankBtn = document.getElementById('add-bank-btn');
+    if (!form) return;
+
+    if (addEmployerBtn && addEmployerBtn.dataset.bound !== 'true') {
+      addEmployerBtn.addEventListener('click', () => openSourceForm('payslip'));
+      addEmployerBtn.dataset.bound = 'true';
+    }
+    if (addBankBtn && addBankBtn.dataset.bound !== 'true') {
+      addBankBtn.addEventListener('click', () => openSourceForm('statement'));
+      addBankBtn.dataset.bound = 'true';
+    }
+    cancelBtns.forEach((cancelBtn) => {
+      if (cancelBtn.dataset.bound === 'true') return;
+      cancelBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        hideSourceForm();
+      });
+      cancelBtn.dataset.bound = 'true';
+    });
+
+    if (form.dataset.bound === 'true') return;
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const feedback = document.getElementById('source-form-feedback');
+      const submit = form.querySelector('button[type="submit"]');
+      const typeInput = document.getElementById('source-type');
+      const nameInput = document.getElementById('source-name');
+      const institutionInput = document.getElementById('source-institution');
+      const accountInput = document.getElementById('source-account-number');
+      const payload = {
+        type: typeInput?.value || 'payslip',
+        name: nameInput?.value || '',
+        institutionName: institutionInput?.value || '',
+        accountNumber: accountInput?.value || '',
+      };
+      if (!payload.name.trim()) {
+        if (feedback) {
+          feedback.textContent = 'Please add a name for this source.';
+        }
+        return;
+      }
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = 'Saving…';
+      }
+      if (feedback) {
+        feedback.textContent = '';
+      }
+      try {
+        await App.Api.createDocumentSource(payload);
+        hideSourceForm();
+        await loadSources();
+        setUploadFeedback('Source added. Upload the latest period to keep things current.', 'success');
+      } catch (error) {
+        if (feedback) {
+          feedback.textContent = error.message || 'Unable to save this source.';
+        }
+      } finally {
+        if (submit) {
+          submit.disabled = false;
+          submit.textContent = 'Save source';
+        }
+      }
+    });
+    form.dataset.bound = 'true';
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     App.bootstrap('vault')
       .then(() => {
         bindUploadControls();
         bindMonthSelect();
+        bindSourceForm();
         bindJsonCopy();
         bindDocumentActions();
         resetUploadStatus();
-        return Promise.all([loadAnalytics(), loadDocuments()]);
+        return Promise.all([loadAnalytics(), loadDocuments(), loadSources()]);
       })
       .catch((error) => {
         console.error('Document vault initialisation failed', error);

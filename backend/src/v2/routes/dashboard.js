@@ -7,6 +7,7 @@ const DocumentResult = require('../models/DocumentResult');
 const DocumentInsight = require('../models/DocumentInsight');
 const TransactionV2 = require('../models/TransactionV2');
 const PayslipMetricsV2 = require('../models/PayslipMetricsV2');
+const DocumentSource = require('../models/DocumentSource');
 const { mongoose } = require('../models');
 const { config } = require('../config');
 const { parseCompletenessToken } = require('../services/documents/completeness');
@@ -741,6 +742,115 @@ const categoryMatchers = [
   { key: 'pension', label: 'Retirement' },
 ];
 
+function normaliseSourceKey(type, name, accountNumber) {
+  const normalisedName = (name || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  const accountKey = (accountNumber || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+  return [type || '', normalisedName, accountKey].filter(Boolean).join('|');
+}
+
+function parseMonthValue(month) {
+  if (!month || typeof month !== 'string') return null;
+  const [yearStr, monthStr] = month.split('-');
+  const year = Number(yearStr);
+  const monthNum = Number(monthStr);
+  if (!Number.isInteger(year) || !Number.isInteger(monthNum)) return null;
+  if (monthNum < 1 || monthNum > 12) return null;
+  return { year, month: monthNum };
+}
+
+function monthDistance(start, end) {
+  const startMonth = parseMonthValue(start);
+  const endMonth = parseMonthValue(end);
+  if (!startMonth || !endMonth) return 0;
+  return (endMonth.year - startMonth.year) * 12 + (endMonth.month - startMonth.month);
+}
+
+function computeMissingPeriods(monthsSet) {
+  const months = Array.from(monthsSet || []).filter(Boolean).sort((a, b) => (a > b ? 1 : -1));
+  if (months.length <= 1) {
+    return { latestMonth: months[months.length - 1] || null, missingPeriods: 0 };
+  }
+  const first = months[0];
+  const last = months[months.length - 1];
+  const span = monthDistance(first, last) + 1;
+  const missingPeriods = Math.max(0, span - months.length);
+  return { latestMonth: last, missingPeriods };
+}
+
+function summariseDocumentSources(documents) {
+  const byKey = new Map();
+  const bySourceId = new Map();
+
+  documents.forEach((doc) => {
+    if (!doc) return;
+    const metadata = doc.metadata || {};
+    let name = null;
+    let institutionName = null;
+    let accountNumber = null;
+
+    if (doc.docType === 'payslip') {
+      name = metadata.employerName || 'Employer';
+    } else if (doc.docType === 'statement') {
+      name = metadata.institutionName || metadata.accountName || 'Account';
+      institutionName = metadata.institutionName || null;
+      accountNumber = metadata.accountNumber || null;
+    } else {
+      return;
+    }
+
+    const key = normaliseSourceKey(doc.docType, name, accountNumber || institutionName);
+    const target = byKey.get(key) || {
+      type: doc.docType,
+      name,
+      institutionName,
+      accountNumber,
+      months: new Set(),
+      documentCount: 0,
+      sourceId: metadata.sourceId || null,
+    };
+    if (doc.month) {
+      target.months.add(doc.month);
+    }
+    target.documentCount += 1;
+    if (metadata.sourceId) {
+      target.sourceId = metadata.sourceId;
+    }
+    byKey.set(key, target);
+    if (target.sourceId) {
+      bySourceId.set(target.sourceId, target);
+    }
+  });
+
+  return { byKey, bySourceId };
+}
+
+function buildSourceResponse(sourceDoc, summary) {
+  const months = summary?.months ? Array.from(summary.months).filter(Boolean) : [];
+  months.sort((a, b) => (a > b ? -1 : 1));
+  const { latestMonth, missingPeriods } = computeMissingPeriods(new Set(months));
+
+  return {
+    sourceId: sourceDoc?.sourceId || summary?.sourceId || null,
+    type: sourceDoc?.type || summary?.type || 'payslip',
+    name: sourceDoc?.name || summary?.name || 'Source',
+    institutionName: sourceDoc?.institutionName || summary?.institutionName || null,
+    accountNumber: sourceDoc?.accountNumber || summary?.accountNumber || null,
+    latestMonth,
+    monthsCovered: summary?.months?.size || 0,
+    missingPeriods,
+    documentCount: summary?.documentCount || 0,
+    registered: Boolean(sourceDoc),
+  };
+}
+
 function categoriseTransaction(description) {
   const value = (description || '').toString().toLowerCase();
   if (!value.trim()) return 'Other';
@@ -816,6 +926,13 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
   }
 
   const { buffer, originalname, mimetype, size } = req.file;
+  const sourceType = typeof req.body?.sourceType === 'string' ? req.body.sourceType.trim() : null;
+  const sourceName = typeof req.body?.sourceName === 'string' ? req.body.sourceName.trim() : null;
+  const sourceId = typeof req.body?.sourceId === 'string' ? req.body.sourceId.trim() : null;
+  const sourceInstitution =
+    typeof req.body?.sourceInstitution === 'string' ? req.body.sourceInstitution.trim() : null;
+  const sourceAccountNumber =
+    typeof req.body?.sourceAccountNumber === 'string' ? req.body.sourceAccountNumber.trim() : null;
   if (!/pdf$/i.test(originalname) && mimetype !== 'application/pdf') {
     return next(badRequest('Only PDF documents are supported in this preview'));
   }
@@ -998,7 +1115,9 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
     }
 
     const metadata = extractStandardizationMetadata(selectedStdJson);
-    const docType = selectedCandidate.type || resolveDocTypeFromSchema(selectedStdJson) || 'unknown';
+    const userDocType = sourceType === 'payslip' || sourceType === 'statement' ? sourceType : null;
+    const pipelineDocType = selectedCandidate.type || resolveDocTypeFromSchema(selectedStdJson) || 'unknown';
+    const docType = pipelineDocType === 'unknown' && userDocType ? userDocType : pipelineDocType;
     const payload = extractDocumentPayload(selectedStdJson);
 
     console.log('[docupipe] selected', {
@@ -1095,9 +1214,28 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
       || docupipeInfo.uploadJobId
       || null;
 
-    const metadata = { ...(parsed?.metadata || {}) };
-    if (completenessContext) {
-      metadata.completeness = completenessContext;
+    const mergedMetadata = { ...(parsed?.metadata || {}) };
+    if (sourceId) {
+      mergedMetadata.sourceId = sourceId;
+    }
+    if (docType === 'payslip' && sourceName && !mergedMetadata.employerName) {
+      mergedMetadata.employerName = sourceName;
+    }
+    if (docType === 'statement') {
+      if (sourceAccountNumber && !mergedMetadata.accountNumber) {
+        mergedMetadata.accountNumber = sourceAccountNumber;
+      }
+      if (sourceInstitution && !mergedMetadata.institutionName) {
+        mergedMetadata.institutionName = sourceInstitution;
+      }
+      if (sourceName) {
+        if (!mergedMetadata.accountName) {
+          mergedMetadata.accountName = sourceName;
+        }
+        if (!mergedMetadata.institutionName) {
+          mergedMetadata.institutionName = sourceName;
+        }
+      }
     }
 
     await UploadedDocument.findOneAndUpdate(
@@ -1115,7 +1253,7 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
         originalName: originalname,
         contentType: mimetype,
         size,
-        metadata,
+        metadata: mergedMetadata,
         analytics: parsed?.analytics || {},
         transactions: parsed?.transactions || [],
         docupipe: docupipeInfo,
@@ -1149,6 +1287,74 @@ router.post('/documents', upload.single('document'), async (req, res, next) => {
     if (r2Key) {
       await deleteObject(r2Key).catch(() => {});
     }
+    return next(error);
+  }
+});
+
+router.post('/sources', async (req, res, next) => {
+  const userId = req.user.id;
+  const { type, name, institutionName, accountNumber } = req.body || {};
+
+  try {
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName) {
+      return res.status(400).json({ error: 'A source name is required' });
+    }
+    if (!['payslip', 'statement'].includes(type)) {
+      return res.status(400).json({ error: 'type must be payslip or statement' });
+    }
+
+    const source = await DocumentSource.create({
+      userId,
+      sourceId: randomUUID(),
+      type,
+      name: trimmedName,
+      institutionName: typeof institutionName === 'string' ? institutionName.trim() || null : null,
+      accountNumber: typeof accountNumber === 'string' ? accountNumber.trim() || null : null,
+      metadata: {},
+    });
+
+    return res.status(201).json({ source });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/sources', async (req, res, next) => {
+  const userId = req.user.id;
+  try {
+    const [sources, documents] = await Promise.all([
+      DocumentSource.find({ userId }).sort({ createdAt: -1 }).lean(),
+      UploadedDocument.find({ userId })
+        .select({ docType: 1, month: 1, metadata: 1 })
+        .lean(),
+    ]);
+
+    const summary = summariseDocumentSources(documents);
+    const used = new Set();
+    const response = [];
+
+    sources.forEach((sourceDoc) => {
+      const key = normaliseSourceKey(sourceDoc.type, sourceDoc.name, sourceDoc.accountNumber);
+      const matched = summary.bySourceId.get(sourceDoc.sourceId) || summary.byKey.get(key);
+      if (matched) {
+        used.add(matched);
+      }
+      response.push(buildSourceResponse(sourceDoc, matched));
+    });
+
+    summary.byKey.forEach((entry) => {
+      if (used.has(entry)) return;
+      response.push(buildSourceResponse(null, entry));
+    });
+
+    response.sort((a, b) => {
+      if (a.type !== b.type) return a.type > b.type ? 1 : -1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    return res.json({ sources: response });
+  } catch (error) {
     return next(error);
   }
 });
