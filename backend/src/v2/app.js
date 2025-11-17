@@ -30,9 +30,19 @@ async function createApp() {
   });
 
   app.use('/assets', express.static(path.join(FRONTEND_DIR, 'assets'), { maxAge: '7d' }));
+  app.use('/css', express.static(path.join(FRONTEND_DIR, 'css'), { maxAge: '7d' }));
+  app.use('/js', express.static(path.join(FRONTEND_DIR, 'js'), { maxAge: '1h' }));
+  app.use('/components', express.static(path.join(FRONTEND_DIR, 'components'), { maxAge: '1h' }));
 
   app.get('/', (_req, res) => {
     res.sendFile(path.join(LANDING_DIR, 'index.html'));
+  });
+
+  const authPages = ['login.html', 'signup.html', 'unauthorized.html'];
+  authPages.forEach((page) => {
+    app.get(`/${page}`, (_req, res) => {
+      res.sendFile(path.join(FRONTEND_DIR, page));
+    });
   });
 
   app.use('/app', ensureAuthenticatedPage, express.static(APP_DIR, { index: false }));
