@@ -4,6 +4,9 @@ const dayjs = require('dayjs');
 const { randomUUID } = require('crypto');
 const UploadedDocument = require('../models/UploadedDocument');
 const DocumentResult = require('../models/DocumentResult');
+const DocumentInsight = require('../models/DocumentInsight');
+const TransactionV2 = require('../models/TransactionV2');
+const PayslipMetricsV2 = require('../models/PayslipMetricsV2');
 const { mongoose } = require('../models');
 const { config } = require('../config');
 const {
@@ -13,6 +16,7 @@ const {
   getStandardizationWithRetry,
   getDocupipeRequestConfig,
 } = require('../services/docupipe');
+const { recomputeSnapshotsForPeriods } = require('../services/analytics');
 const { writeBuffer, deleteObject, createPresignedGet } = require('../services/r2');
 const { badRequest, notFound } = require('../utils/errors');
 const { sha256 } = require('../utils/hashing');
@@ -30,6 +34,29 @@ const upload = multer({
 
 const logger = createLogger('dashboard:documents');
 const analyticsLogger = createLogger('dashboard:analytics');
+
+function resolveTaxYear(isoDate) {
+  const parsed = dayjs(isoDate);
+  if (!parsed.isValid()) return null;
+  const year = parsed.year();
+  const cutoff = dayjs(`${year}-04-06`);
+  if (parsed.isBefore(cutoff)) {
+    const startYear = year - 1;
+    return `${startYear}-${String(year).slice(-2)}`;
+  }
+  const endYear = year + 1;
+  return `${year}-${String(endYear).slice(-2)}`;
+}
+
+function trackDateContext(dateValue, { months, taxYears }) {
+  if (!dateValue) return;
+  const parsed = dayjs(dateValue);
+  if (!parsed.isValid()) return;
+  const iso = parsed.format('YYYY-MM-DD');
+  months.add(iso.slice(0, 7));
+  const taxYear = resolveTaxYear(iso);
+  if (taxYear) taxYears.add(taxYear);
+}
 
 function unwrapPrimitive(value) {
   if (value === null || value === undefined) return null;
@@ -1135,6 +1162,86 @@ router.get('/documents/:fileId/preview', async (req, res, next) => {
       contentType: document.contentType || 'application/pdf',
       originalName: document.originalName || 'document.pdf',
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/documents/:fileId/download', async (req, res, next) => {
+  const userId = req.user.id;
+  const fileId = String(req.params.fileId || '');
+
+  try {
+    const document = await UploadedDocument.findOne({ userId, fileId })
+      .select({ r2Key: 1, originalName: 1 })
+      .lean();
+    if (!document) {
+      throw notFound('Document not found');
+    }
+    if (!document.r2Key) {
+      throw notFound('Document download is not available');
+    }
+
+    const url = await createPresignedGet({ key: document.r2Key, expiresIn: 60 * 10 });
+    return res.json({
+      url,
+      originalName: document.originalName || 'document.pdf',
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete('/documents/:fileId', async (req, res, next) => {
+  const userId = req.user.id;
+  const fileId = String(req.params.fileId || '');
+
+  try {
+    const document = await UploadedDocument.findOne({ userId, fileId }).lean();
+    if (!document) {
+      throw notFound('Document not found');
+    }
+
+    const context = { months: new Set(), taxYears: new Set() };
+    if (document.month) {
+      context.months.add(document.month);
+    }
+    trackDateContext(document.payDate, context);
+    trackDateContext(document.periodStart, context);
+    trackDateContext(document.periodEnd, context);
+
+    const docInsight = await DocumentInsight.findOne({ userId, fileId }).lean();
+    if (docInsight?.canonical?.docType === 'payslip') {
+      trackDateContext(docInsight.canonical.payPeriod?.paymentDate, context);
+    } else if (docInsight?.canonical?.docType === 'statement') {
+      (docInsight.canonical.transactions || []).forEach((tx) => trackDateContext(tx.date, context));
+      trackDateContext(docInsight.canonical.period?.start, context);
+      trackDateContext(docInsight.canonical.period?.end, context);
+    }
+
+    const docResultId = document.docupipe?.documentResultId || document.raw?.documentResultId;
+    const deleteOps = [
+      DocumentInsight.deleteMany({ userId, fileId }),
+      TransactionV2.deleteMany({ userId, fileId }),
+      PayslipMetricsV2.deleteMany({ userId, fileId }),
+      UploadedDocument.deleteOne({ userId, fileId }),
+    ];
+
+    if (document.r2Key) {
+      deleteOps.push(deleteObject(document.r2Key).catch(() => {}));
+    }
+    if (docResultId && mongoose.Types.ObjectId.isValid(docResultId)) {
+      deleteOps.push(DocumentResult.deleteOne({ _id: docResultId }));
+    }
+
+    await Promise.all(deleteOps);
+
+    await recomputeSnapshotsForPeriods(userId, {
+      months: Array.from(context.months),
+      taxYears: Array.from(context.taxYears),
+    });
+
+    return res.json({ ok: true, fileId });
   } catch (error) {
     return next(error);
   }

@@ -64,6 +64,24 @@
     if (tone === 'error') feedback.classList.add('error');
   }
 
+  function setDocumentActionsEnabled(enabled) {
+    const buttons = [
+      document.getElementById('document-download'),
+      document.getElementById('document-delete'),
+    ];
+    buttons.forEach((button) => {
+      if (!button) return;
+      button.disabled = !enabled;
+      if (!button.dataset.defaultLabel) {
+        button.dataset.defaultLabel = button.textContent || '';
+      }
+      if (!enabled) {
+        button.textContent = button.dataset.defaultLabel;
+        button.classList.remove('is-success', 'is-error');
+      }
+    });
+  }
+
   function formatCurrency(value, currency = 'GBP', { invert = false } = {}) {
     if (value === null || value === undefined || Number.isNaN(Number(value))) {
       return '—';
@@ -261,6 +279,20 @@
     setJsonCopyButtonEnabled(false);
   }
 
+  function bindDocumentActions() {
+    const downloadButton = document.getElementById('document-download');
+    const deleteButton = document.getElementById('document-delete');
+    if (downloadButton && downloadButton.dataset.bound !== 'true') {
+      downloadButton.addEventListener('click', handleDocumentDownload);
+      downloadButton.dataset.bound = 'true';
+    }
+    if (deleteButton && deleteButton.dataset.bound !== 'true') {
+      deleteButton.addEventListener('click', handleDocumentDelete);
+      deleteButton.dataset.bound = 'true';
+    }
+    setDocumentActionsEnabled(Boolean(state.selectedDocumentId));
+  }
+
   function renderDocumentList() {
     const list = document.getElementById('document-list');
     const empty = document.getElementById('document-list-empty');
@@ -333,6 +365,7 @@
       title.textContent = state.documents.length ? 'No document selected' : 'No documents available';
       meta.textContent = '';
       renderDocumentTags(null);
+      setDocumentActionsEnabled(false);
       return;
     }
 
@@ -350,6 +383,7 @@
     }
     meta.textContent = parts.join(' • ');
     renderDocumentTags(doc);
+    setDocumentActionsEnabled(true);
   }
 
   function clearDocumentPreview(message) {
@@ -357,6 +391,7 @@
     const frameEmpty = document.getElementById('document-preview-empty');
     const json = document.getElementById('document-json');
     const jsonEmpty = document.getElementById('document-json-empty');
+    setDocumentActionsEnabled(false);
 
     if (frame) {
       frame.hidden = true;
@@ -685,6 +720,80 @@
     }
   }
 
+  async function handleDocumentDownload(event) {
+    const button = event.currentTarget;
+    const doc = getDocumentById(state.selectedDocumentId);
+    if (!doc || !button || button.disabled) return;
+
+    const defaultLabel = button.dataset.defaultLabel || 'Download';
+    button.disabled = true;
+    button.textContent = 'Preparing…';
+    button.classList.remove('is-success', 'is-error');
+
+    try {
+      const { url } = await App.Api.getDashboardDocumentDownload(doc.fileId);
+      if (url) {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.target = '_blank';
+        anchor.rel = 'noopener';
+        anchor.download = doc.originalName || `${doc.fileId}.pdf`;
+        anchor.click();
+      }
+      button.textContent = defaultLabel;
+      button.classList.add('is-success');
+      setTimeout(() => button.classList.remove('is-success'), 1500);
+    } catch (error) {
+      console.error('Document download failed', error);
+      button.textContent = 'Download failed';
+      button.classList.add('is-error');
+      setUploadFeedback(error.message || 'Unable to download this document.', 'error');
+    } finally {
+      button.disabled = false;
+      if (!button.classList.contains('is-error')) {
+        button.textContent = defaultLabel;
+      }
+    }
+  }
+
+  async function handleDocumentDelete(event) {
+    const button = event.currentTarget;
+    const doc = getDocumentById(state.selectedDocumentId);
+    if (!doc || !button || button.disabled) return;
+
+    const name = doc.originalName || formatDocumentType(doc.docType) || 'document';
+    const confirmed = window.confirm(`Delete ${name}? This will remove the document and its analytics.`);
+    if (!confirmed) return;
+
+    const defaultLabel = button.dataset.defaultLabel || 'Delete';
+    button.disabled = true;
+    button.textContent = 'Deleting…';
+    button.classList.remove('is-success', 'is-error');
+
+    try {
+      await App.Api.deleteDashboardDocument(doc.fileId);
+      documentPreviewCache.delete(doc.fileId);
+      documentDetailsCache.delete(doc.fileId);
+      state.selectedDocumentId = null;
+      setUploadFeedback('Document deleted.', 'success');
+      await loadDocuments({ preserveSelection: false });
+      await loadAnalytics(state.selectedMonth);
+    } catch (error) {
+      console.error('Document delete failed', error);
+      button.textContent = 'Delete failed';
+      button.classList.add('is-error');
+      setUploadFeedback(error.message || 'Unable to delete this document.', 'error');
+    } finally {
+      button.disabled = false;
+      if (!button.classList.contains('is-error')) {
+        button.textContent = defaultLabel;
+      }
+      if (!state.selectedDocumentId) {
+        setDocumentActionsEnabled(false);
+      }
+    }
+  }
+
   async function loadDocuments({ preserveSelection = false } = {}) {
     const empty = document.getElementById('document-list-empty');
     if (empty && !state.documents.length) {
@@ -869,6 +978,7 @@
         bindUploadControls();
         bindMonthSelect();
         bindJsonCopy();
+        bindDocumentActions();
         resetUploadStatus();
         return Promise.all([loadAnalytics(), loadDocuments()]);
       })

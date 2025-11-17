@@ -30,6 +30,10 @@ const App = (() => {
       request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/preview`),
     getDashboardDocumentJson: (fileId) =>
       request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/json`),
+    getDashboardDocumentDownload: (fileId) =>
+      request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}/download`),
+    deleteDashboardDocument: (fileId) =>
+      request(`/api/v2/dashboard/documents/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
     getDashboardAnalytics: (month) => {
       const query = month ? `?month=${encodeURIComponent(month)}` : '';
       return request(`/api/v2/dashboard/analytics${query}`);
