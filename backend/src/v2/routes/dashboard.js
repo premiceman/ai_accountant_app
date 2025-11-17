@@ -29,6 +29,7 @@ const upload = multer({
 });
 
 const logger = createLogger('dashboard:documents');
+const analyticsLogger = createLogger('dashboard:analytics');
 
 function unwrapPrimitive(value) {
   if (value === null || value === undefined) return null;
@@ -545,6 +546,112 @@ function buildMonthSummary(payslips, statements) {
   };
 }
 
+function determineMonthFromDocument(doc) {
+  if (!doc) return null;
+  return (
+    doc.month
+    || deriveMonth(doc.periodStart || doc.periodEnd)
+    || deriveMonth(doc.payDate)
+    || deriveMonth(doc.createdAt)
+  );
+}
+
+const categoryMatchers = [
+  { key: 'rent', label: 'Housing' },
+  { key: 'mortgage', label: 'Housing' },
+  { key: 'tax', label: 'Taxes' },
+  { key: 'council', label: 'Taxes' },
+  { key: 'grocer', label: 'Groceries' },
+  { key: 'supermarket', label: 'Groceries' },
+  { key: 'tesco', label: 'Groceries' },
+  { key: 'sainsbury', label: 'Groceries' },
+  { key: 'aldi', label: 'Groceries' },
+  { key: 'lidl', label: 'Groceries' },
+  { key: 'coffee', label: 'Dining & Coffee' },
+  { key: 'restaurant', label: 'Dining & Coffee' },
+  { key: 'cafe', label: 'Dining & Coffee' },
+  { key: 'netflix', label: 'Subscriptions' },
+  { key: 'prime', label: 'Subscriptions' },
+  { key: 'spotify', label: 'Subscriptions' },
+  { key: 'entertain', label: 'Entertainment' },
+  { key: 'uber', label: 'Transport' },
+  { key: 'lyft', label: 'Transport' },
+  { key: 'bus', label: 'Transport' },
+  { key: 'rail', label: 'Transport' },
+  { key: 'train', label: 'Transport' },
+  { key: 'fuel', label: 'Transport' },
+  { key: 'petrol', label: 'Transport' },
+  { key: 'insurance', label: 'Insurance' },
+  { key: 'pension', label: 'Retirement' },
+];
+
+function categoriseTransaction(description) {
+  const value = (description || '').toString().toLowerCase();
+  if (!value.trim()) return 'Other';
+  const match = categoryMatchers.find((matcher) => value.includes(matcher.key));
+  if (match) return match.label;
+  return 'Other';
+}
+
+function addCategorySpend(bag, category, amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  const current = bag.get(category) || 0;
+  bag.set(category, current + amount);
+}
+
+function normaliseAmount(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+async function buildOpenAiInsights(payload, signal) {
+  const requestBody = {
+    model: config.openai.model,
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are a financial analyst. Only use the provided numeric analytics. Keep output concise and data-driven.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify(payload),
+      },
+    ],
+  };
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.openai.apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+    signal,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI request failed (${response.status}): ${text}`);
+  }
+
+  const body = await response.json();
+  const content = body.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('OpenAI response missing content');
+  }
+
+  const parsed = JSON.parse(content);
+  return {
+    summary: parsed.summary || null,
+    highlights: Array.isArray(parsed.highlights) ? parsed.highlights.filter(Boolean) : [],
+    risks: Array.isArray(parsed.risks) ? parsed.risks.filter(Boolean) : [],
+    model: body.model || config.openai.model,
+  };
+}
+
 router.post('/documents', upload.single('document'), async (req, res, next) => {
   const userId = req.user.id;
   if (!req.file) {
@@ -1028,6 +1135,165 @@ router.get('/documents/:fileId/preview', async (req, res, next) => {
       contentType: document.contentType || 'application/pdf',
       originalName: document.originalName || 'document.pdf',
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/insights', async (req, res, next) => {
+  const userId = req.user.id;
+
+  try {
+    const documents = await UploadedDocument.find({ userId }).sort({ month: 1, createdAt: 1 }).lean();
+    if (!documents.length) {
+      return res.json({
+        months: [],
+        summary: null,
+        series: { income: [], spend: [], cashflow: [], netWorth: [] },
+        categories: { top: [], totalSpend: 0 },
+        aiInsights: null,
+      });
+    }
+
+    const monthBuckets = new Map();
+    const categoryTotals = new Map();
+
+    for (const doc of documents) {
+      const month = determineMonthFromDocument(doc);
+      if (!month) {
+        analyticsLogger.warn('Skipping document without a month', { fileId: doc.fileId, type: doc.docType });
+        continue;
+      }
+
+      if (!monthBuckets.has(month)) {
+        monthBuckets.set(month, {
+          month,
+          currency: doc.metadata?.currency || 'GBP',
+          income: 0,
+          spend: 0,
+          netWorth: 0,
+          cashflow: 0,
+          categorySpend: new Map(),
+          payroll: [],
+          sources: [],
+        });
+      }
+
+      const bucket = monthBuckets.get(month);
+      bucket.sources.push({ fileId: doc.fileId, docType: doc.docType });
+
+      if (doc.docType === 'statement') {
+        const totals = doc.analytics?.totals || {};
+        bucket.income += Number(totals.income) || 0;
+        bucket.spend += Number(totals.spend) || 0;
+
+        const closingBalance = normaliseAmount(doc.metadata?.closingBalance);
+        if (closingBalance !== null) {
+          bucket.netWorth += closingBalance;
+        }
+
+        const transactions = Array.isArray(doc.transactions) ? doc.transactions : [];
+        transactions.forEach((tx) => {
+          const amount = normaliseAmount(tx.amount ?? (tx.credit ?? 0) - (tx.debit ?? 0));
+          if (amount === null || amount >= 0) return;
+          const spend = Math.abs(amount);
+          const category = categoriseTransaction(tx.description);
+          addCategorySpend(bucket.categorySpend, category, spend);
+          addCategorySpend(categoryTotals, category, spend);
+        });
+      }
+
+      if (doc.docType === 'payslip') {
+        const net = normaliseAmount(doc.analytics?.net);
+        const gross = normaliseAmount(doc.analytics?.gross);
+        if (net !== null) bucket.income += Math.max(0, net);
+        if (gross !== null || net !== null) {
+          bucket.payroll.push({
+            gross: normaliseAmount(gross),
+            net: normaliseAmount(net),
+            employer: doc.metadata?.employerName || 'Employer',
+          });
+        }
+      }
+    }
+
+    const months = Array.from(monthBuckets.keys()).sort();
+
+    months.forEach((month) => {
+      const bucket = monthBuckets.get(month);
+      bucket.cashflow = safeRound((bucket.income || 0) - (bucket.spend || 0));
+      bucket.income = safeRound(bucket.income);
+      bucket.spend = safeRound(bucket.spend);
+      bucket.netWorth = safeRound(bucket.netWorth);
+    });
+
+    const series = {
+      income: months.map((month) => ({ month, amount: monthBuckets.get(month).income })),
+      spend: months.map((month) => ({ month, amount: monthBuckets.get(month).spend })),
+      cashflow: months.map((month) => ({ month, amount: monthBuckets.get(month).cashflow })),
+      netWorth: months.map((month) => ({ month, amount: monthBuckets.get(month).netWorth })),
+    };
+
+    const totalSpend = months.reduce((acc, month) => acc + (monthBuckets.get(month).spend || 0), 0);
+    const totalIncome = months.reduce((acc, month) => acc + (monthBuckets.get(month).income || 0), 0);
+    const totalCashflow = months.reduce((acc, month) => acc + (monthBuckets.get(month).cashflow || 0), 0);
+
+    const topCategories = Array.from(categoryTotals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([category, amount]) => ({
+        category,
+        amount: safeRound(amount),
+        share: totalSpend ? safeRound(amount / totalSpend) : null,
+      }));
+
+    const summary = {
+      months: { count: months.length, start: months[0], end: months[months.length - 1] },
+      totals: {
+        income: safeRound(totalIncome),
+        spend: safeRound(totalSpend),
+        cashflow: safeRound(totalCashflow),
+      },
+      netWorth: {
+        latest: months.length ? monthBuckets.get(months[months.length - 1]).netWorth : null,
+        previous: months.length > 1 ? monthBuckets.get(months[months.length - 2]).netWorth : null,
+      },
+    };
+
+    const monthlyPayload = months.map((month) => {
+      const bucket = monthBuckets.get(month);
+      const categories = Array.from(bucket.categorySpend.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([category, amount]) => ({ category, amount: safeRound(amount) }));
+      return {
+        month,
+        income: bucket.income,
+        spend: bucket.spend,
+        cashflow: bucket.cashflow,
+        netWorth: bucket.netWorth,
+        categories,
+      };
+    });
+
+    let aiInsights = null;
+    try {
+      aiInsights = await buildOpenAiInsights(
+        {
+          summary,
+          months: monthlyPayload,
+          instructions: {
+            focus: 'Highlight trends in income, spending, and category shifts. Flag unusual changes and opportunities.',
+          },
+        },
+        AbortSignal.timeout(12000)
+      );
+    } catch (error) {
+      analyticsLogger.warn('OpenAI insights failed', { error: error.message });
+      aiInsights = { summary: null, highlights: [], risks: [], error: error.message };
+    }
+
+    return res.json({ months, summary, series, categories: { top: topCategories, totalSpend: safeRound(totalSpend) }, aiInsights });
   } catch (error) {
     return next(error);
   }
