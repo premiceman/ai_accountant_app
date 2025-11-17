@@ -19,6 +19,15 @@ function optionalEnv(name, fallback = null) {
   return value;
 }
 
+function optionalBooleanEnv(name, fallback = undefined) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 const config = {
   app: {
     nodeEnv: process.env.NODE_ENV || 'development',
@@ -27,6 +36,11 @@ const config = {
   },
   mongo: {
     uri: requireEnv('MONGODB_URI'),
+    serverSelectionTimeoutMS:
+      Number(optionalEnv('MONGODB_SERVER_SELECTION_TIMEOUT_MS', '5000')),
+    tls: optionalBooleanEnv('MONGODB_TLS'),
+    tlsAllowInvalidCertificates: optionalBooleanEnv('MONGODB_TLS_INSECURE', false),
+    tlsAllowInvalidHostnames: optionalBooleanEnv('MONGODB_TLS_ALLOW_INVALID_HOSTNAMES', false),
   },
   r2: {
     accountId: requireEnv('R2_ACCOUNT_ID'),
@@ -59,4 +73,4 @@ const config = {
   },
 };
 
-module.exports = { config, requireEnv, optionalEnv };
+module.exports = { config, requireEnv, optionalEnv, optionalBooleanEnv };
