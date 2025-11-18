@@ -1114,6 +1114,10 @@ label {
   background: rgba(9, 14, 26, 0.7);
   padding: 12px;
   min-height: 220px;
+  max-height: 65vh;
+  width: min(100%, 1080px);
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .document-preview-frame-wrapper {
@@ -1122,7 +1126,8 @@ label {
 
 #document-preview-frame {
   width: 100%;
-  height: 280px;
+  max-width: 100%;
+  height: clamp(260px, 55vh, 600px);
   border: none;
   border-radius: 8px;
   background: #0b1220;
