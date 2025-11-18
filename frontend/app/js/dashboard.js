@@ -41,6 +41,11 @@
     dashboard: 0,
   };
 
+  const loaderTimers = {
+    completeness: null,
+    dashboard: null,
+  };
+
   function refreshCompletenessLoader() {
     const loading = document.getElementById('completeness-loading');
     const body = document.getElementById('completeness-body');
@@ -60,6 +65,17 @@
 
   function setCompletenessLoading(isLoading) {
     loaderState.completeness = Math.max(0, loaderState.completeness + (isLoading ? 1 : -1));
+    if (loaderTimers.completeness) {
+      clearTimeout(loaderTimers.completeness);
+      loaderTimers.completeness = null;
+    }
+    if (isLoading) {
+      loaderTimers.completeness = setTimeout(() => {
+        loaderState.completeness = 0;
+        loaderTimers.completeness = null;
+        refreshCompletenessLoader();
+      }, 15000);
+    }
     refreshCompletenessLoader();
   }
 
@@ -77,6 +93,17 @@
 
   function setLoading(isLoading) {
     loaderState.dashboard = Math.max(0, loaderState.dashboard + (isLoading ? 1 : -1));
+    if (loaderTimers.dashboard) {
+      clearTimeout(loaderTimers.dashboard);
+      loaderTimers.dashboard = null;
+    }
+    if (isLoading) {
+      loaderTimers.dashboard = setTimeout(() => {
+        loaderState.dashboard = 0;
+        loaderTimers.dashboard = null;
+        refreshDashboardLoader();
+      }, 15000);
+    }
     refreshDashboardLoader();
   }
 
