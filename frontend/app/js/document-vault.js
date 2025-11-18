@@ -1191,8 +1191,19 @@
     const dropzone = document.getElementById('upload-dropzone');
     if (!fileInput || !button || !dropzone) return;
 
-    button.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('click', () => fileInput.click());
+    const openPicker = () => fileInput.click();
+
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openPicker();
+    });
+
+    dropzone.addEventListener('click', (event) => {
+      if (event.target === fileInput) return;
+      if (event.target.closest('#document-button')) return;
+      openPicker();
+    });
     dropzone.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
