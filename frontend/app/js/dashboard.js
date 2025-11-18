@@ -36,11 +36,31 @@
     return `${now.getFullYear()}-${month}`;
   }
 
-  function setCompletenessLoading(isLoading) {
+  const loaderState = {
+    completeness: 0,
+    dashboard: 0,
+  };
+
+  function refreshCompletenessLoader() {
     const loading = document.getElementById('completeness-loading');
     const body = document.getElementById('completeness-body');
-    if (loading) loading.hidden = !isLoading;
-    if (body) body.ariaBusy = isLoading ? 'true' : 'false';
+    const isActive = loaderState.completeness > 0;
+    if (loading) loading.hidden = !isActive;
+    if (body) body.ariaBusy = isActive ? 'true' : 'false';
+  }
+
+  function refreshDashboardLoader() {
+    const loading = document.getElementById('dashboard-loading');
+    const summary = document.getElementById('dashboard-summary');
+    const isActive = loaderState.dashboard > 0;
+    if (!loading || !summary) return;
+    loading.hidden = !isActive;
+    summary.ariaBusy = isActive ? 'true' : 'false';
+  }
+
+  function setCompletenessLoading(isLoading) {
+    loaderState.completeness = Math.max(0, loaderState.completeness + (isLoading ? 1 : -1));
+    refreshCompletenessLoader();
   }
 
   function setCompletenessError(message) {
@@ -56,12 +76,15 @@
   }
 
   function setLoading(isLoading) {
-    const loading = document.getElementById('dashboard-loading');
-    const summary = document.getElementById('dashboard-summary');
-    if (!loading || !summary) return;
-    loading.hidden = !isLoading;
-    summary.ariaBusy = isLoading ? 'true' : 'false';
+    loaderState.dashboard = Math.max(0, loaderState.dashboard + (isLoading ? 1 : -1));
+    refreshDashboardLoader();
   }
+
+  const LOADER_REFRESH_INTERVAL = 10000;
+  setInterval(() => {
+    refreshDashboardLoader();
+    refreshCompletenessLoader();
+  }, LOADER_REFRESH_INTERVAL);
 
   function ensureUploadInput() {
     let input = document.getElementById('completeness-upload');
