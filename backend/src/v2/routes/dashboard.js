@@ -879,11 +879,11 @@ async function buildOpenAiInsights(payload, signal) {
       {
         role: 'system',
         content:
-          'You are a financial analyst. Only use the provided numeric analytics. Keep output concise and data-driven.',
+          'You are a financial analyst. Only use the provided numeric analytics. Keep output concise and data-driven. Respond with a JSON object that includes summary, highlights, and risks.',
       },
       {
         role: 'user',
-        content: JSON.stringify(payload),
+        content: `Analytics payload (JSON): ${JSON.stringify(payload)}`,
       },
     ],
   };

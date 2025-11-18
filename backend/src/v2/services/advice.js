@@ -15,8 +15,12 @@ async function fetchAdviceCompletion(prompt, signal) {
       temperature: 0.2,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: 'You are an expert financial advisor who only uses provided analytics to draft actionable advice.' },
-        { role: 'user', content: prompt },
+        {
+          role: 'system',
+          content:
+            'You are an expert financial advisor who only uses provided analytics to draft actionable advice. Respond with a JSON object matching the required shape.',
+        },
+        { role: 'user', content: `Analytics prompt (JSON): ${prompt}` },
       ],
     }),
     signal,
