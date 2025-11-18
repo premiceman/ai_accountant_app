@@ -1115,6 +1115,8 @@ label {
   padding: 12px;
   min-height: 220px;
   max-height: 65vh;
+  width: min(100%, 1080px);
+  max-width: 100%;
   overflow: hidden;
 }
 
@@ -1124,6 +1126,7 @@ label {
 
 #document-preview-frame {
   width: 100%;
+  max-width: 100%;
   height: clamp(260px, 55vh, 600px);
   border: none;
   border-radius: 8px;
