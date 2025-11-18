@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Document Vault · AI Accountant</title>
   <link rel="stylesheet" href="/app/css/app.css" />
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script defer src="/app/js/app.js"></script>
   <script defer src="/app/js/document-vault.js"></script>
 </head>
@@ -33,14 +34,29 @@
             <p class="subtitle">Documents are stored in your secure R2 vault and processed through Docupipe.</p>
           </div>
         </div>
+        <div class="upload-progress" id="upload-progress" hidden>
+          <div class="upload-progress__header">
+            <span id="upload-progress-label">Preparing uploads…</span>
+            <span id="upload-progress-percent">0%</span>
+          </div>
+          <div class="upload-progress__bar">
+            <div class="upload-progress__fill" id="upload-progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
         <form id="upload-form" class="upload-form" novalidate>
-          <input id="document-input" class="visually-hidden" type="file" accept="application/pdf" />
+          <input
+            id="document-input"
+            class="visually-hidden"
+            type="file"
+            accept="application/pdf,application/zip,.pdf,.zip"
+            multiple
+          />
           <div id="upload-dropzone" class="upload-dropzone" tabindex="0">
             <div class="dropzone-content">
               <div class="dropzone-icon">📄</div>
-              <p class="dropzone-title">Drag &amp; drop a PDF here, or</p>
-              <button type="button" class="button" id="document-button">Select PDF</button>
-              <p class="dropzone-subtitle">Supported: payslips and bank statements (.pdf, max 20&nbsp;MB)</p>
+              <p class="dropzone-title">Drag &amp; drop PDFs or a ZIP of PDFs here, or</p>
+              <button type="button" class="button" id="document-button">Select files</button>
+              <p class="dropzone-subtitle">Supported: multiple PDFs or a .zip containing PDFs (max 20&nbsp;MB per PDF)</p>
             </div>
           </div>
         </form>

@@ -13,6 +13,10 @@
   const documentDetailsCache = new Map();
   const documentPreviewCache = new Map();
   let jsonCopyResetTimer = null;
+  const uploadProgressState = {
+    total: 0,
+    completed: 0,
+  };
 
   function formatDocupipeLabel(value) {
     if (!value && value !== 0) return '';
@@ -64,6 +68,51 @@
     feedback.classList.remove('success', 'error');
     if (tone === 'success') feedback.classList.add('success');
     if (tone === 'error') feedback.classList.add('error');
+  }
+
+  function startUploadProgress(total) {
+    const container = document.getElementById('upload-progress');
+    const label = document.getElementById('upload-progress-label');
+    uploadProgressState.total = total;
+    uploadProgressState.completed = 0;
+    if (label) {
+      label.textContent = total > 1 ? `Preparing ${total} uploads…` : 'Preparing upload…';
+    }
+    if (container) container.hidden = false;
+    updateUploadProgressPercent();
+  }
+
+  function updateUploadProgressLabel(currentIndex, stage, fileName) {
+    const label = document.getElementById('upload-progress-label');
+    const displayIndex = Math.min(currentIndex, uploadProgressState.total) || 1;
+    const total = uploadProgressState.total || 1;
+    const stageLabel = stage || 'Processing';
+    if (label) {
+      label.textContent = `${stageLabel} (${displayIndex} of ${total})${fileName ? ` — ${fileName}` : ''}`;
+    }
+  }
+
+  function updateUploadProgressPercent() {
+    const percent = uploadProgressState.total
+      ? Math.round((uploadProgressState.completed / uploadProgressState.total) * 100)
+      : 0;
+    const percentEl = document.getElementById('upload-progress-percent');
+    const fill = document.getElementById('upload-progress-fill');
+    if (percentEl) percentEl.textContent = `${percent}%`;
+    if (fill) fill.style.width = `${percent}%`;
+  }
+
+  function incrementUploadProgress() {
+    uploadProgressState.completed += 1;
+    updateUploadProgressPercent();
+    if (uploadProgressState.completed >= uploadProgressState.total) {
+      setTimeout(() => {
+        const container = document.getElementById('upload-progress');
+        if (container) container.hidden = true;
+        uploadProgressState.total = 0;
+        uploadProgressState.completed = 0;
+      }, 900);
+    }
   }
 
   function setDocumentActionsEnabled(enabled) {
@@ -989,28 +1038,75 @@
     }
   }
 
-  async function handleUpload(file) {
-    if (!file || isUploading) return;
-    const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
-    if (!isPdf) {
-      resetUploadStatus();
-      setUploadFeedback('Please upload a PDF document.', 'error');
-      return;
+  async function expandSelectedFiles(files) {
+    const flattened = [];
+    const errors = [];
+
+    for (const file of files) {
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      const isZip = file.type === 'application/zip' || /\.zip$/i.test(file.name || '');
+
+      if (isPdf) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          errors.push(`${file.name} is larger than 20 MB.`);
+          continue;
+        }
+        flattened.push(file);
+        continue;
+      }
+
+      if (isZip) {
+        if (typeof JSZip === 'undefined') {
+          errors.push('Zip uploads are not available right now. Please try uploading PDFs directly.');
+          continue;
+        }
+        try {
+          const archive = await JSZip.loadAsync(file);
+          const pdfEntries = archive.file(/\.pdf$/i);
+          if (!pdfEntries.length) {
+            errors.push(`${file.name} does not contain any PDFs.`);
+          }
+          for (const entry of pdfEntries) {
+            const blob = await entry.async('blob');
+            if (blob.size > MAX_UPLOAD_BYTES) {
+              errors.push(`${entry.name} is larger than 20 MB.`);
+              continue;
+            }
+            const pdfFile = new File([blob], entry.name, { type: 'application/pdf' });
+            flattened.push(pdfFile);
+          }
+        } catch (error) {
+          errors.push(`${file.name} could not be opened as a zip: ${error.message || 'Invalid archive.'}`);
+        }
+        continue;
+      }
+
+      errors.push(`${file.name || 'This file'} is not a supported type. Upload PDFs or a .zip containing PDFs.`);
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      resetUploadStatus();
-      setUploadFeedback('This file is larger than 20 MB. Please choose a smaller document.', 'error');
-      return;
+
+    if (errors.length) {
+      setUploadFeedback(errors.join(' '), 'error');
     }
-    isUploading = true;
+
+    return flattened;
+  }
+
+  async function uploadSingleFile(file, position, total) {
     resetUploadStatus();
     setUploadFeedback('', 'info');
     setUploadStatus('upload', 'active');
     setUploadStatus('docupipe', null);
     setUploadStatus('analytics', null);
+    updateUploadProgressLabel(position + 1, 'Uploading to Cloudflare R2', file.name || 'Document');
 
-    const docupipeTimer = setTimeout(() => setUploadStatus('docupipe', 'active'), 500);
-    const analyticsTimer = setTimeout(() => setUploadStatus('analytics', 'active'), 1200);
+    const docupipeTimer = setTimeout(() => {
+      setUploadStatus('docupipe', 'active');
+      updateUploadProgressLabel(position + 1, 'Running Docupipe workflow', file.name || 'Document');
+    }, 500);
+    const analyticsTimer = setTimeout(() => {
+      setUploadStatus('analytics', 'active');
+      updateUploadProgressLabel(position + 1, 'Saving analytics', file.name || 'Document');
+    }, 1200);
 
     const formData = new FormData();
     formData.append('document', file);
@@ -1035,12 +1131,16 @@
       setUploadStatus('upload', 'success');
       setUploadStatus('docupipe', 'success');
       setUploadStatus('analytics', 'success');
-      const tone = response.status === 'duplicate' ? 'success' : 'success';
       const message = response.message || 'Document processed successfully.';
-      setUploadFeedback(message, tone);
+      setUploadFeedback(message, 'success');
       await loadAnalytics(response.month || state.selectedMonth);
       await loadDocuments({ preserveSelection: false });
       await loadSources();
+      incrementUploadProgress();
+      if (total > 1) {
+        setUploadFeedback(`Processed ${position + 1} of ${total} uploads.`, 'success');
+      }
+      return true;
     } catch (error) {
       clearTimeout(docupipeTimer);
       clearTimeout(analyticsTimer);
@@ -1048,10 +1148,41 @@
       setUploadStatus('docupipe', 'error');
       setUploadStatus('analytics', 'error');
       setUploadFeedback(error.message || 'We could not process this document.', 'error');
-    } finally {
-      isUploading = false;
-      pendingUploadSource = null;
+      incrementUploadProgress();
+      return false;
     }
+  }
+
+  async function handleUploads(fileList) {
+    if (!fileList || !fileList.length || isUploading) return;
+
+    const preparedFiles = await expandSelectedFiles(fileList);
+    if (!preparedFiles.length) return;
+
+    isUploading = true;
+    startUploadProgress(preparedFiles.length);
+
+    for (let index = 0; index < preparedFiles.length; index += 1) {
+      const file = preparedFiles[index];
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (!isPdf) {
+        setUploadFeedback('Please upload PDF documents only.', 'error');
+        incrementUploadProgress();
+        continue;
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        setUploadFeedback(`${file.name || 'This document'} exceeds the 20 MB limit.`, 'error');
+        incrementUploadProgress();
+        continue;
+      }
+
+      updateUploadProgressLabel(index + 1, 'Uploading to Cloudflare R2', file.name || 'Document');
+      // eslint-disable-next-line no-await-in-loop
+      await uploadSingleFile(file, index, preparedFiles.length);
+    }
+
+    pendingUploadSource = null;
+    isUploading = false;
   }
 
   function bindUploadControls() {
@@ -1070,9 +1201,9 @@
     });
 
     fileInput.addEventListener('change', () => {
-      const [file] = fileInput.files || [];
-      if (file) {
-        handleUpload(file).finally(() => {
+      const files = Array.from(fileInput.files || []);
+      if (files.length) {
+        handleUploads(files).finally(() => {
           fileInput.value = '';
         });
       }
@@ -1090,9 +1221,9 @@
     dropzone.addEventListener('drop', (event) => {
       event.preventDefault();
       dropzone.classList.remove('drag-active');
-      const [file] = event.dataTransfer?.files || [];
-      if (file) {
-        handleUpload(file);
+      const files = Array.from(event.dataTransfer?.files || []);
+      if (files.length) {
+        handleUploads(files);
       }
     });
   }
